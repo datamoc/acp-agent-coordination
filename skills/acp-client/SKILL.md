@@ -12,8 +12,8 @@ roster. It sits on top of, not instead of, any per-repo file-based log
 (`agents_talking.md`) the target project already uses.
 
 **This is a throwaway prototype** (see the repo's own README) - nothing here
-is a stable API, and the server's bound port can and does move between
-runs (see "Port volatility" below).
+is a stable API. The server listens on `http://localhost:1337` (override
+with `$ACP_BASE_URL` if run elsewhere).
 
 ## Quickstart
 
@@ -22,8 +22,9 @@ cd <path-to-this-repo-checkout>
 python ACP_client.py status
 ```
 
-If that fails (`ConnectError`), the server isn't running or the client's
-port guess is stale - see "Port volatility" below before assuming the API
+If that fails (`ConnectError`), the server isn't running - start it with
+`python ACP_server.py` (or `uv run ACP_server.py`) from this repo and
+confirm with `curl http://localhost:1337/agents` before assuming the API
 itself is broken.
 
 `uv run ACP_client.py ...` also works (the repo's own documented form);
@@ -73,37 +74,6 @@ All commands: `python ACP_client.py <agent> "<input>"`.
 | `presence` | empty / `"<seconds>"` / `"all"` | Empty = default TTL window; `"all"` = every known session incl. stale. |
 | `poll` | `"<session>"` | inbox-since-last-poll + open requests + locks, one call. The idle-loop command. |
 | `echo` | `"<text>"` | Quickstart sanity check only, unrelated to coordination. |
-
-## Port volatility - read this before assuming the server is broken
-
-The server's bound port **moved mid-session during actual use of this repo**
-(observed both 8100 and 1337 on the same machine within one working session,
-across two different process restarts). `ACP_client.py`'s `BASE_URL`
-defaults to `http://localhost:1337` but that default has been wrong before
-and will be wrong again after the next restart.
-
-If a command silently fails or raises `ConnectError`:
-
-1. Check what's actually listening:
-   `netstat -ano | findstr LISTEN` (PowerShell/cmd) and match the PID against
-   the `ACP_server.py` process, or just try both `8100` and `1337`.
-2. Override the port without editing the script:
-   `ACP_BASE_URL=http://localhost:<port> python ACP_client.py status`
-   (the client reads this env var if present - check the top of
-   `ACP_client.py` for the current default and whether that override still
-   exists; it was added specifically for this problem).
-3. If the server isn't running at all: `python ACP_server.py` (or
-   `uv run ACP_server.py`) from this repo, then `curl http://localhost:<port>/agents`
-   to confirm before retrying client calls.
-4. A version of the client with retry-with-backoff and a loud stderr
-   failure (rather than a silent no-op) has been added at least once - if
-   calls are failing with no trace anywhere, re-check you have the current
-   `ACP_client.py`, not a stale copy (this has happened: a synced copy at
-   `mwg-pixel-dungeon/tools/ACP_client.py` drifted behind this one before).
-
-**Never treat a failed call as "the coordination system is down" without
-checking the actual port first** - in every observed case so far it was a
-stale port guess, not a real outage.
 
 ## Practical conventions observed in real multi-session use
 
