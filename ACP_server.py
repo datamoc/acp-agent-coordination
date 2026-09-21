@@ -2,8 +2,9 @@
 
 Run: uv run ACP_server.py [-v]
 Listens on http://localhost:1337 (loopback only - never expose it;
-see README.md "Security"). Default log output is warnings/errors plus
-one startup line; -v/--verbose restores the per-call traffic log.
+see README.md "Security"). Default log output shows state-changing
+calls (post/resolve/claim/release/request/done/heartbeat/whoami) plus
+warnings/errors; -v/--verbose adds the read traffic and framework chatter.
 
 Storage is one SQLite file (`coord.db`, WAL mode - see store.py). The
 agent API below is the contract clients rely on: reply shapes and input
@@ -34,9 +35,22 @@ STARTED_AT = datetime.now(timezone.utc)
 # only shows "POST /runs 200 OK". Log one line per agent call with the
 # (truncated, single-line) input and one per reply so `uv run
 # ACP_server.py -v` shows actual traffic. Uses the "acp" logger the SDK
-# configures, so output lands on the same terminal stream. Shown only
-# with -v/--verbose; the default is warnings/errors plus one startup line.
+# configures, so output lands on the same terminal stream.
 logger = logging.getLogger("acp.coord")
+
+# High-frequency reads polled every few minutes by idle sessions: useful
+# when debugging, noise the rest of the time. Everything else (posts,
+# resolves, claims, releases, requests, dones, heartbeats, names) is the
+# coordination state itself and stays at INFO so the default view shows
+# what matters. -v drops the level to DEBUG so the reads show again.
+_READ_ONLY = frozenset({"echo", "inbox", "locks", "presence", "requests", "status"})
+
+
+def _note(agent: str, message: str) -> None:
+    logger.log(
+        logging.DEBUG if agent in _READ_ONLY else logging.INFO,
+        "%s %s", agent, message,
+    )
 
 
 def _short(text: str, limit: int = 300) -> str:
@@ -47,7 +61,7 @@ def _short(text: str, limit: int = 300) -> str:
 
 
 def _reply(agent: str, content: str) -> Message:
-    logger.info("%s out: %s", agent, _short(content))
+    _note(agent, f"out: {_short(content)}")
     return Message(parts=[MessagePart(
         content=content,
         content_type="text/plain",
@@ -77,12 +91,12 @@ async def echo(
 ) -> AsyncGenerator[RunYield, RunYieldResume]:
     """Quickstart sanity check: echoes everything back."""
     text = _text_of(input)
-    logger.info("echo in: %s", _short(text))
+    _note("echo", f"in: {_short(text)}")
     for message in input:
         await asyncio.sleep(0.2)
         yield {"thought": "I should echo everything"}
         await asyncio.sleep(0.2)
-        logger.info("echo out: %s", _short(text))
+        _note("echo", f"out: {_short(text)}")
         yield message
 
 
@@ -96,7 +110,7 @@ async def post(
     The live mailbox keeps the last 500; older entries roll into
     mailbox-archive-<date>.json, and numbers stay stable."""
     text = _text_of(input)
-    logger.info("post in: %s", _short(text))
+    _note("post", f"in: {_short(text)}")
     if ":" in text:
         who, _, body = text.partition(":")
         who, body = who.strip(), body.strip()
@@ -129,7 +143,7 @@ async def inbox(
     "<session>" (or "from <session>") for one sender's messages.
     Returns them newest-last, one per line, as "#N [at] from: message"."""
     text = _text_of(input)
-    logger.info("inbox in: %s", _short(text))
+    _note("inbox", f"in: {_short(text)}")
     query = store.parse_inbox_query(text)
     entries = store.read_inbox(
         limit=query["limit"],
@@ -141,9 +155,10 @@ async def inbox(
         rendered = "(mailbox empty)"
     else:
         rendered = "\n".join(_render(e) for e in entries)
-    logger.info(
-        "inbox out: %d entries query=%s first=%s",
-        len(entries), query, _short(rendered, 200),
+    _note(
+        "inbox",
+        f"out: {len(entries)} entries query={query} "
+        f"first={_short(rendered, 200)}",
     )
     yield Message(parts=[MessagePart(content=rendered, content_type="text/plain")])
 
@@ -155,7 +170,7 @@ async def resolve(
     """Mark a mailbox message done. Input: "#N" or "#N: note".
     Stamps the live entry so inbox shows it as [resolved]."""
     raw = _text_of(input)
-    logger.info("resolve in: %s", _short(raw))
+    _note("resolve", f"in: {_short(raw)}")
     text = raw.strip().lstrip("#")
     num, _, note = text.partition(":")
     num, note = num.strip(), note.strip()
@@ -186,7 +201,7 @@ async def claim(
     (Windows paths) should use the pipe form: "<session>: <scope> | <note>";
     a claimed scope also round-trips bare, matched against live claims."""
     raw = _text_of(input)
-    logger.info("claim in: %s", _short(raw))
+    _note("claim", f"in: {_short(raw)}")
     known = tuple(l["scope"] for l in store.list_locks(include_expired=True))
     parsed = store.parse_claim(raw, known)
     who, scope, note = parsed["owner"], parsed["scope"], parsed["note"]
@@ -219,7 +234,7 @@ async def release(
     (or anyone, once expired) can release. A claimed scope round-trips
     bare even when it contains colons."""
     raw = _text_of(input)
-    logger.info("release in: %s", _short(raw))
+    _note("release", f"in: {_short(raw)}")
     known = tuple(l["scope"] for l in store.list_locks(include_expired=True))
     parsed = store.parse_claim(raw, known)
     who, scope = parsed["owner"], parsed["scope"]
@@ -247,7 +262,7 @@ async def locks(
     """List claims. Empty input shows live claims; "all" includes expired
     ones. One per line: "[until] scope <- owner[: note]"."""
     raw = _text_of(input)
-    logger.info("locks in: %s", _short(raw))
+    _note("locks", f"in: {_short(raw)}")
     show_all = raw.strip().lower() == "all"
     lines = []
     for e in store.list_locks(include_expired=show_all):
@@ -258,7 +273,7 @@ async def locks(
             + (" [expired]" if e.get("expired") else "")
         )
     rendered = "\n".join(lines) if lines else "(no active claims)"
-    logger.info("locks out: %d claims", len(lines))
+    _note("locks", f"out: {len(lines)} claims")
     yield Message(parts=[MessagePart(content=rendered, content_type="text/plain")])
 
 
@@ -270,7 +285,7 @@ async def request(
     Returns "request #R opened" - request numbers are a separate sequence
     from mailbox #N. Check `requests` for the queue, `done` to close."""
     text = _text_of(input)
-    logger.info("request in: %s", _short(text))
+    _note("request", f"in: {_short(text)}")
     if ":" in text:
         who, _, task = text.partition(":")
         who, task = who.strip(), task.strip()
@@ -294,7 +309,7 @@ async def requests(
     """List task requests, oldest first. Empty input shows open ones;
     "all" includes closed ones: "#R [at] requester: task[ [done by X: note]]"."""
     raw = _text_of(input)
-    logger.info("requests in: %s", _short(raw))
+    _note("requests", f"in: {_short(raw)}")
     show_all = raw.strip().lower() == "all"
     rows = store.list_requests(open_only=not show_all)
     lines = []
@@ -310,7 +325,7 @@ async def requests(
             rendered = "(no requests)"
     else:
         rendered = "\n".join(lines)
-    logger.info("requests out: %d rows", len(lines))
+    _note("requests", f"out: {len(lines)} rows")
     yield Message(parts=[MessagePart(content=rendered, content_type="text/plain")])
 
 
@@ -321,7 +336,7 @@ async def done(
     """Close a task request. Input: "<session>: #R[: <note>]".
     The session prefix records who did the work."""
     text = _text_of(input)
-    logger.info("done in: %s", _short(text))
+    _note("done", f"in: {_short(text)}")
     if ":" in text:
         who, _, rest = text.partition(":")
         who = who.strip() or "unknown"
@@ -354,7 +369,7 @@ async def whoami(
     presence TTL; a stale holder's number is reusable. Use the returned
     name for every other agent."""
     family = _text_of(input).strip()
-    logger.info("whoami in: %s", _short(family))
+    _note("whoami", f"in: {_short(family)}")
     try:
         name = store.claim_instance(family)
     except ValueError:
@@ -375,7 +390,7 @@ async def heartbeat(
     """Mark a session as live. Input: "<session-name>[: <status>]".
     The roster survives restarts; entries dead over a week are pruned."""
     text = _text_of(input)
-    logger.info("heartbeat in: %s", _short(text))
+    _note("heartbeat", f"in: {_short(text)}")
     if ":" in text:
         who, _, status = text.partition(":")
         who, status = who.strip(), status.strip() or "live"
@@ -395,7 +410,7 @@ async def presence(
     an integer N for live within the last N seconds, or "all" for
     every known session including stale ones."""
     text = _text_of(input)
-    logger.info("presence in: %s", _short(text))
+    _note("presence", f"in: {_short(text)}")
     lowered = text.strip().lower()
     if lowered == "all":
         selected = store.list_presence(window_seconds=None)
@@ -411,7 +426,7 @@ async def presence(
             f"[{s.get('last_seen', '?')}] {s.get('session', '?')}: {s.get('status', 'live')}"
             for s in selected
         )
-    logger.info("presence out: %d sessions", len(selected))
+    _note("presence", f"out: {len(selected)} sessions")
     yield Message(parts=[MessagePart(content=rendered, content_type="text/plain")])
 
 
@@ -422,7 +437,7 @@ async def status(
     """Quick triage: uptime, live mailbox size, archived total,
     live sessions, active claims."""
     raw = _text_of(input)
-    logger.info("status in: %s", _short(raw))
+    _note("status", f"in: {_short(raw)}")
     now = datetime.now(timezone.utc)
     live_count = store.message_count()
     archived_total = store.archived_total()
@@ -432,7 +447,7 @@ async def status(
     uptime = now - STARTED_AT
     content = (f"uptime {uptime} | mailbox live {live_count} / archived {archived_total} | "
                f"sessions live {cutoff_count}/{len(sessions)} | claims active {active_locks}")
-    logger.info("status out: %s", content)
+    _note("status", f"out: {content}")
     yield Message(parts=[MessagePart(content=content, content_type="text/plain")])
 
 
@@ -443,9 +458,12 @@ def _configure_logging(verbose: bool) -> None:
     uvicorn logs every POST /runs at INFO: no agent name, no payload, no
     status beyond 200 OK. Both go through the "acp" logger (ours,
     "acp.coord", is its child), so one level switch covers both loggers;
-    uvicorn's own access log is disabled separately in main(). Warnings
-    and errors always show, in either mode."""
+    uvicorn's own access log is disabled separately in main(). Our own
+    logger gets an explicit level too: it is a child of "acp", so without
+    this the WARNING above would hide the INFO traffic lines as well.
+    Warnings and errors always show, in either mode."""
     logging.getLogger("acp").setLevel(logging.INFO if verbose else logging.WARNING)
+    logger.setLevel(logging.DEBUG if verbose else logging.INFO)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -453,7 +471,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "-v", "--verbose",
         action="store_true",
-        help="log every agent call with its input (default: warnings/errors only)",
+        help="also log read traffic and framework chatter "
+        "(default: state-changing calls plus warnings/errors)",
     )
     args = parser.parse_args(argv)
     _configure_logging(args.verbose)
