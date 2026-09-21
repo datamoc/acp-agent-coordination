@@ -1,11 +1,5 @@
 """ACP (Agent Communication Protocol) coordination server - PROTOTYPE.
 
-Temporary scratch server for Claude Code sessions working the same repo
-concurrently (mwg-pixel-dungeon and friends) to coordinate in near
-real time, alongside the file-based `agents_talking.md` log each repo
-already carries. A dedicated project will replace this later - see
-README.md.
-
 Run: uv run ACP_server.py
 Listens on http://localhost:1337 (loopback only - never expose it;
 see README.md "Security").
