@@ -1,8 +1,9 @@
 """ACP (Agent Communication Protocol) coordination server - PROTOTYPE.
 
-Run: uv run ACP_server.py
+Run: uv run ACP_server.py [-v]
 Listens on http://localhost:1337 (loopback only - never expose it;
-see README.md "Security").
+see README.md "Security"). Default log output is warnings/errors plus
+one startup line; -v/--verbose restores the per-call traffic log.
 
 Storage is one SQLite file (`coord.db`, WAL mode - see store.py). The
 agent API below is the contract clients rely on: reply shapes and input
@@ -10,6 +11,7 @@ grammars stay stable; `mailbox.json`/`presence.json`/`locks.json` are
 legacy inputs for the one-time migration only.
 """
 
+import argparse
 import asyncio
 import logging
 from collections.abc import AsyncGenerator
@@ -31,8 +33,9 @@ STARTED_AT = datetime.now(timezone.utc)
 # Run completed" (no agent name, no payload), and uvicorn's access log
 # only shows "POST /runs 200 OK". Log one line per agent call with the
 # (truncated, single-line) input and one per reply so `uv run
-# ACP_server.py` shows actual traffic. Uses the "acp" logger the SDK
-# configures, so output lands on the same terminal stream.
+# ACP_server.py -v` shows actual traffic. Uses the "acp" logger the SDK
+# configures, so output lands on the same terminal stream. Shown only
+# with -v/--verbose; the default is warnings/errors plus one startup line.
 logger = logging.getLogger("acp.coord")
 
 
@@ -433,10 +436,34 @@ async def status(
     yield Message(parts=[MessagePart(content=content, content_type="text/plain")])
 
 
-def main() -> None:
+def _configure_logging(verbose: bool) -> None:
+    """Quiet the per-request chatter unless -v was passed.
+
+    The SDK executor logs bare "Run started / Run completed" at INFO and
+    uvicorn logs every POST /runs at INFO: no agent name, no payload, no
+    status beyond 200 OK. Both go through the "acp" logger (ours,
+    "acp.coord", is its child), so one level switch covers both loggers;
+    uvicorn's own access log is disabled separately in main(). Warnings
+    and errors always show, in either mode."""
+    logging.getLogger("acp").setLevel(logging.INFO if verbose else logging.WARNING)
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        help="log every agent call with its input (default: warnings/errors only)",
+    )
+    args = parser.parse_args(argv)
+    _configure_logging(args.verbose)
     # 8000/8100 are commonly taken by other dev tools; 1337 is this
     # project's own port until it moves into a dedicated setup.
-    server.run(port=1337)
+    if args.verbose:
+        server.run(port=1337)
+    else:
+        print("serving on http://localhost:1337 (quiet; -v for the traffic log)")
+        server.run(port=1337, access_log=False, log_level="warning")
 
 
 if __name__ == "__main__":

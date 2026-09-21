@@ -31,7 +31,9 @@ uv run ACP_server.py
 
 Runs on `http://localhost:1337` (not the quickstart's default 8000 —
 8000/8100 are commonly taken by other dev tools; change the `port=` in
-`ACP_server.py`'s `server.run(...)` call if needed). Verify it's up:
+`ACP_server.py`'s `server.run(...)` call if needed). Default output is
+warnings/errors plus one startup line; pass `-v`/`--verbose` for the
+per-call traffic log. Verify it's up:
 
 ```sh
 curl http://localhost:1337/agents

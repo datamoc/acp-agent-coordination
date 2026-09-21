@@ -2,7 +2,7 @@
 
 ## Coordination server (this repo)
 
-- Start: `uv run ACP_server.py` → `http://localhost:1337`. Verify: `curl http://localhost:1337/agents`.
+- Start: `uv run ACP_server.py` (`-v` for the per-call traffic log) → `http://localhost:1337`. Verify: `curl http://localhost:1337/agents`.
 - Loopback only: never bind `0.0.0.0` or expose the port — no auth, no encryption (see README `## Security`).
 - CLI: `uv run ACP_client.py <agent> [input]` (agents: `post`, `inbox`, `resolve`, `claim`, `release`, `locks`, `status`, `heartbeat`, `presence`, `echo`).
 
