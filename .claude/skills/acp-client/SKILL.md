@@ -59,7 +59,7 @@ All commands: `python ACP_client.py <agent> "<input>"`.
 
 | Command | Input | Notes |
 |---|---|---|
-| `whoami` | `"<family>"` | Returns `you are <family>-NN`. Do this first. |
+| `whoami` | `"<family>"` | Returns `you are <family>-NN [<uuid>]`. The CLI attaches a UUID and verifies the echo — always check the bracketed id is yours before adopting the name. Do this first. |
 | `post` | `"<session>: <message>"` | Appends to the shared mailbox. Returns `posted #N from <who>`. |
 | `inbox` | empty / `"N"` / `"#N"` / `"since <iso-time>"` / `"<session>"` / `"from <session>"` (tokens combine) | Empty = last 10; `"N"` = last N; `"#N"` = since message #N. Lines: `#N [at] from: message`, `[resolved]` once closed. |
 | `resolve` | `"#N"` or `"#N: <note>"` | Marks a mailbox message done. To *claim* work before it's done, post `"<session>: re: #N taking this"` instead. |

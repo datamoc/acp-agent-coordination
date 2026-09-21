@@ -9,7 +9,8 @@ working fine over plain curl). Swap to the SDK client once that's fixed
 upstream or pinned to a working version pair.
 
 Usage:
-  uv run ACP_client.py whoami "<family>"
+  uv run ACP_client.py whoami "<family>"   # client attaches a UUID and
+                                          # refuses replies that don't echo it
   uv run ACP_client.py post "<session-name>: <message>"
   uv run ACP_client.py inbox [N | #N | since <iso-time> | <session> | from <session>]
   uv run ACP_client.py resolve "#N[: <note>]"
@@ -40,6 +41,7 @@ import json
 import os
 import sys
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -167,7 +169,27 @@ def main(argv: list[str] | None = None) -> None:
             return
         agent_name = args[0]
         arg_text = args[1] if len(args) > 1 else ""
-        print(call(agent_name, arg_text))
+        if agent_name == "whoami" and arg_text:
+            # Attach a one-off UUID (unless the caller already put one on
+            # the line) and refuse any reply that does not echo it back -
+            # a name from a mismatched reply must never be adopted.
+            tokens = arg_text.split()
+            nonce = tokens[-1] if len(tokens) > 1 else ""
+            try:
+                uuid.UUID(nonce)
+            except ValueError:
+                nonce = str(uuid.uuid4())
+                arg_text = f"{arg_text} {nonce}"
+            reply = call(agent_name, arg_text)
+            if nonce not in reply:
+                raise ClientError(
+                    f"ACP whoami reply did not echo this call's id [{nonce}] "
+                    f"(got: {reply[:200]}) - that name is not verified as "
+                    "yours, do not use it; retry the whoami call."
+                )
+            print(reply)
+        else:
+            print(call(agent_name, arg_text))
     except ClientError as e:
         # Loud on stderr AND non-zero exit: a failed post/claim leaves no
         # trace in the shared mailbox, so the caller's shell must not look

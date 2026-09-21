@@ -15,6 +15,7 @@ legacy inputs for the one-time migration only.
 import argparse
 import asyncio
 import logging
+import uuid
 from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
 
@@ -363,24 +364,40 @@ async def whoami(
     input: list[Message], context: Context
 ) -> AsyncGenerator[RunYield, RunYieldResume]:
     """Take a numbered session name. Input: a family ("muse", "opencode",
-    "codex", ...). Returns "you are <family>-NN" - the smallest free
+    "codex", ...), optionally followed by a caller-chosen UUID
+    ("<family> <uuid>"). Returns "you are <family>-NN" - the smallest free
     number, heartbeated immediately so concurrent starters cannot draw
     the same one. A     number stays yours while you heartbeat inside the
-    presence TTL; a stale holder's number is reusable. Use the returned
+    presence TTL; a stale holder's number is reusable. When a UUID is
+    given it is echoed back ("you are <family>-NN [<uuid>]") so the caller
+    can verify the reply is theirs. Use the returned
     name for every other agent."""
-    family = _text_of(input).strip()
-    _note("whoami", f"in: {_short(family)}")
+    raw = _text_of(input).strip()
+    _note("whoami", f"in: {_short(raw)}")
+    tokens = raw.split()
+    family = tokens[0] if tokens else ""
+    nonce = tokens[1] if len(tokens) > 1 else ""
+    if nonce:
+        try:
+            uuid.UUID(nonce)
+        except ValueError:
+            yield _reply(
+                "whoami", 'usage: whoami "<family> [<uuid>]" (family is '
+                'letters/digits/_/-, e.g. "muse")'
+            )
+            return
     try:
         name = store.claim_instance(family)
     except ValueError:
         yield _reply(
-            "whoami", 'usage: whoami "<family>" (letters/digits/_/-, e.g. "muse")'
+            "whoami", 'usage: whoami "<family> [<uuid>]" (family is '
+            'letters/digits/_/-, e.g. "muse")'
         )
         return
     except RuntimeError as e:
         yield _reply("whoami", str(e))
         return
-    yield _reply("whoami", f"you are {name}")
+    yield _reply("whoami", f"you are {name}" + (f" [{nonce}]" if nonce else ""))
 
 
 @server.agent()

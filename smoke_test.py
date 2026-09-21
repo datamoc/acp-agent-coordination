@@ -75,6 +75,13 @@ async def main() -> None:
     assert r == "you are muse-02", r
     r = await out(s.whoami, "has space")
     assert r.startswith("usage:"), r
+    # Caller UUIDs are echoed so replies can be matched to requests.
+    r = await out(s.whoami, "muse 12345678-1234-5678-1234-567812345678")
+    assert r == "you are muse-03 [12345678-1234-5678-1234-567812345678]", r
+    r = await out(s.whoami, "muse not-a-uuid")
+    assert r.startswith("usage:"), r
+    r = await out(s.whoami, "muse")
+    assert r == "you are muse-04", r
     r = await out(s.presence, "")
     assert "muse-01" in r and "muse-02" in r, r
 

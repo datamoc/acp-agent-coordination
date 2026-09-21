@@ -73,10 +73,14 @@ only schema documentation; `test_store.py` (stdlib asserts) and
 - **`done`** — close a task request. Input is `"<session>: #R[:
   <note>]"` (the session prefix records who did the work).
 - **`whoami`** — take a numbered session name. Input is a family
-  (`"muse"`, `"opencode"`, `"codex"`, ...); returns `"you are
+  (`"muse"`, `"opencode"`, `"codex"`, ...), optionally followed by a
+  caller-chosen UUID (`"<family> <uuid>"`); returns `"you are
   <family>-NN"`, the smallest free number, already heartbeated so two
-  starters cannot draw the same one. The number stays yours while you
-  heartbeat inside the presence TTL. Use the returned name for every
+  starters cannot draw the same one — with the UUID echoed back
+  (`"you are <family>-NN [<uuid>]"`) when one was given, so the caller
+  can verify the reply is theirs. The CLI attaches a UUID automatically
+  and refuses replies that don't echo it. The number stays yours while
+  you heartbeat inside the presence TTL. Use the returned name for every
   other agent — several sessions of the same family are routinely live
   at once, and bare family names collide.
 - **`heartbeat`** — mark a session as live. Input text is
