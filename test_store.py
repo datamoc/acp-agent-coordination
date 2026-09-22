@@ -4,6 +4,7 @@ Uses throwaway databases under the system temp dir - never touches coord.db.
 
 import json
 import tempfile
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -217,6 +218,31 @@ def test_claim_expiry():
     ), "expired rows visible on request"
 
 
+def test_claim_lock_race():
+    # Concurrent first-time claimants on the same never-before-claimed
+    # scope must not all win: exactly one gets ok=True. Regression test
+    # for a TOCTOU race (SELECT-then-INSERT with no transaction) that
+    # let every racer see no existing row and all insert successfully.
+    path = fresh_db()
+    outcomes = []
+    barrier = threading.Barrier(8)
+
+    def claim(i):
+        barrier.wait()
+        outcomes.append(
+            store.claim_lock(f"agent{i}", "src/contested.ts", "racing", path=path)["ok"]
+        )
+
+    threads = [threading.Thread(target=claim, args=(i,)) for i in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert sum(outcomes) == 1, f"exactly one claimant should win, got {outcomes}"
+    live = store.list_locks(path=path)
+    assert len(live) == 1, live
+
+
 def test_claim_grammar():
     assert store.parse_claim("alice: src/foo.ts") == {
         "owner": "alice",
@@ -343,6 +369,7 @@ if __name__ == "__main__":
     check("heartbeat and presence", test_heartbeat_and_presence)
     check("claim release locks", test_claim_release_locks)
     check("claim expiry", test_claim_expiry)
+    check("claim lock race", test_claim_lock_race)
     check("claim grammar", test_claim_grammar)
     check("migrate json", test_migrate_json)
     check("request flow", test_request_flow)

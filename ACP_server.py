@@ -321,9 +321,7 @@ async def requests(
             line += f" [done by {r['closer'] or 'unknown'}{(': ' + note) if note else ''}]"
         lines.append(line)
     if not lines:
-        rendered = "(no open requests)" if show_all else "(no open requests)"
-        if show_all and not rows:
-            rendered = "(no requests)"
+        rendered = "(no requests)" if show_all else "(no open requests)"
     else:
         rendered = "\n".join(lines)
     _note("requests", f"out: {len(lines)} rows")

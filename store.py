@@ -378,7 +378,12 @@ def claim_lock(
     """Claim exclusive ownership of a file/area scope. Returns
     {"ok": True, lock} on success (re-claiming your own scope refreshes it),
     {"ok": False, "held_by": lock} when someone else's live claim blocks it.
-    Raises ValueError on empty owner/scope."""
+    Raises ValueError on empty owner/scope.
+
+    Serialized with BEGIN IMMEDIATE (like `claim_instance`): without it, two
+    concurrent claimants on the same brand-new scope can each see no
+    existing row and both insert, both getting {"ok": True} - the exact
+    collision this function exists to prevent."""
     owner = (owner or "").strip()[:SENDER_MAX_CHARS]
     scope = (scope or "").strip()[:400]
     if not owner:
@@ -388,13 +393,17 @@ def claim_lock(
     note = (note or "").strip()[:400]
     now = datetime.now(timezone.utc)
     until = (now + timedelta(seconds=ttl_seconds)).isoformat(timespec="seconds")
-    with connect(path) as db:
+    db = connect(path)
+    try:
+        db.isolation_level = None
+        db.execute("BEGIN IMMEDIATE")
         row = db.execute(
             "SELECT scope, owner, note, claimed_at, until FROM locks WHERE scope = ?",
             (scope,),
         ).fetchone()
         held = _valid_lock(row)
         if held is not None and held["owner"] != owner:
+            db.execute("ROLLBACK")
             return {"ok": False, "held_by": held}
         if held is not None:
             db.execute(
@@ -409,10 +418,19 @@ def claim_lock(
                 "VALUES (?, ?, ?, ?, ?)",
                 (scope, owner, note, now.isoformat(timespec="seconds"), until),
             )
+        db.execute("COMMIT")
         return {
             "ok": True,
             "lock": {"scope": scope, "owner": owner, "note": note, "until": until},
         }
+    except Exception:
+        try:
+            db.execute("ROLLBACK")
+        except sqlite3.Error:
+            pass
+        raise
+    finally:
+        db.close()
 
 
 def release_lock(owner: str, scope: str, path: Path | None = None) -> dict:
