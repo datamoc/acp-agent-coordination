@@ -1,7 +1,7 @@
 {
   "name": "acp",
   "description": "Coordinate concurrent agent sessions through the local ACP server: shared mailbox, file claims, task requests, presence. Wraps acp-agent-coordination's ACP_client.py.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": {
     "name": "Michel WEINACHTER"
   },
