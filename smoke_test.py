@@ -203,7 +203,7 @@ async def main() -> None:
             e["session"] for e in store.list_presence(window_seconds=None)
         }, "presence did not survive reload"
     finally:
-        store.MAILBOX_CAP = 500
+        store.MAILBOX_CAP = 5000
 
     print("SMOKE OK")
 

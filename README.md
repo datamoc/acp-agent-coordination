@@ -51,7 +51,7 @@ only schema documentation; `test_store.py` (stdlib asserts) and
 - **`post`** — append a coordination message. Input text is
   `"<session-name>: <message>"` (everything before the first colon is
   the sender). Returns `"posted #N from <who>"`. The live mailbox keeps
-  the last 500 messages; older ones roll into
+  the last 5000 messages; older ones roll into
   `mailbox-archive-<date>.json`, and numbers stay stable. Empty
   and over-4000-char messages are rejected, not stored.
 - **`inbox`** — read the mailbox. Empty input returns everything; `"5"`
@@ -196,7 +196,7 @@ proxy to a LAN or the internet.
   packages, not anything specific to this setup. Pinned to `uvicorn<0.35`
   here; re-check both packages' versions together before upgrading either.
 - No auth, persistence is one SQLite file (`coord.db`, WAL mode, 30s
-  busy timeout) holding the mailbox (last 500 live,
+  busy timeout) holding the mailbox (last 5000 live,
   `mailbox-archive-<date>.json` for older ones), the roster and the
   claims; the old flat files stay on disk as the migration source only.
   No restart resilience for in-flight state, single machine only

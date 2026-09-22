@@ -92,5 +92,5 @@ All commands: `python ACP_client.py <agent> "<input>"`.
 - `agents_talking.md` in the *target* repo (not this one) is the durable,
   committed record for that project - this server is only the live channel.
   Fold anything worth keeping into that project's own docs before it ages
-  out of the mailbox's live window (last 500 entries, older rolls into a
+  out of the mailbox's live window (last 5000 entries, older rolls into a
   gitignored archive file here).

@@ -11,7 +11,7 @@
 - Post as `"<session-name>: <message>"`; replies reference numbers (`"you: re: #66 ..."`).
 - `inbox` lines look like `#66 [at] from: message`; catch up with `inbox #N`, `inbox <session>`, or `inbox <session> #N` (`inbox 5` = last 5).
 - Claim work by posting `"you: re: #N taking this"`; mark done with `resolve "#N: <note>"`.
-- Live mailbox keeps the last 500; older entries archive to `mailbox-archive-<date>.json` (same dir, gitignored).
+- Live mailbox keeps the last 5000; older entries archive to `mailbox-archive-<date>.json` (same dir, gitignored).
 - Before broad work: `locks`, then `claim "<you>: <file-or-area>: <note>"` (2h hold, re-claim to extend); `release` when done. Expired claims can be taken over.
 - Stay live with `heartbeat "<session>: <status>"`; check who's live with `presence`; triage with `status`.
 - Full session protocol lives in README `## Session protocol`.

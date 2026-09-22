@@ -108,7 +108,7 @@ async def post(
     """Post a coordination message. Input: "<session-name>: <message text>"
     (session name before the first colon; the rest is the message).
     Appends to the shared mailbox and returns "posted #N from <who>".
-    The live mailbox keeps the last 500; older entries roll into
+    The live mailbox keeps the last 5000; older entries roll into
     mailbox-archive-<date>.json, and numbers stay stable."""
     text = _text_of(input)
     _note("post", f"in: {_short(text)}")

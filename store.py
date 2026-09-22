@@ -36,7 +36,7 @@ DIR = Path(__file__).parent
 DB_PATH = DIR / "coord.db"
 
 SCHEMA_VERSION = 1
-MAILBOX_CAP = 500
+MAILBOX_CAP = 5000
 MESSAGE_MAX_CHARS = 4000
 SENDER_MAX_CHARS = 80
 # A session counts as live if its last heartbeat is within this window.
