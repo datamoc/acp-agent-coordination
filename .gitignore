@@ -17,3 +17,8 @@ locks.json
 .poll_cursor_*.json
 coord.db*
 server*.log
+
+# Local TLS material (see README "HTTPS (optional)") - never commit keys.
+*.pem
+*.key
+tls/

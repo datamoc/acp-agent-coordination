@@ -5,6 +5,8 @@ Listens on http://localhost:1337 (loopback only - never expose it;
 see README.md "Security"). Default log output shows state-changing
 calls (post/resolve/claim/release/request/done/heartbeat/whoami) plus
 warnings/errors; -v/--verbose adds the read traffic and framework chatter.
+Optionally set ACP_TLS_CERT and ACP_TLS_KEY to serve HTTPS instead -
+see README.md "HTTPS (optional)".
 
 Storage is one SQLite file (`coord.db`, WAL mode - see store.py). The
 agent API below is the contract clients rely on: reply shapes and input
@@ -15,6 +17,7 @@ legacy inputs for the one-time migration only.
 import argparse
 import asyncio
 import logging
+import os
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
@@ -23,6 +26,19 @@ from acp_sdk.models import Message, MessagePart
 from acp_sdk.server import Context, RunYield, RunYieldResume, Server
 
 import store
+
+# HTTPS is opt-in: unset (the default) keeps plain HTTP, unchanged from
+# before this existed. Set both to serve HTTPS - see README.md "HTTPS
+# (optional)" for how to generate a loopback cert and what key exchange
+# actually gets negotiated (OpenSSL 3.5+ prefers the post-quantum hybrid
+# group X25519MLKEM768 automatically; this project adds no crypto code
+# of its own, only the TLS wiring).
+TLS_CERT = os.environ.get("ACP_TLS_CERT")
+TLS_KEY = os.environ.get("ACP_TLS_KEY")
+
+# Override for a second/test instance so it doesn't collide with a live
+# dev server on the usual 1337 (see test_tls.py).
+PORT = int(os.environ.get("ACP_PORT", "1337"))
 
 server = Server()
 
@@ -493,11 +509,24 @@ def main(argv: list[str] | None = None) -> None:
     _configure_logging(args.verbose)
     # 8000/8100 are commonly taken by other dev tools; 1337 is this
     # project's own port until it moves into a dedicated setup.
-    if args.verbose:
-        server.run(port=1337)
+    if bool(TLS_CERT) != bool(TLS_KEY):
+        raise SystemExit(
+            "ACP_TLS_CERT and ACP_TLS_KEY must both be set to enable HTTPS "
+            "(only one was) - see README.md 'HTTPS (optional)'"
+        )
+    if TLS_CERT and TLS_KEY:
+        import ssl
+
+        logger.info(
+            "starting HTTPS on port %d (cert=%s, OpenSSL %s - see README.md "
+            "'HTTPS (optional)' for the negotiated key exchange)",
+            PORT, TLS_CERT, ssl.OPENSSL_VERSION,
+        )
+        server.run(port=PORT, ssl_certfile=TLS_CERT, ssl_keyfile=TLS_KEY)
     else:
-        print("serving on http://localhost:1337 (quiet; -v for the traffic log)")
-        server.run(port=1337, access_log=False, log_level="warning")
+        if not args.verbose:
+            print(f"serving on http://localhost:{PORT} (quiet; -v for the traffic log)")
+        server.run(port=PORT, access_log=not args.verbose)
 
 
 if __name__ == "__main__":

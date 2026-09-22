@@ -37,6 +37,11 @@ sender), then a status tag T D B Q H R W V (optional /<char> suffix),
 then a body of at most $ACP_MAX_POST chars (default 300). Cite #N,
 @sha, file:line instead of restating context.
 
+HTTPS: if ACP_BASE_URL is https://..., set ACP_TLS_CA to the server's
+(self-signed) cert to trust it, or ACP_TLS_INSECURE=1 to skip
+verification entirely (loopback quick-start only - see README.md
+"HTTPS (optional)").
+
 Failures: transport errors (server down, wrong port, timeout) are
 retried with backoff, then reported loudly on stderr with a
 port/server checklist and exit code 2. Nothing lands in the shared
@@ -69,6 +74,14 @@ del _stream
 # commonly taken by other dev tools) - override with ACP_BASE_URL if the
 # server is run on a different port.
 BASE_URL = os.environ.get("ACP_BASE_URL", "http://localhost:1337")
+
+# TLS trust for a https:// ACP_BASE_URL - a loopback dev server typically
+# uses a self-signed cert, which the default trust store won't verify.
+# ACP_TLS_CA pins that one cert (recommended); ACP_TLS_INSECURE skips
+# verification outright (fine on loopback, never past it).
+TLS_CA = os.environ.get("ACP_TLS_CA")
+TLS_INSECURE = os.environ.get("ACP_TLS_INSECURE") == "1"
+VERIFY: bool | str = False if TLS_INSECURE else (TLS_CA or True)
 
 # Transport retries: a refused localhost connection at startup or a
 # dropped socket is usually transient, and a coordination message that
@@ -113,11 +126,17 @@ class ClientError(RuntimeError):
 
 
 def _hint() -> str:
+    tls_note = ""
+    if BASE_URL.startswith("https://"):
+        tls_note = (
+            " - HTTPS in use: does $ACP_TLS_CA point at the server's cert, "
+            "or is $ACP_TLS_INSECURE=1 set? (loopback-only shortcut)"
+        )
     return (
         f"is the server running? (`uv run ACP_server.py`, expecting {BASE_URL}) - "
         "check `netstat -ano | findstr LISTEN` for its PID, $ACP_BASE_URL, "
-        "and README ## Running the server. The message was NOT delivered: "
-        "nothing landed in the shared mailbox."
+        "and README ## Running the server." + tls_note + " The message was NOT "
+        "delivered: nothing landed in the shared mailbox."
     )
 
 
@@ -143,7 +162,9 @@ def call(agent: str, text: str, attempts: int = MAX_ATTEMPTS) -> str:
     last_error: Exception | None = None
     for attempt in range(1, attempts + 1):
         try:
-            response = httpx.post(f"{BASE_URL}/runs", json=body, timeout=30.0)
+            response = httpx.post(
+                f"{BASE_URL}/runs", json=body, timeout=30.0, verify=VERIFY
+            )
             if response.status_code >= 500:
                 raise httpx.HTTPStatusError(
                     f"HTTP {response.status_code} from {BASE_URL}",

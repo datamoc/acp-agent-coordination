@@ -45,8 +45,9 @@ curl http://localhost:1337/agents
 Fourteen agents are registered. Storage is one SQLite file (`coord.db`,
 WAL mode — see `store.py`); `mailbox.json`/`presence.json`/`locks.json`
 are legacy inputs for the one-time migration only. `store.py` has the
-only schema documentation; `test_store.py` (stdlib asserts) and
-`smoke_test.py` (agent round-trips) cover it.
+only schema documentation; `test_store.py` (stdlib asserts),
+`smoke_test.py` (agent round-trips) and `test_tls.py` (real subprocess,
+real HTTPS handshake) cover it.
 
 - **`post`** — append a coordination message. Input text is
   `"<session-name>: <message>"` (everything before the first colon is
@@ -190,13 +191,58 @@ curl -s -X POST http://localhost:1337/runs -H "Content-Type: application/json" -
 }'
 ```
 
+## HTTPS (optional)
+
+Off by default — plain HTTP, unchanged. To turn it on:
+
+```sh
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
+  -keyout acp-key.pem -out acp-cert.pem -days 825 -nodes \
+  -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+
+ACP_TLS_CERT=acp-cert.pem ACP_TLS_KEY=acp-key.pem uv run ACP_server.py
+```
+
+Now `https://localhost:1337`. The cert is self-signed (there's no CA to
+ask for a loopback-only server), so clients need to be told to trust it
+rather than verifying against the system trust store:
+
+```sh
+ACP_BASE_URL=https://localhost:1337 ACP_TLS_CA=acp-cert.pem \
+  uv run ACP_client.py status
+```
+
+(`ACP_TLS_INSECURE=1` skips verification entirely instead of pinning the
+cert — fine for a quick loopback check, not a substitute for `ACP_TLS_CA`.)
+
+**Key exchange:** this project adds no cryptography of its own — it
+only wires `ssl_certfile`/`ssl_keyfile` into the server (`ACP_server.py`
+`main()`) and `verify=` into the client (`ACP_client.py`). All of the
+actual TLS behavior comes from OpenSSL. On OpenSSL 3.5+ (what `uv sync`
+installs via the pinned Python here), the library's own default TLS 1.3
+group preference already puts the hybrid post-quantum group
+**`X25519MLKEM768`** (ML-KEM-768 combined with classical X25519) first,
+so a modern peer gets it automatically; an older peer that doesn't
+support it falls back to classical ECDHE (`X25519`/`P-256`) with no
+error — "possible", not mandatory. The negotiated TLS 1.3 cipher is
+`TLS_AES_256_GCM_SHA384` either way. Confirm what a given connection
+actually negotiated with:
+
+```sh
+openssl s_client -connect localhost:1337 -tls1_3 2>&1 | grep -i "Negotiated TLS1.3 group"
+```
+
+On OpenSSL older than 3.5, `X25519MLKEM768` doesn't exist yet — TLS
+still works, just without the post-quantum hybrid group.
+
 ## Security
 
-**No authentication, no encryption, no access control.** Anyone who can
-reach the port can read and write the mailbox and the presence roster.
-Run it on loopback (`127.0.0.1`) only — never change the host to
-`0.0.0.0`, and never expose the port via a port forward, tunnel, or
-proxy to a LAN or the internet.
+**No authentication, no access control — HTTPS above adds transport
+encryption only.** Anyone who can reach the port can read and write the
+mailbox and the presence roster, over HTTP or HTTPS alike. Run it on
+loopback (`127.0.0.1`) only — never change the host to `0.0.0.0`, and
+never expose the port via a port forward, tunnel, or proxy to a LAN or
+the internet.
 
 ## Known issues
 
