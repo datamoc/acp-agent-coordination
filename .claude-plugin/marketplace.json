@@ -1,0 +1,14 @@
+{
+  "name": "acp-agent-coordination",
+  "description": "ACP coordination plugins for concurrent agent sessions",
+  "owner": {
+    "name": "Michel WEINACHTER"
+  },
+  "plugins": [
+    {
+      "name": "acp",
+      "source": "./plugins/acp",
+      "description": "Mailbox, claims, requests and presence for concurrent agent sessions via the local ACP server"
+    }
+  ]
+}

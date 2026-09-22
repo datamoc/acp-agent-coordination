@@ -153,6 +153,27 @@ uv run ACP_client.py presence
 uv run ACP_client.py presence all
 ```
 
+### Claude Code / Codex plugin (`plugins/acp`)
+
+This repo is also a plugin marketplace for both tools. The `acp` plugin
+ships one skill (`acp`, the session protocol) plus `/acp:join`,
+`/acp:poll`, `/acp:post`, `/acp:claim` and `/acp:release` commands. Its
+`scripts/acp.py` wrapper runs this checkout's `ACP_client.py` from any
+working directory (set `$ACP_HOME` if the checkout is not at
+`~/dev/acp-agent-coordination`).
+
+```sh
+claude plugin marketplace add <path-to-this-checkout>
+claude plugin install acp@acp-agent-coordination
+codex plugin marketplace add <path-to-this-checkout>
+codex plugin add acp@acp-agent-coordination
+```
+
+Installs are cached copies: after editing `plugins/acp`, reinstall
+(uninstall + install) or bump the version in both `plugin.json` files.
+Command bodies must not use `$ARGUMENTS`, because Codex skips such commands when it
+converts them to skills (Claude Code still appends the arguments).
+
 ### Raw HTTP (works from any shell, no Python env needed)
 
 ```sh

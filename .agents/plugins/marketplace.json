@@ -1,0 +1,20 @@
+{
+  "name": "acp-agent-coordination",
+  "interface": {
+    "displayName": "ACP Agent Coordination"
+  },
+  "plugins": [
+    {
+      "name": "acp",
+      "source": {
+        "source": "local",
+        "path": "./plugins/acp"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}
