@@ -335,7 +335,11 @@ refused unless TLS **and** an identity method are configured:
   client checks it matches its key and replaces `agent.crt` in place. The
   renewal re-certifies the key the client already holds: no private key
   is ever sent, and the client needs no openssl. A client offline for
-  more than 30 days has to be enrolled again. `coord-admin list` shows
+  more than 30 days has to be enrolled again. The server renews its own
+  certificate the same way: at start and every hour (`--check-hours`) it
+  asks management when due and loads the new one live, no restart. No
+  certificate lives longer than 47 days (server 47, clients 30); an older,
+  longer one is renewed at the first check or request. `coord-admin list` shows
   every cert; `--crl` (TLS-level CRL) is still accepted.
 - OIDC (Keycloak): `--oidc-introspect-url .../protocol/openid-connect/token/introspect
   --oidc-client-id coord` (secret in `COORD_OIDC_SECRET`); clients set
@@ -345,6 +349,42 @@ refused unless TLS **and** an identity method are configured:
 In both modes the session is bound to the authenticated principal at
 `whoami`; another identity cannot drive it. Agents only ever run `coord`
 (any directory, no exports, survives reboots).
+
+**Corporate deployment: Keycloak agents, enterprise CA for the server.**
+Agents authenticate with Keycloak (OIDC above) and hold no certificate;
+no PKI code is loaded on either side. The server's own TLS certificate
+comes from the corporate CA and is renewed by a `--cert-source`
+(`coordination/certsource.py`), then loaded live, with no restart. A new
+certificate that doesn't load with its key (half-written or mismatched) is
+never used: the server keeps its current one and retries.
+
+| `--cert-source` | Who renews | Typical CA |
+|---|---|---|
+| `watch` | an external renewer rewrites the files; the server reloads when their content changes (checked every 60 s) | cert-manager (mounted Secret), certmonger (e.g. AD CS autoenrollment), `step ca renew --daemon` |
+| `command` | the server runs `--renew-command` when due (`{cert}`, `{key}` are substituted), then reloads | step-ca, a certreq/PowerShell script for AD CS |
+| `local` | our management (`--pki`) | the local mTLS setup (default with `--pki`) |
+
+"Due" means 15 days old (`--renew-after-days`) or two-thirds of the lifetime,
+whichever comes first, so short-lived certs (step-ca issues 24 h by default)
+are renewed in time. Examples, not tested here against the real services:
+
+```sh
+# cert-manager: a Certificate (duration: 1128h = 47 d) mounted at /tls
+coord-server --listen 0.0.0.0 --tls-cert /tls/tls.crt --tls-key /tls/tls.key \
+  --cert-source watch --oidc-introspect-url https://sso.example.com/realms/corp/protocol/openid-connect/token/introspect \
+  --oidc-client-id coord          # secret in COORD_OIDC_SECRET
+
+# step-ca: bootstrap once with `step ca certificate coord.example.com tls.crt tls.key`
+coord-server ... --tls-cert tls.crt --tls-key tls.key \
+  --cert-source command --renew-command 'step ca renew --force {cert} {key}'
+
+# AD CS: let certmonger (with an AD CS helper such as cepces) track the files -> watch,
+# or run your own enrollment script -> command
+coord-server ... --cert-source command --renew-command '/usr/local/bin/adcs-renew {cert} {key}'
+```
+
+Clients verify the server against the corporate CA (`COORD_CA`, or the
+system trust store when unset) and send `COORD_TOKEN`.
 
 **Servers as services.** `contrib/systemd/` has user units
 (`coord-server --pki pki`, `acp-server`); install with

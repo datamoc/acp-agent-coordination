@@ -27,9 +27,11 @@ try:
 except ImportError:  # Windows: in-process lock only
     fcntl = None
 
+MAX_DAYS = 47            # no leaf certificate (client or server) may live longer
 CLIENT_DAYS = 30
-SERVER_DAYS = 365
-RENEW_AFTER_DAYS = 15
+SERVER_DAYS = 47
+RENEW_AFTER_DAYS = 15    # renew once this old - or at once if it outlives MAX_DAYS
+assert max(CLIENT_DAYS, SERVER_DAYS) <= MAX_DAYS
 DEFAULT_DIR = Path(__file__).resolve().parents[1] / "pki"
 
 _CNF = """[ca]
@@ -82,6 +84,12 @@ def _locked(d: Path):
                 fcntl.flock(f, fcntl.LOCK_UN)
 
 
+def _ts(openssl_date: str) -> float:
+    """'Sep 23 08:57:42 2026 GMT' -> epoch seconds."""
+    return dt.datetime.strptime(openssl_date.strip(), "%b %d %H:%M:%S %Y %Z").replace(
+        tzinfo=dt.timezone.utc).timestamp()
+
+
 def _index(d: Path) -> list[list[str]]:
     return [line.split("\t") for line in (d / "index.txt").read_text().splitlines() if line]
 
@@ -101,14 +109,14 @@ def init(d: str | Path, cn: str = "coord-ca") -> Path:
     return d
 
 
-def issue(d: str | Path, name: str, server: bool = False) -> tuple[Path, Path]:
+def issue(d: str | Path, name: str, server: bool = False, days: int | None = None) -> tuple[Path, Path]:
     d = Path(d).resolve()
     key, csr, crt = d / f"{name}.key", d / f"{name}.csr", d / f"{name}.crt"
     with _locked(d):
         _run("req", "-new", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256", "-nodes",
              "-keyout", str(key), "-out", str(csr), "-subj", f"/CN={name}")
         _run("ca", "-batch", "-config", str(d / "openssl.cnf"), "-extensions",
-             "server_ext" if server else "client_ext", "-days", str(SERVER_DAYS if server else CLIENT_DAYS),
+             "server_ext" if server else "client_ext", "-days", str(days or (SERVER_DAYS if server else CLIENT_DAYS)),
              "-in", str(csr), "-out", str(crt), "-notext")
     return crt, key
 
@@ -158,11 +166,27 @@ class Authority:
             self._status = (mtime, {f[3].upper().lstrip("0"): f[0] for f in _index(self.d) if len(f) >= 4})
         return self._status[1].get(serial.upper().lstrip("0"))
 
-    def due(self, not_before: float) -> bool:
-        return self.clock() - not_before >= self.renew_after.total_seconds()
+    def due(self, not_before: float, not_after: float | None = None) -> bool:
+        """Renew once RENEW_AFTER_DAYS old, or right away if the cert outlives MAX_DAYS."""
+        too_long = not_after is not None and not_after - not_before > MAX_DAYS * 86400 + 60
+        return too_long or self.clock() - not_before >= self.renew_after.total_seconds()
 
-    def renew(self, der: bytes) -> str:
-        """Return a fresh PEM certificate for the same CN and public key as `der`.
+    def renew_server(self, cert: str | Path) -> str | None:
+        """The server's own certificate: re-certify it when due, replace the file atomically
+        and return the new PEM; None when it is not due yet."""
+        cert = Path(cert)
+        dates = _run("x509", "-in", str(cert), "-noout", "-startdate", "-enddate", text=True)
+        nb, na = (_ts(line.partition("=")[2]) for line in dates.strip().splitlines())
+        if not self.due(nb, na):
+            return None
+        pem = self.renew(cert.read_bytes(), server=True)
+        tmp = cert.with_suffix(".renew")
+        tmp.write_text(pem)
+        os.replace(tmp, cert)
+        return pem
+
+    def renew(self, der: bytes, server: bool = False) -> str:
+        """Return a fresh PEM certificate for the same CN and public key as `der` (DER or PEM).
 
         Idempotent per key: while a renewal issued after the presented
         certificate is still fresh, the same one is returned again (so a
@@ -170,7 +194,8 @@ class Authority:
         with tempfile.TemporaryDirectory() as tmp:
             cur = Path(tmp) / "cur.der"
             cur.write_bytes(der)
-            pem = _run("x509", "-inform", "DER", "-in", str(cur), text=True)
+            pem = _run("x509", "-inform", "PEM" if der.lstrip().startswith(b"-----") else "DER",
+                       "-in", str(cur), text=True)
             (Path(tmp) / "cur.pem").write_text(pem)
             _run("verify", "-CAfile", str(self.d / "ca.crt"), str(Path(tmp) / "cur.pem"))
             info = _run("x509", "-in", str(Path(tmp) / "cur.pem"), "-noout", "-serial", "-subject",
@@ -195,8 +220,9 @@ class Authority:
                 out = self.d / "newcerts" / f"{new_serial}.pem"
                 _run("x509", "-new", "-force_pubkey", str(Path(tmp) / "pub.pem"), "-subj", f"/CN={cn}",
                      "-CA", str(self.d / "ca.crt"), "-CAkey", str(self.d / "ca.key"),
-                     "-set_serial", f"0x{new_serial}", "-days", str(CLIENT_DAYS),
-                     "-extfile", str(self.d / "openssl.cnf"), "-extensions", "client_ext", "-out", str(out))
+                     "-set_serial", f"0x{new_serial}", "-days", str(SERVER_DAYS if server else CLIENT_DAYS),
+                     "-extfile", str(self.d / "openssl.cnf"), "-extensions",
+                     "server_ext" if server else "client_ext", "-out", str(out))
                 end = _run("x509", "-in", str(out), "-noout", "-enddate", text=True).strip().partition("=")[2]
                 end_ts = dt.datetime.strptime(end, "%b %d %H:%M:%S %Y %Z").strftime("%y%m%d%H%M%SZ")
                 with open(self.d / "index.txt", "a") as idx:   # same line format `openssl ca` writes

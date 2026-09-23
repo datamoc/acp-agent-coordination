@@ -10,6 +10,11 @@ request whether the presented certificate is still valid - a revocation
 applies at once, no restart - and, once the certificate is
 RENEW_AFTER_DAYS old, for a renewed one, which it hands to the client in
 the response ("certificate"). The client never contacts management.
+The server's own certificate is renewed by a --cert-source (certsource.py):
+our management (local), an external renewer's files (watch: cert-manager,
+certmonger/AD CS) or a command (step-ca, AD CS scripts); it is loaded live.
+No certificate lives longer than pki.MAX_DAYS (47); longer ones are
+renewed at the first check or request.
 """
 
 import argparse
@@ -93,7 +98,7 @@ def make_handler(coord, oidc: OIDCIntrospector | None, mtls: bool, authority=Non
                 return
             if authority.status(cert.get("serialNumber", "")) != "V":
                 raise CoordError("unauthenticated", "client certificate is revoked or unknown to the CA")
-            if authority.due(ssl.cert_time_to_seconds(cert["notBefore"])):
+            if authority.due(ssl.cert_time_to_seconds(cert["notBefore"]), ssl.cert_time_to_seconds(cert["notAfter"])):
                 try:
                     self._renewal = authority.renew(self.connection.getpeercert(binary_form=True))
                 except Exception as e:   # a failed renewal must not fail the request
@@ -152,11 +157,21 @@ def make_handler(coord, oidc: OIDCIntrospector | None, mtls: bool, authority=Non
     return Handler
 
 
+class _Server(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def handle_error(self, request, client_address):
+        if isinstance(sys.exc_info()[1], (BrokenPipeError, ConnectionResetError, ssl.SSLError)):
+            return          # client went away or failed the handshake: not a server error
+        super().handle_error(request, client_address)
+
+
 def build_server(coord, host="127.0.0.1", port=1338, tls_cert=None, tls_key=None, client_ca=None,
                  crl=None, oidc: OIDCIntrospector | None = None,
-                 authority=None) -> ThreadingHTTPServer:
-    """`authority` is a pki.Authority (mTLS with management) or None: local and OIDC
-    modes never load the PKI code."""
+                 authority=None, cert_source=None) -> ThreadingHTTPServer:
+    """`authority`: a pki.Authority (mTLS with our management) or None - local and OIDC
+    modes never load the PKI code. `cert_source` (certsource.py) renews the server's own
+    certificate; with an authority it defaults to the local one."""
     if not is_loopback(host):
         if not (tls_cert and tls_key):
             raise SystemExit(f"refusing to listen on {host}: non-loopback requires --tls-cert/--tls-key")
@@ -165,7 +180,8 @@ def build_server(coord, host="127.0.0.1", port=1338, tls_cert=None, tls_key=None
                              "or --oidc-introspect-url")
     if client_ca and not (tls_cert and tls_key):
         raise SystemExit("--client-ca needs --tls-cert/--tls-key")
-    httpd = ThreadingHTTPServer((host, port), make_handler(coord, oidc, mtls=bool(client_ca), authority=authority))
+    httpd = _Server((host, port), make_handler(coord, oidc, mtls=bool(client_ca), authority=authority))
+    httpd.refresh_server_cert = lambda: False
     if tls_cert:
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ctx.minimum_version = ssl.TLSVersion.TLSv1_2
@@ -177,6 +193,25 @@ def build_server(coord, host="127.0.0.1", port=1338, tls_cert=None, tls_key=None
                 ctx.load_verify_locations(crl)
                 ctx.verify_flags |= ssl.VERIFY_CRL_CHECK_LEAF
         httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
+        if cert_source is None and authority is not None:
+            from .certsource import LocalSource
+            cert_source = LocalSource(tls_cert, tls_key, authority)
+        if cert_source is not None:
+            def refresh_server_cert() -> bool:
+                """Let the source renew/pick up the server cert; load it live (new handshakes
+                use it, open connections are untouched). True if a new cert is in use."""
+                try:
+                    if not cert_source.refresh():
+                        return False
+                    ctx.load_cert_chain(tls_cert, tls_key)
+                except Exception as e:   # keep serving on the current cert, retry next check
+                    print(f"coord-server: server certificate renewal ({cert_source.name}) failed: {e!r}",
+                          file=sys.stderr, flush=True)
+                    return False
+                print(f"coord-server: server certificate renewed ({cert_source.name}: {tls_cert})",
+                      file=sys.stderr, flush=True)
+                return True
+            httpd.refresh_server_cert = refresh_server_cert
     return httpd
 
 
@@ -189,39 +224,61 @@ def main(argv=None) -> int:
     p.add_argument("--db", default=os.environ.get("COORD_DB") or str(root / "coord2.db"))
     p.add_argument("--pki", type=Path, help="mTLS with management's CA dir: client CA, server cert "
                    "(<dir>/localhost.crt/.key unless --tls-cert/--tls-key), live revocation and renewal")
-    p.add_argument("--renew-after-days", type=float, help="with --pki (default 15)")
     p.add_argument("--tls-cert"); p.add_argument("--tls-key")
+    p.add_argument("--cert-source", choices=("none", "local", "watch", "command"),
+                   help="how the server's own cert is renewed (default: local with --pki, else none)")
+    p.add_argument("--renew-command", help="for --cert-source command, e.g. "
+                   "'step ca renew --force {cert} {key}'")
+    p.add_argument("--renew-after-days", type=float,
+                   help="renew once this old or 2/3 of the lifetime, whichever comes first (default 15)")
+    p.add_argument("--check-seconds", type=float,
+                   help="how often to check the server cert (default 60 for watch, else 3600)")
     p.add_argument("--client-ca"); p.add_argument("--crl")
     p.add_argument("--oidc-introspect-url"); p.add_argument("--oidc-client-id")
     p.add_argument("--oidc-client-secret")
     a = p.parse_args(argv)
     authority = None
-    if a.renew_after_days is not None and not a.pki:
-        p.error("--renew-after-days needs --pki")
+    source_kind = a.cert_source or ("local" if a.pki else "none")
     if a.pki:
         from .pki import RENEW_AFTER_DAYS, Authority   # only mTLS with management needs the PKI code
-        a.renew_after_days = a.renew_after_days or RENEW_AFTER_DAYS
         d = a.pki.resolve()
-        authority = Authority(d, a.renew_after_days)
+        authority = Authority(d, a.renew_after_days or RENEW_AFTER_DAYS)
         a.client_ca = a.client_ca or str(d / "ca.crt")
         a.tls_cert = a.tls_cert or str(d / "localhost.crt")
         a.tls_key = a.tls_key or str(d / "localhost.key")
+    cert_source = None
+    if source_kind != "none":
+        if not (a.tls_cert and a.tls_key):
+            p.error(f"--cert-source {source_kind} needs --tls-cert/--tls-key (or --pki)")
+        from . import certsource
+        kw = {"renew_after_days": a.renew_after_days} if a.renew_after_days else {}
+        cert_source = certsource.make(source_kind, a.tls_cert, a.tls_key, command=a.renew_command,
+                                      authority=authority, **kw)
     oidc = None
     if a.oidc_introspect_url:
         oidc = OIDCIntrospector(a.oidc_introspect_url, a.oidc_client_id or "",
                                 os.environ.get("COORD_OIDC_SECRET") or a.oidc_client_secret or "")
     try:
         httpd = build_server(Coord(a.db), a.listen, a.port, a.tls_cert, a.tls_key, a.client_ca, a.crl,
-                             oidc, authority)
+                             oidc, authority, cert_source)
     except OSError as e:
         if e.errno != errno.EADDRINUSE:
             raise
         print(f"error: {a.listen}:{a.port} is already in use - another `coord-server` is probably "
               f"running (find it with `ss -ltnp | grep :{a.port}`), or pick another --port", file=sys.stderr)
         return 1
+    if cert_source is not None:
+        every = a.check_seconds or (60 if source_kind == "watch" else 3600)
+
+        def watch_server_cert():   # at start, then every --check-seconds
+            while True:
+                httpd.refresh_server_cert()
+                time.sleep(every)
+        threading.Thread(target=watch_server_cert, name="server-cert-renewal", daemon=True).start()
     scheme = "https" if a.tls_cert else "http"
-    print(f"coord-server on {scheme}://{a.listen}:{a.port}"
-          + (f" (mTLS, renewal after {a.renew_after_days:g} days)" if authority else ""), flush=True)
+    mode = ", ".join(x for x in ("mTLS" if a.client_ca else "", "OIDC" if oidc else "",
+                                 f"server cert: {source_kind}" if cert_source else "") if x)
+    print(f"coord-server on {scheme}://{a.listen}:{a.port}" + (f" ({mode})" if mode else ""), flush=True)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

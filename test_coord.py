@@ -501,6 +501,149 @@ def mtls_renewal_and_live_revocation():
         httpd.shutdown()
 
 
+@check
+def server_cert_auto_renewal_and_47_day_cap():
+    """The server renews its own certificate through management and loads it live; no leaf
+    certificate outlives MAX_DAYS - older, longer ones are renewed at the first check/use."""
+    if not shutil.which("openssl"):
+        print("  (skipped: no openssl)")
+        return
+    import socket
+    import subprocess
+    import time
+
+    def lifetime_days(pem_or_path):
+        src = ["-in", str(pem_or_path)] if isinstance(pem_or_path, Path) else []
+        out = subprocess.run(["openssl", "x509", *src, "-noout", "-startdate", "-enddate"],
+                             input=None if src else pem_or_path, capture_output=True, text=True, check=True).stdout
+        nb, na = (pki._ts(line.partition("=")[2]) for line in out.strip().splitlines())
+        return round((na - nb) / 86400)
+
+    d = pki.init(TMP / "pki-srv")
+    pki.issue(d, "localhost", server=True, days=365)                 # issued before the 47-day rule
+    pki.issue(d, "old-client", days=365)
+    b = Path(pki.enroll(d, "old-client", "unused", out=TMP / "bundle-old")["bundle"])
+    clock = [time.time()]
+    authority = pki.Authority(d, clock=lambda: clock[0])
+    httpd = build_server(fresh()[0], "127.0.0.1", 0, tls_cert=str(d / "localhost.crt"),
+                         tls_key=str(d / "localhost.key"), client_ca=str(d / "ca.crt"), authority=authority)
+    port = _serve(httpd)
+    ctx = ssl.create_default_context(cafile=str(b / "ca.crt"))
+    ctx.load_cert_chain(str(b / "agent.crt"), str(b / "agent.key"))
+
+    def served():   # the certificate a new handshake gets
+        with ctx.wrap_socket(socket.create_connection(("127.0.0.1", port)), server_hostname="localhost") as t:
+            return ssl.DER_cert_to_PEM_cert(t.getpeercert(binary_form=True))
+    try:
+        assert lifetime_days(served()) == 365
+        assert httpd.refresh_server_cert()                              # 365 > 47: renewed at once
+        assert served().strip() == (d / "localhost.crt").read_text().strip()   # live, no restart
+        assert lifetime_days(d / "localhost.crt") == pki.SERVER_DAYS == 47
+        assert not httpd.refresh_server_cert()                          # fresh: nothing to do
+        cl = RemoteCoord(f"https://localhost:{port}", ca=str(b / "ca.crt"), cert=str(b / "agent.crt"),
+                         key=str(b / "agent.key"))
+        cl.presence()                                                 # client 365 d -> 30 d on first use
+        assert lifetime_days(b / "agent.crt") == pki.CLIENT_DAYS
+        clock[0] += 16 * 86400
+        assert httpd.refresh_server_cert()                              # 15-day rule for the server too
+        cl.presence()                                                 # still trusted after the swap
+    finally:
+        httpd.shutdown()
+
+_EXTERNAL_SCRIPT = r"""
+import json, shutil, socket, ssl, sys, threading, time
+from pathlib import Path
+sys.modules["coordination.pki"] = None          # corporate mode: no local PKI code at all
+from coordination.certsource import CommandSource, WatchSource
+from coordination.client import RemoteCoord
+from coordination.server import OIDCIntrospector, build_server
+from coordination.service import Coord
+
+T = Path(sys.argv[1])
+class Resp:
+    def __init__(self, b): self.b = b
+    def read(self): return self.b
+    def __enter__(self): return self
+    def __exit__(self, *a): pass
+keycloak = OIDCIntrospector("https://sso/introspect", "coord", "s", opener=lambda req, timeout: Resp(
+    json.dumps({"active": True, "sub": "agent", "roles": ["coord:*:contributor"]}).encode()))
+ca = str(T / "ca.crt")
+
+def serve(source):
+    live_c, live_k = T / "live.crt", T / "live.key"
+    httpd = build_server(Coord(T / f"{source.name}.db"), "127.0.0.1", 0, tls_cert=str(live_c),
+                         tls_key=str(live_k), oidc=keycloak, cert_source=source)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    return httpd, httpd.server_address[1]
+
+def served(port):
+    ctx = ssl.create_default_context(cafile=ca)
+    with ctx.wrap_socket(socket.create_connection(("127.0.0.1", port)), server_hostname="localhost") as t:
+        return ssl.DER_cert_to_PEM_cert(t.getpeercert(binary_form=True)).strip()
+
+pem = lambda n: (T / f"{n}.crt").read_text().strip()
+def put(n, key=None):   # what cert-manager / certmonger / step would do to the files
+    shutil.copy(T / f"{n}.crt", T / "live.crt"); shutil.copy(T / f"{key or n}.key", T / "live.key")
+
+# watch (cert-manager, certmonger/AD CS): reload when an external renewer rewrites the files
+put("srv1")
+httpd, port = serve(WatchSource(T / "live.crt", T / "live.key"))
+agent = RemoteCoord(f"https://localhost:{port}", ca=ca, token="sso-token")
+sid = agent.whoami(family="agent")["session_id"]
+assert served(port) == pem("srv1") and not httpd.refresh_server_cert()
+put("srv2", key="srv1")                                   # half-rotated: mismatched pair
+assert not httpd.refresh_server_cert() and served(port) == pem("srv1")   # never loaded
+put("srv2")
+assert httpd.refresh_server_cert() and served(port) == pem("srv2")
+agent.post(session=sid, body="still served after rotation")
+httpd.shutdown()
+
+# command (step-ca `step ca renew --force {cert} {key}`, AD CS script): run when due
+put("srv1")
+clock = [time.time()]
+renew = f"{sys.executable} {T / 'fake_step.py'} {{cert}} {{key}}"
+src = CommandSource(T / "live.crt", T / "live.key", renew, clock=lambda: clock[0])
+httpd, port = serve(src)
+assert not httpd.refresh_server_cert() and not (T / "ran").exists()     # 1-day cert, not due
+clock[0] += 17 * 3600                                                     # > 2/3 of 24 h
+assert httpd.refresh_server_cert() and served(port) == pem("srv3")
+bad = CommandSource(T / "live.crt", T / "live.key", f"{sys.executable} -c 'raise SystemExit(3)'",
+                    clock=lambda: clock[0] + 10**6)
+try:
+    bad.refresh(); raise AssertionError("failed command not reported")
+except RuntimeError as e:
+    assert "exited 3" in str(e)
+RemoteCoord(f"https://localhost:{port}", ca=ca, token="sso-token").presence()
+httpd.shutdown()
+print("ok")
+"""
+
+
+@check
+def corporate_oidc_with_external_cert_sources():
+    """Keycloak agents + server cert renewed by cert-manager-style files or a step-ca-style
+    command, with the local PKI code unimportable."""
+    if not shutil.which("openssl"):
+        print("  (skipped: no openssl)")
+        return
+    import subprocess
+    t = TMP / "corp"
+    d = pki.init(t / "fake-corp-ca")                     # stands in for the corporate CA
+    for n in ("srv1", "srv2", "srv3"):
+        pki.issue(d, n, server=True, days=1)             # short-lived like step-ca's 24 h default
+        for ext in ("crt", "key"):
+            shutil.copy(d / f"{n}.{ext}", t / f"{n}.{ext}")
+    shutil.copy(d / "ca.crt", t / "ca.crt")
+    (t / "fake_step.py").write_text(
+        "import shutil, sys\nfrom pathlib import Path\nT = Path(__file__).parent\n"
+        "shutil.copy(T / 'srv3.crt', sys.argv[1]); shutil.copy(T / 'srv3.key', sys.argv[2])\n"
+        "(T / 'ran').touch()\n")
+    env = {k: v for k, v in os.environ.items() if not k.startswith("COORD_")}
+    env.update(COORD_CONFIG=str(TMP / "no-such-config"), PYTHONPATH=str(Path(__file__).parent))
+    p = subprocess.run([sys.executable, "-c", _EXTERNAL_SCRIPT, str(t)], env=env,
+                       capture_output=True, text=True, cwd=TMP)
+    assert p.returncode == 0 and p.stdout.strip().endswith("ok"), p.stdout + p.stderr
+
 _NO_PKI_SCRIPT = r"""
 import json, sys, threading
 sys.modules["coordination.pki"] = None          # any `import coordination.pki` now fails
