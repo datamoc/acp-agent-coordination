@@ -9,6 +9,6 @@ def state_home() -> Path:
     checkout when running from one (pki/, coord2.db next to pyproject.toml), else
     $XDG_DATA_HOME/coord (~/.local/share/coord) for an installed package."""
     checkout = Path(__file__).resolve().parents[1]
-    if (checkout / "pyproject.toml").exists() and (checkout / "coord.py").exists():
+    if (checkout / "pyproject.toml").exists() and (checkout / "test_coord.py").exists():
         return checkout
     return Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share") / "coord"

@@ -1,493 +1,324 @@
-# acp-agent-coordination (prototype)
+# coord — coordination for concurrent agent sessions
 
-A small local [Agent Communication Protocol](https://agentcommunicationprotocol.dev/)
-server so concurrent Claude Code sessions on this machine can coordinate in
-near real time, on top of (not instead of) the per-repo file-based log
-(`agents_talking.md`) already used for this. **This is a throwaway
-prototype** — a dedicated project will replace it later. Nothing here
-should be treated as stable API.
+Several coding agents (Claude Code, Codex, your own TS/JS agents) working the
+same repositories need to know who is doing what. `coord` gives them claims
+on files and directories, direct questions that keep ownership, messages,
+tasks, consensus discussions, shared documents and project memory — and it is
+an **[A2A](https://a2a-protocol.org) v1.0 agent**, so any A2A client can use
+it. (This repo started on IBM's ACP, which is now part of A2A under the
+Linux Foundation; the ACP layer was retired in 0.3.0.)
 
-Built from the [ACP quickstart](https://agentcommunicationprotocol.dev/introduction/quickstart),
-with two additions for actual coordination, alongside the quickstart's own
-`echo` sanity-check agent: a `mailbox` (`post`/`inbox`) pair for messages,
-and a presence (`heartbeat`/`presence`) pair for who's live.
-
-## Setup
-
-Already done in this checkout (`uv init` + `uv add acp-sdk`), but for
-reference:
-
-```sh
-uv init --python '>=3.11' .
-uv add acp-sdk
-uv add "uvicorn<0.35"   # see Known issues below
-```
-
-## Running the server
-
-```sh
-uv run ACP_server.py
-```
-
-Runs on `http://localhost:1337` (not the quickstart's default 8000 —
-8000/8100 are commonly taken by other dev tools; change the `port=` in
-`ACP_server.py`'s `server.run(...)` call if needed). Default output shows
-state-changing calls (posts, claims, requests…) plus warnings/errors;
-pass `-v`/`--verbose` to add the read traffic and framework chatter.
-Verify it's up:
-
-```sh
-curl http://localhost:1337/agents
-```
-
-## Using it
-
-Fourteen agents are registered. Storage is one SQLite file (`coord.db`,
-WAL mode — see `store.py`); `mailbox.json`/`presence.json`/`locks.json`
-are legacy inputs for the one-time migration only. `store.py` has the
-only schema documentation; `test_store.py` (stdlib asserts),
-`smoke_test.py` (agent round-trips) and `test_tls.py` (real subprocess,
-real HTTPS handshake) cover it.
-
-- **`post`** — append a coordination message. Input text is
-  `"<session-name>: <message>"` (everything before the first colon is
-  the sender). Returns `"posted #N from <who>"`. The live mailbox keeps
-  the last 5000 messages; older ones roll into
-  `mailbox-archive-<date>.json`, and numbers stay stable. Empty
-  and over-4000-char messages are rejected, not stored.
-- **`inbox`** — read the mailbox. Empty input returns everything; `"5"`
-  returns only the last 5; `"#66"` returns messages since #66;
-  `"since 2026-09-21T12:00:00+00:00"` returns messages after a
-  timestamp; `"my-session"` (or `"from my-session"`) returns one
-  sender's messages (tokens combine, e.g. `"my-session #66"`). Lines
-  render as `#N [at] from: message`, with a `[resolved]` suffix once
-  closed via `resolve`.
-- **`resolve`** — mark a message done. Input is `"#N"` or `"#N: note"`
-  (e.g. `"#66: fixed in commit abc123"`). To claim work before it is
-  done, post a reply instead: `"my-session: re: #66 taking this"`.
-- **`request`** — open a task request for another agent. Input is
-  `"<session>: <task>"` (e.g. `"opencode-session: sync the client
-  please"`). Returns `"request #R opened"` — request numbers are a
-  separate sequence from mailbox `#N`.
-- **`requests`** — list task requests oldest-first. Empty input shows
-  open ones; `"all"` includes closed ones.
-- **`done`** — close a task request. Input is `"<session>: #R[:
-  <note>]"` (the session prefix records who did the work).
-- **`whoami`** — take a numbered session name. Input is a family
-  (`"muse"`, `"opencode"`, `"codex"`, ...), optionally followed by a
-  caller-chosen UUID (`"<family> <uuid>"`); returns `"you are
-  <family>-NN"`, the smallest free number, already heartbeated so two
-  starters cannot draw the same one — with the UUID echoed back
-  (`"you are <family>-NN [<uuid>]"`) when one was given, so the caller
-  can verify the reply is theirs. The CLI attaches a UUID automatically
-  and refuses replies that don't echo it. The number stays yours while
-  you heartbeat inside the presence TTL. Use the returned name for every
-  other agent — several sessions of the same family are routinely live
-  at once, and bare family names collide.
-- **`heartbeat`** — mark a session as live. Input text is
-  `"<session-name>[: <status>]"`. The roster survives restarts; stale
-  entries expire by TTL.
-- **`presence`** — list live sessions. Empty input uses the default
-  30 min window; a plain integer (e.g. `"3600"`) uses that many seconds;
-  `"all"` lists every known session including stale ones. Entries older
-  than 7 days are purged on each heartbeat.
-- **`claim`** — claim a file or area so parallel sessions don't collide.
-  Input is `"<session>: <scope>[: <note>]"` (e.g. `"my-session:
-  src/combat.ts: reworking rolls"`). Holds for 2h; re-claim to extend.
-  A live claim blocks other sessions; an expired one can be taken over.
-  Scopes containing colons (Windows paths) should use the pipe form
-  `"<session>: <scope> | <note>"`; a claimed scope also round-trips
-  bare, matched against live claims.
-- **`release`** — release a claim. Input is `"<session>: <scope>"`.
-  Only the holder can release a live claim; anyone can release an
-  expired one.
-- **`locks`** — list claims. Empty input shows live claims; `"all"`
-  includes expired ones.
-- **`status`** — triage line: uptime, live/archived mailbox size, live
-  sessions, active claims.
-- **`echo`** — the quickstart's own sanity check, unrelated to
-  coordination.
-
-## Session protocol
-
-The convention parallel sessions follow (so nobody has to discover it
-from chat history):
-
-0. On start: `whoami "<family>"`, then use the returned
-   `<family>-NN` name for everything below — including the next step.
-1. On start: `heartbeat "<session>: <what you're working on>"`.
-2. Before broad work: `inbox` to catch up, `locks` to check claims,
-   `claim` your files/areas.
-3. Report handoffs by posting `"you: re: #N ..."`, and close them with
-   `resolve "#N: <note>"` once done. To ask another agent for work,
-   open a `request` instead of a plain post so it lands in the queue.
-4. On finish: `release` your claims and post a closing summary.
-5. With nothing else to do, `poll` about every five minutes (the CLI's
-   `poll [session]` command checks new mail, open requests and claims
-   in one go) — the server has no push channel, so polling is the only
-   way requests and messages get picked up.
-6. `agents_talking.md` (per-repo file log) stays the durable record;
-   this server is the live channel.
-
-### From the CLI (`ACP_client.py`)
-
-```sh
-uv run ACP_client.py whoami "my-family-name"
-uv run ACP_client.py post "my-session-name: starting on the key-management item"
-uv run ACP_client.py inbox
-uv run ACP_client.py inbox 5
-uv run ACP_client.py inbox "#66"
-uv run ACP_client.py inbox "my-session-name #66"
-uv run ACP_client.py inbox "since 2026-09-21T12:00:00+00:00"
-uv run ACP_client.py request "my-session-name: sync the client please"
-uv run ACP_client.py requests
-uv run ACP_client.py done "my-session-name: #1: synced"
-uv run ACP_client.py poll my-session-name
-uv run ACP_client.py claim "my-session-name: src/combat.ts: reworking rolls"
-uv run ACP_client.py locks
-uv run ACP_client.py release "my-session-name: src/combat.ts"
-uv run ACP_client.py status
-uv run ACP_client.py post "my-session-name: re: #66 taking this"
-uv run ACP_client.py resolve "#66: fixed in commit abc123"
-uv run ACP_client.py heartbeat "my-session-name: working on item X"
-uv run ACP_client.py presence
-uv run ACP_client.py presence all
-```
-
-### Claude Code / Codex plugin (`plugins/acp`)
-
-This repo is also a plugin marketplace for both tools. The `acp` plugin
-ships one skill (`acp`, the session protocol) plus `/acp:join`,
-`/acp:poll`, `/acp:post`, `/acp:claim` and `/acp:release` commands. Its
-`scripts/acp.py` wrapper runs this checkout's `ACP_client.py` from any
-working directory (set `$ACP_HOME` if the checkout is not at
-`~/dev/acp-agent-coordination`).
-
-```sh
-claude plugin marketplace add <path-to-this-checkout>
-claude plugin install acp@acp-agent-coordination
-codex plugin marketplace add <path-to-this-checkout>
-codex plugin add acp@acp-agent-coordination
-```
-
-Claude Code loads this directory marketplace in place: edits to
-`plugins/acp` apply at the next session start (or `/reload-plugins` in an
-open session), no reinstall. Codex installs a cached copy: reinstall there,
-or bump the version in both `plugin.json` files.
-Command bodies must not use `$ARGUMENTS`, because Codex skips such commands when it
-converts them to skills (Claude Code still appends the arguments).
-
-### Raw HTTP (works from any shell, no Python env needed)
-
-```sh
-curl -s -X POST http://localhost:1337/runs -H "Content-Type: application/json" -d '{
-  "agent_name": "post",
-  "input": [{"role": "user", "parts": [{"content_type": "text/plain", "content": "my-session-name: hello"}]}],
-  "mode": "sync"
-}'
-
-curl -s -X POST http://localhost:1337/runs -H "Content-Type: application/json" -d '{
-  "agent_name": "inbox",
-  "input": [{"role": "user", "parts": [{"content_type": "text/plain", "content": ""}]}],
-  "mode": "sync"
-}'
-```
-
-## HTTPS (optional)
-
-Off by default — plain HTTP, unchanged. To turn it on:
-
-```sh
-openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
-  -keyout acp-key.pem -out acp-cert.pem -days 825 -nodes \
-  -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
-
-ACP_TLS_CERT=acp-cert.pem ACP_TLS_KEY=acp-key.pem uv run ACP_server.py
-```
-
-Now `https://localhost:1337`. The cert is self-signed (there's no CA to
-ask for a loopback-only server), so clients need to be told to trust it
-rather than verifying against the system trust store:
-
-```sh
-ACP_BASE_URL=https://localhost:1337 ACP_TLS_CA=acp-cert.pem \
-  uv run ACP_client.py status
-```
-
-(`ACP_TLS_INSECURE=1` skips verification entirely instead of pinning the
-cert — fine for a quick loopback check, not a substitute for `ACP_TLS_CA`.)
-
-**Key exchange:** this project adds no cryptography of its own — it
-only wires `ssl_certfile`/`ssl_keyfile` into the server (`ACP_server.py`
-`main()`) and `verify=` into the client (`ACP_client.py`). All of the
-actual TLS behavior comes from OpenSSL. On OpenSSL 3.5+ (what `uv sync`
-installs via the pinned Python here), the library's own default TLS 1.3
-group preference already puts the hybrid post-quantum group
-**`X25519MLKEM768`** (ML-KEM-768 combined with classical X25519) first,
-so a modern peer gets it automatically; an older peer that doesn't
-support it falls back to classical ECDHE (`X25519`/`P-256`) with no
-error — "possible", not mandatory. The negotiated TLS 1.3 cipher is
-`TLS_AES_256_GCM_SHA384` either way. Confirm what a given connection
-actually negotiated with:
-
-```sh
-openssl s_client -connect localhost:1337 -tls1_3 2>&1 | grep -i "Negotiated TLS1.3 group"
-```
-
-On OpenSSL older than 3.5, `X25519MLKEM768` doesn't exist yet — TLS
-still works, just without the post-quantum hybrid group.
-
-## Coordination v2 (`coord`)
-
-A second, self-contained coordination layer (`coordination/` + `coord.py`,
-stdlib only, its own `coord2.db`) built for real multi-agent work. It runs
-next to the ACP server; nothing above changes.
-
-`coord`, `coord-server` and `coord-admin` are on PATH once the project is
-synced (`uv sync`, then `ln -s "$PWD"/.venv/bin/coord* ~/.local/bin/`);
-agents use `coord`, never `coord.py`.
-
-**Identity.** `coord whoami claude` gives you `claude-NN`, a session UUID
-and a generation. Every command authenticates with the UUID
-(`COORD_SESSION` env, else `.coord-session` at the repo root). A recycled
-name gets a new UUID and a higher generation, so it can never touch the
-old session's claims. A dead or ended session cannot mutate anything, and
-its claims lapse with it.
-
-**Correctness.** Every mutation runs under `BEGIN IMMEDIATE`. Mutations
-accept a `client_id` idempotency key (the CLI sends one automatically), so
-a retried post/claim is replayed, not duplicated. `poll` and
-`inbox --after N` use message ids as cursors, never timestamps. Everything
-carries a `project_id` (auto-detected from `git remote origin`, e.g.
-`github.com/org/repo`, override with `COORD_PROJECT`); claims, messages
-and tasks are isolated per project; `coord projects` gives the cross-project view.
-
-**Claims.** Paths are repo-relative and normalized (`\` -> `/`, `..` and
-absolute paths rejected, case-folded on Windows). `coord claim src/auth/`
-(or `--tree`) claims a directory tree; a file claims `exact`. Parent/child
-scopes conflict; siblings don't. Claims get ids (`C12`) and a monotonic
-**fence**: pass it to `coord fence-check C12 <fence>` before a write to
-refuse stale leases. `renew C12`, `release C12`, `release --all`.
-
-**Asking for help without losing ownership.**
-`coord ask --claim C12 --to codex-01 "second opinion?"` sends a direct
-question tied to the claim and grants `advisor` (or `--role reviewer|coeditor|delegate`);
-the claim stays yours. Advisors/reviewers get no write access
-(`check` still flags them); only an explicit `delegate` may claim inside your scope.
-
-**Messages.** Kinds `info question advice proposal decision review warning done`;
-`--to <session>` for direct messages (visible only to both ends);
-`reply N`, `thread N`, `resolve N` (records who resolved). Soft limit 300
-chars (warning), hard limit 10000 - put long analyses in a document.
-`inbox` shows the last 20 by default; every command takes `--json`.
-
-**Consensus.** `discuss "topic"` -> `D3`; `propose D3 "..."` -> `P7`;
-`react P7 support|object|abstain|need-more-info [comment]`; `discussion D3`
-shows tallies; the opener closes it with `decide D3 "..." --proposal P7
-[--no-consensus]`, which records who/when/consensus and writes a final
-`decision` document linked from the discussion thread.
-
-**Documents.** `doc create --kind note|diagnosis|plan|proposal|decision|review|adr`,
-`doc show DOC4 [--revision N]`, `doc edit DOC4 --base-revision N --file x.md`
-(optimistic concurrency: a stale base is refused with the current content so
-you merge and retry), `doc history DOC4`.
-
-**Git.** `coord install-hooks` adds a pre-commit hook (`coord check` - fails
-if a staged file is claimed by another session) and a post-commit hook
-(`coord post-commit` - publishes `commit.created @sha` and releases your exact
-claims made with `--release-on-commit`). Hooks do nothing without a session.
-
-**Shared context and routing.** `memory add overview|convention|architecture|decision|pitfall|glossary "title" --content ...`
-(versioned, attributed, `--source`), `memory show`, `memory search`,
-`memory edit M2 --base-revision N`. `coord context` is the compact start-of-session
-view (overview, memory, my claims, tasks, discussions, unread count).
-`task create/accept/done`, `tasks --status open`. `coord profile --category reasoning
---capability debugging` declares a (transient) profile; `coord suggest
---prefer-category reasoning --capability debugging` ranks live agents - a hint, you choose.
-
-**Network (opt-in): three roles, three files, three commands.**
-
-| Role | File | Command | Holds |
+| Part | Where | Language | Command |
 |---|---|---|---|
-| Management | `coordination/pki.py` | `coord-admin` | the CA (`pki/`, CA key never leaves it) |
-| Server | `coordination/server.py` | `coord-server` | the service; asks management |
-| Client | `coordination/client.py` + `coord.py` | `coord` | only its identity bundle |
+| Server (service, SQLite) | `coordination/server.py`, `a2a.py`; `service.py` = `core.py` + one module per topic (`sessions`, `messages`, `claims`, `consensus`, `documents` + `textpatch`, `tasks`, `memory`, `routing`) | Python, stdlib only | `coord-server` |
+| Certificate management (local CA) | `coordination/pki.py` | Python + openssl | `coord-admin` |
+| Server certificate sources | `coordination/certsource.py` | Python | `coord-server --cert-source` |
+| Local mode bridge | `coordination/local.py` | Python | `coord-local` |
+| **Client** (CLI + library) | `clients/ts/` | **TypeScript**, Node >= 20, no runtime deps | `coord` |
+| **Agent plugin** (Claude Code / Codex) | `plugins/coord/` | JS (bundled client) | `/coord:join` ... |
+| Wire contract | `schema/ops.json`, `schema/project-vectors.json` | generated | `uv run tools/gen_schema.py` |
 
-Local mode (no `COORD_SERVER`, SQLite only), plain loopback HTTP and OIDC
-never load the PKI code: `pki.py` is imported only by `coord-server --pki`
-and `coord-admin`, and the client never imports it (it only swaps in a
-renewed cert file when a server sends one).
+The contract is generated from the Python service; the TS client and its tests
+are checked against it, so the two sides cannot drift.
+
+## Quick start (one machine, mTLS)
+
+```sh
+cd ~/dev/acp-agent-coordination
+uv sync                                          # server + admin (no runtime dependencies)
+(cd clients/ts && npm ci && npm run build)       # the TS client
+ln -sf "$PWD"/.venv/bin/coord-{server,admin,local} ~/.local/bin/
+ln -sf "$PWD"/clients/ts/dist/cli.js ~/.local/bin/coord
+
+coord-admin init && coord-admin server-cert      # local CA + server certificate (47 days, self-renewing)
+coord-admin enroll <client-name>                 # an agent identity -> ~/.config/coord/<client-name>/ (first = default)
+cp contrib/systemd/coord-server.service ~/.config/systemd/user/
+systemctl --user daemon-reload && systemctl --user enable --now coord-server   # WSL: systemd=true in /etc/wsl.conf
+
+claude plugin marketplace add ~/dev/acp-agent-coordination
+claude plugin install coord@acp-agent-coordination
+```
+
+Agents then run `/coord:join` (or `coord whoami <family>`), from any
+directory, after reboots, with no exports. `coord --help` lists every command.
+
+## For agents
+
+**Plugin** (`plugins/coord`): the `coord` skill (the session protocol) plus
+`/coord:join`, `/coord:poll`, `/coord:post`, `/coord:claim`,
+`/coord:release`, `/coord:status`. It ships the compiled client, so it needs
+only Node. Claude Code loads this directory marketplace in place: edits apply
+at the next session (or `/reload-plugins`). Codex installs a copy
+(`codex plugin marketplace add <checkout>`, `codex plugin add coord@acp-agent-coordination`).
+Command bodies must not use `$ARGUMENTS` (Codex skips such commands).
+
+**CLI** — the session protocol:
+
+```sh
+coord --json whoami claude                    # -> name claude-NN + session_id; keep both
+export COORD_SESSION=<session_id>             # or prefix every command with it
+coord context                                 # overview, memory, my claims, tasks, discussions, unread
+coord locks && coord claim src/auth/ --note "rework login"   # dir/ = whole tree; C12
+coord ask --claim C12 --to codex-01 "second opinion on the token flow?"
+coord post --kind done "login rework merged (!45)"
+coord poll                                    # idle: about every 5 minutes
+coord release --all && coord end
+```
+
+**Library** — for agents written in TS/JS (`clients/ts`, typed from the contract):
+
+```ts
+import { CoordClient } from "coord-client";
+const c = CoordClient.fromEnv();              // same config as the CLI (~/.config/coord/env, COORD_*)
+const me = await c.call("whoami", { family: "my-agent", project: "gitlab.dci.local/team/repo" });
+await c.call("claim", { session: me.session_id, scope: "src/auth/", tree: true });
+const task = await c.a2a("GetTask", { id: "T3" });   // any A2A method
+```
+
+### Reference
+
+**Identity.** `whoami <family>` gives `<family>-NN`, a session UUID and a
+generation. Every command authenticates with the UUID (`COORD_SESSION`, else
+`.coord-session` at the repo root — shared by the checkout, so a second
+`whoami` never overwrites a live session's file). A recycled name gets a new
+UUID and a higher generation, so it can never touch the old session's claims.
+A dead or ended session cannot mutate anything; its claims lapse with it.
+
+**Correctness.** Every mutation runs under `BEGIN IMMEDIATE`; mutations take a
+`client_id` idempotency key (the CLI sends one), so a retried post/claim is
+replayed, not duplicated. `poll` and `inbox --after N` use message ids as
+cursors. Everything carries a `project_id` from `git remote origin`
+(`github.com/org/repo`, `gitlab.dci.local/group/sub/repo`; SSH with a port and
+HTTPS give the same id; override with `COORD_PROJECT`); `coord projects` is
+the cross-project view.
+
+**Claims.** Repo-relative, normalized paths (`\` -> `/`, `..`/absolute
+refused, case-folded on Windows). `claim src/auth/` (or `--tree`) claims a
+tree; a file claims `exact`. Parent/child scopes conflict; siblings don't.
+Claims get ids (`C12`) and a monotonic **fence** (`fence-check C12 <fence>`
+refuses stale leases). `renew`, `release C12`, `release --all`.
+
+**Asking without losing ownership.** `ask --claim C12 --to codex-01 "..."`
+sends a direct question tied to the claim and grants `advisor` (or `--role
+reviewer|coeditor|delegate`); advisors get no write access, only a
+`delegate` may claim inside your scope. **Roles are mutual when they carry
+duties**: `advisor`/`reviewer` apply at once (advice only), `coeditor` and
+`delegate` are *offers* - the grantee gets a direct message and answers
+`role accept C12 delegate` or `role decline C12 delegate "why"`; they take
+effect only once accepted (`roles C12` shows `offered`/`granted`).
+
+**Messages.** Kinds `info question advice proposal decision review warning
+done`; `--to <session>` is private to both ends; `reply N`, `thread N`,
+`resolve N`. Soft limit 300 chars, hard 10000 — long content goes in a
+document. Every command takes `--json`.
+
+**Tasks — assignment is an offer.** `task create "..." [--assign <session>]`:
+unassigned = `open` (anyone may `task accept`); assigned = `offered` - only the
+assignee can `task accept T3`, or `task decline T3 "why"` (back to `open`,
+unassigned, reason kept). Creator and assignee get direct messages at each
+step; offers show in the assignee's `poll` and `context`. `task done T3
+"note"`, `task cancel T3` (creator or assignee), `task show T3`, `tasks
+--status open|offered|accepted|done|cancelled`; `task notify T3 --url
+https://...` registers an A2A push webhook (below).
+
+**Consensus — computed, never declared.** `discuss "topic" [--with rev-01,ops-01]
+[--rule unanimous|majority|no-objection] [--quorum N] [--deadline 48h|<ISO date>]`
+-> `D3` (invited participants get a direct message); `propose D3 "..."` -> `P7`;
+`react P7 support|object|abstain|need-more-info`; `discussion D3` shows, per
+proposal, each participant's stance and whether the rule is met; `decide D3
+"..." --proposal P7` closes it and writes a `decision` document with the
+per-participant stances; every participant is told the outcome.
+
+- **Objections block a silent decision**: without consensus `decide` is
+  refused (`no_consensus`, saying who objected or stayed silent). The opener
+  may still decide, explicitly: `--no-consensus "reason"` - recorded with the
+  objections.
+- **Joint decision**: once consensus is reached, any participant may close
+  the discussion, not only the opener; overriding stays the opener's.
+- **Deadline**: after it, a participant's silence counts as agreement
+  (marked *silent past deadline*); before it, silence is "no stance yet".
+
+- **Participants**: the opener plus `--with` (live sessions). Without
+  `--with` the discussion is open: the opener plus whoever reacts. Only
+  participants count; others' reactions are shown in the tally.
+- **Stances**: a participant's reaction; otherwise the proposal's author
+  supports it, and so does the decider for the proposal they decide on (both
+  marked *implied*).
+- **Rules** (default `unanimous`): `unanimous` = everyone supports
+  (abstentions allowed; an objection, `need-more-info` or silence fails it);
+  `majority` = more than half of the participants support; `no-objection` =
+  nobody objects or asks for more info (silence is consent).
+- **Quorum** (default 2): at least that many participants took a stance, so
+  consensus always involves someone besides the decider.
+- `decide` records the **computed** result; `--no-consensus` can only lower
+  it. Discussions from 0.2.x get `unanimous`/2 and no deadline when the
+  database is opened; their old decisions keep the value recorded then.
+  Grants made before 0.3 stay in effect.
+
+**Documents & memory.** `doc create --kind note|diagnosis|plan|proposal|decision|review|adr`,
+`doc show|history`, and two ways to edit:
+
+- `doc edit DOC4 --base-revision 3 --file new.md` replaces the whole content;
+  a stale base is refused with the current content (merge and retry).
+- `doc patch DOC4 --base-revision 3 --from new.md` (the client diffs the file
+  against revision 3 and sends only the diff), or `--file change.diff` / stdin
+  with any unified diff (`diff -u`, `git diff`). If someone edited since
+  revision 3, the diff is re-applied to the latest revision, each hunk found by
+  its context: **non-overlapping edits merge** (`merged: true`, noted in the
+  history); overlapping ones get `revision_conflict` naming the hunks, with the
+  current content. A diff that doesn't match revision 3 itself is
+  `patch_invalid`; exact matching only, never fuzz. Line endings (CRLF) and a
+  missing final newline are preserved.
+
+`memory add overview|convention|architecture|decision|pitfall|glossary`,
+`memory show|search|edit`. `profile` / `suggest` rank live agents (a hint).
+
+**Git.** `coord install-hooks`: pre-commit `coord check` (fails if a staged
+file is claimed by another session) and post-commit `coord post-commit`
+(publishes the commit, releases `--release-on-commit` claims). Hooks do
+nothing without a session.
+
+## A2A
+
+The server is an A2A v1.0 agent (JSON-RPC binding), verified with the
+official `@a2a-js/sdk` in `clients/ts/test/a2a-sdk.test.mjs`:
+
+- **Agent Card** at `/.well-known/agent-card.json` (`coord agent-card`):
+  endpoint `/a2a`, skills `coord-ops` and `delegate`, and the security scheme
+  in use (`mtlsSecurityScheme` or `openIdConnectSecurityScheme`).
+- **Every coord operation**: `SendMessage` with a data part
+  `{"op": "<name>", "args": {...}}` (names and params: `schema/ops.json`); the
+  reply is a Message whose data part is the result. The TS client uses this
+  (falling back to `/call` on a pre-0.3 server; `COORD_PROTOCOL=call` forces it).
+- **Delegation = A2A tasks**: `SendMessage` with text parts and metadata
+  `{"coord": {"session": "<id>", "assign": "<name>"}}` creates a coord task and
+  returns an A2A Task. `GetTask`, `ListTasks` (`contextId` = project),
+  `CancelTask` (metadata `coord.session`). States: open = `SUBMITTED`,
+  accepted = `WORKING`, done = `COMPLETED`, cancelled = `CANCELED`.
+- **Push notifications instead of polling**:
+  `Create/Get/List/DeleteTaskPushNotificationConfig`; on accept / done /
+  cancel the server POSTs `{"statusUpdate": ...}` (`application/a2a+json`,
+  `X-A2A-Notification-Token` or `Authorization: <scheme> <credentials>`).
+  Webhooks may only target loopback or `--push-allow` hosts
+  (`--push-allow .dci.local`): a registered URL makes the server send
+  requests, so arbitrary hosts are refused.
+- Not offered: streaming (`SendStreamingMessage`, `SubscribeToTask` ->
+  `-32004`), extended card. Coord refusals are JSON-RPC errors `-32000` with
+  `data.error` = the coord code (`conflict`, `forbidden`, ...).
+- A renewed mTLS client certificate comes back in the `Coord-Certificate`
+  response header (base64 PEM).
+
+## Security and identities
 
 `coord-server` listens on `127.0.0.1:1338`. A non-loopback `--listen` is
-refused unless TLS **and** an identity method are configured:
+refused unless TLS **and** an identity method are configured. Without one
+(plain loopback), anyone on the machine can read and write: keep it on
+loopback. In both authenticated modes a session is bound to the identity
+that opened it; another identity cannot drive it.
 
-- mTLS - the administrator, once: `coord-admin init`,
-  `coord-admin server-cert`, then per client `coord-admin enroll <client-name>`.
-  Enroll issues a 30-day client cert (or reuses a valid one) and writes a
-  self-contained bundle to `~/.config/coord/<name>/` (`ca.crt`,
-  `agent.crt`, `agent.key` 0600, `env`), or to `--out DIR` to hand to
-  another machine. The first identity (or `--default`) becomes
-  `~/.config/coord/env`; `COORD_IDENTITY=<name>` selects another,
-  `COORD_CONFIG=<file>` any file; shell variables still win. Serve with
-  `coord-server --pki pki`: on every request the server asks management
-  whether the presented cert is still valid, so `coord-admin revoke <name>`
-  (all of that client's certs) applies to the next request, no restart.
-  Once a client cert is 15 days old (`--renew-after-days`), the server
-  asks management for a renewal and returns it with the response; the
-  client checks it matches its key and replaces `agent.crt` in place. The
-  renewal re-certifies the key the client already holds: no private key
-  is ever sent, and the client needs no openssl. A client offline for
-  more than 30 days has to be enrolled again. The server renews its own
-  certificate the same way: at start and every hour (`--check-hours`) it
-  asks management when due and loads the new one live, no restart. No
-  certificate lives longer than 47 days (server 47, clients 30); an older,
-  longer one is renewed at the first check or request.
-  A renewed certificate retires the one it replaces: once the server sees
-  the new one in use, management revokes the older ones for that key
-  (never before, so a client that failed to save its renewal is not
-  locked out); the server's old certificate is revoked right after the
-  swap. `coord-admin tidy` (dry run, `--apply` to act) cleans up
-  certificates superseded before this existed.
-  **Python 3.13+ clients** verify strictly and refuse a CA certificate
-  without `keyUsage`, which CAs made before 0.2.1 lack. `coord-admin init`
-  upgrades one in place: same key and name, so every certificate it issued
-  stays valid; the old one is kept as `pki/ca.crt.pre-keyusage` and this
-  machine's bundles get the new `ca.crt`. Then `coord-admin server-cert`
-  (it revokes the server certificate it replaces) and
-  `systemctl --user restart coord-server`; bundles on other machines need
-  the new `ca.crt` copied in.
-  **Windows**: works without Developer Mode (the default identity is a
-  `COORD_IDENTITY=<name>` pointer file when symlinks aren't allowed);
-  `--renew-command` accepts `C:\...` paths; openssl from Git for Windows. `coord-admin list` shows
-  every cert; `--crl` (TLS-level CRL) is still accepted.
-- OIDC (Keycloak): `--oidc-introspect-url .../protocol/openid-connect/token/introspect
-  --oidc-client-id coord` (secret in `COORD_OIDC_SECRET`); clients get
-  and refresh their own tokens (see Corporate deployment). Per-project roles come from token roles/groups named
-  `coord:<project>:viewer|contributor|admin` (`coord:*:...` for all projects).
+### mTLS with the local CA (`coord-admin`)
 
-In both modes the session is bound to the authenticated principal at
-`whoami`; another identity cannot drive it. Agents only ever run `coord`
-(any directory, no exports, survives reboots).
+- **Enroll**: `coord-admin enroll <client-name>` (the agent identity — not
+  the server; `coord-admin server-cert [server-name]` is the server's) issues
+  a 30-day client certificate and writes a self-contained bundle to
+  `~/.config/coord/<client-name>/` (`ca.crt`, `agent.crt`, `agent.key` 0600,
+  `env`), or `--out DIR` for another machine. The first identity (or
+  `--default`) becomes `~/.config/coord/env` (a symlink, or a
+  `COORD_IDENTITY=<name>` pointer where symlinks need privileges);
+  `COORD_IDENTITY` / `COORD_CONFIG` select others; shell variables win.
+- **Serve**: `coord-server --pki pki`. Every request asks management whether
+  the certificate is still valid: `coord-admin revoke <client-name>` (and all
+  its renewals) applies to the next request, no restart.
+- **Renewal, 47-day cap**: once a client certificate is 15 days old
+  (`--renew-after-days`), the server gets a renewal of the **same public
+  key** from management and returns it; the client checks it matches its key
+  and replaces `agent.crt`. No private key ever moves. The server renews its
+  own certificate at start and every hour (`--check-seconds`) and loads it
+  live. No certificate lives longer than 47 days (server 47, clients 30);
+  longer ones are renewed at first use. A renewal retires the certificate it
+  replaces once the new one is seen in use; `coord-admin tidy [--apply]`
+  cleans up older leftovers; `coord-admin list` shows everything.
+- **CA upgrade (from <= 0.2.0)**: Python 3.13+ and strict clients refuse a CA
+  without `keyUsage`. `coord-admin init` re-signs it in place (same key and
+  name, old kept as `pki/ca.crt.pre-keyusage`, local bundles refreshed), then
+  `coord-admin server-cert` and restart; copy the new `ca.crt` to other
+  machines' bundles.
+- **Windows**: works without Developer Mode; openssl from Git for Windows.
 
-**Corporate deployment: Keycloak agents, enterprise CA for the server.**
-Agents authenticate with Keycloak (OIDC above) and hold no certificate;
-no PKI code is loaded on either side. The server's own TLS certificate
-comes from the corporate CA and is renewed by a `--cert-source`
-(`coordination/certsource.py`), then loaded live, with no restart. A new
-certificate that doesn't load with its key (half-written or mismatched) is
-never used: the server keeps its current one and retries.
+### Keycloak (OIDC)
+
+Server: `--oidc-introspect-url .../protocol/openid-connect/token/introspect
+--oidc-client-id coord` (secret in `COORD_OIDC_SECRET`; `--oidc-cache-seconds`,
+default 60, is how long a revoked token may still work). Per-project roles
+from token roles/groups `coord:<project>:viewer|contributor|admin`
+(`coord:*:...` for all). Clients get and refresh their own tokens:
+
+```sh
+# ~/.config/coord/env
+COORD_SERVER=https://coord.example.com:1338
+COORD_OIDC_ISSUER=https://sso.example.com/realms/corp      # endpoints discovered
+COORD_OIDC_CLIENT_ID=coord-agent
+COORD_OIDC_CLIENT_SECRET_FILE=~/.config/coord/agent.secret  # service account; or omit and run `coord login` once
+```
+
+Tokens are cached (0600, `~/.config/coord/oidc/`, shared by parallel agents
+under a lock), refreshed before expiry, rotated refresh tokens kept; a 401
+triggers one fresh token and retry; an ended SSO session says `run coord
+login`. Keycloak client: "OAuth 2.0 Device Authorization Grant" for `coord
+login`, "Service accounts" for client credentials; `COORD_OIDC_SCOPE="openid
+offline_access"` for agents that outlive the SSO session. A fixed
+`COORD_TOKEN` still wins. Local and OIDC modes never load the PKI code.
+
+### Corporate CA for the server (`--cert-source`)
 
 | `--cert-source` | Who renews | Typical CA |
 |---|---|---|
-| `watch` | an external renewer rewrites the files; the server reloads when their content changes (checked every 60 s) | cert-manager (mounted Secret), certmonger (e.g. AD CS autoenrollment), `step ca renew --daemon` |
-| `command` | the server runs `--renew-command` when due (`{cert}`, `{key}` are substituted), then reloads | step-ca, a certreq/PowerShell script for AD CS |
-| `local` | our management (`--pki`) | the local mTLS setup (default with `--pki`) |
+| `watch` | an external renewer rewrites the files; reload on content change (60 s) | cert-manager (mounted Secret), certmonger (AD CS), `step ca renew --daemon` |
+| `command` | the server runs `--renew-command` when due (`{cert}`, `{key}`), then reloads | step-ca (`step ca renew --force {cert} {key}`), an AD CS script |
+| `local` | our management (`--pki`) | the local mTLS setup |
 
-"Due" means 15 days old (`--renew-after-days`) or two-thirds of the lifetime,
-whichever comes first, so short-lived certs (step-ca issues 24 h by default)
-are renewed in time. Examples, not tested here against the real services:
+"Due" = 15 days or two-thirds of the lifetime, whichever comes first (step-ca
+defaults to 24 h certificates). A pair that does not load is never swapped
+in. These integrations are tested with simulated renewers, not against the
+real services.
 
-```sh
-# cert-manager: a Certificate (duration: 1128h = 47 d) mounted at /tls
-coord-server --listen 0.0.0.0 --tls-cert /tls/tls.crt --tls-key /tls/tls.key \
-  --cert-source watch --oidc-introspect-url https://sso.example.com/realms/corp/protocol/openid-connect/token/introspect \
-  --oidc-client-id coord          # secret in COORD_OIDC_SECRET
+## Local mode
 
-# step-ca: bootstrap once with `step ca certificate coord.example.com tls.crt tls.key`
-coord-server ... --tls-cert tls.crt --tls-key tls.key \
-  --cert-source command --renew-command 'step ca renew --force {cert} {key}'
+Without `COORD_SERVER`, `coord` runs each operation on the repo's
+`coord2.db` through `coord-local` (the Python package; `COORD_DB`,
+`COORD_LOCAL` override) — no server, no port, no auth. A2A features
+(push notifications, `a2a()`) need a server.
 
-# AD CS: let certmonger (with an AD CS helper such as cepces) track the files -> watch,
-# or run your own enrollment script -> command
-coord-server ... --cert-source command --renew-command '/usr/local/bin/adcs-renew {cert} {key}'
-```
+## Migrating from 0.2.x
 
-Clients verify the server against the corporate CA (`COORD_CA`, or the
-system trust store when unset). They get and refresh their own Keycloak
-tokens (`coordination/oidc_client.py`), so nothing expires mid-session:
+| 0.2.x | 0.3 |
+|---|---|
+| `ACP_server.py` / `ACP_client.py` (mailbox on :1337) | removed — `coord` does it all (the old `coord.db` stays on disk, unused) |
+| `post` / `inbox` / `resolve` | `coord post` / `coord inbox` / `coord resolve` |
+| `request` / `requests` / `done` | `coord task create --assign` (an offer: the assignee accepts or declines) / `coord tasks` / `coord task done` |
+| `whoami` / `heartbeat` / `presence` / `claim` / `release` / `locks` / `status` / `poll` | same names under `coord` |
+| plugin `acp` (`/acp:join` ...) | plugin `coord` (`/coord:join` ...): `claude plugin uninstall acp@acp-agent-coordination && claude plugin install coord@acp-agent-coordination` |
+| Python `coord` (`coord.py`) | TS `coord` (`clients/ts`) — same commands, output and config files |
+| `acp-server.service` | removed: `systemctl --user disable --now acp-server` |
+| git hooks from `coord install-hooks` | run `coord install-hooks` again (they called `coord.py`) |
 
-```sh
-# ~/.config/coord/env on the agent's machine
-COORD_SERVER=https://coord.example.com:1338
-COORD_OIDC_ISSUER=https://sso.example.com/realms/corp   # endpoints are discovered
-COORD_OIDC_CLIENT_ID=coord-agent
-# service account (client credentials) - no human involved:
-COORD_OIDC_CLIENT_SECRET_FILE=~/.config/coord/agent.secret
-# or leave the secret out and have a person run `coord login` once (device
-# login: open the URL, sign in with SSO); `coord logout` forgets it
-```
-
-Access tokens are cached and refreshed before they expire. With device
-login, the refresh token is kept, and rotated if Keycloak rotates it, in a
-0600 file under `~/.config/coord/oidc/`. Parallel agents update it under a
-file lock. If the server refuses a token (revoked, clock skew), the client
-gets a new one and retries once. When the SSO session ends, commands say
-`run coord login`. Keycloak side: the client needs "OAuth 2.0 Device
-Authorization Grant" enabled for `coord login`, or "Service accounts" for
-client credentials. Add `COORD_OIDC_SCOPE="openid offline_access"` for
-agents that must outlive the SSO session. A fixed `COORD_TOKEN` still
-works and wins when set.
-
-**Servers as services.** `contrib/systemd/` has user units
-(`coord-server --pki pki`, `acp-server`); install with
-`cp contrib/systemd/*.service ~/.config/systemd/user/ && systemctl --user daemon-reload && systemctl --user enable --now coord-server acp-server`
-(WSL needs `systemd=true` under `[boot]` in `/etc/wsl.conf`).
-
-Tests: `uv run test_coord.py` (temp dirs, includes an 8-process claim race,
-an HTTP round-trip, OIDC role checks and a real mTLS handshake with a revoked cert).
+Identity bundles, `~/.config/coord/env`, `coord login` state and the server
+database are unchanged.
 
 ## GitLab (internal)
 
-- **CI**: `.gitlab-ci.yml` runs the same suites as the GitHub workflow on a
-  Linux runner (`uv` image, `openssl` installed so the mTLS/TLS tests run).
-  CI variables for an internal instance: `UV_IMAGE` (mirror of the uv
-  image), `CORPORATE_CA_PEM` (File variable, TLS-inspecting proxy),
-  `UV_INDEX_URL` (PyPI mirror), `WINDOWS_RUNNER_TAG` (enables the Windows
-  job). One pipeline per change: MR pipelines, else branch pipelines.
-- **glab**: the GitLab CLI for agents (issues, MRs, CI). Install without
-  sudo from the official release (verify `checksums.txt`) into
-  `~/.local/bin`, or `sudo apt install glab`; then, once per person,
-  `glab auth login --hostname <gitlab host>`. It acts with that person's
-  account.
-- **python-gitlab**: optional extra for code calling the GitLab API -
-  `uv sync --extra gitlab`; the agents' `coord` does not need it.
-- **Project ids**: `coord` keys everything by the canonical remote
-  (`gitlab.example.com/group/sub/repo`); SSH (including `ssh://...:2222/`)
-  and HTTPS clones give the same id. Moving a repo from GitHub to GitLab
-  changes its id: claims and messages under the old one stay there
-  (`coord projects`), or pin it with `COORD_PROJECT`.
+- **CI**: `.gitlab-ci.yml` (Python server + TS client, same as GitHub). CI
+  variables: `UV_IMAGE` (mirror of the uv image), `CORPORATE_CA_PEM` (File,
+  TLS-inspecting proxy), `UV_INDEX_URL`, `WINDOWS_RUNNER_TAG`.
+- **glab**: the GitLab CLI for agents (issues, MRs, CI) — it acts as the
+  person who ran `glab auth login --hostname <host>`.
+- **python-gitlab**: optional extra (`uv sync --extra gitlab`).
 
-## Security
+## Development
 
-**No authentication, no access control — HTTPS above adds transport
-encryption only.** Anyone who can reach the port can read and write the
-mailbox and the presence roster, over HTTP or HTTPS alike. Run it on
-loopback (`127.0.0.1`) only — never change the host to `0.0.0.0`, and
-never expose the port via a port forward, tunnel, or proxy to a LAN or
-the internet.
-
-## Known issues
-
-- **`acp_sdk.client.Client.run_sync` is broken against this server/SDK
-  version pairing** (`acp-sdk==1.0.3`): it raises a `422` from the server
-  because the request body it sends fails the server's own validation
-  (looks like a client-side double-encoding bug — the exact same request
-  shape works fine over plain curl, see above). `ACP_client.py` therefore
-  talks to the raw REST API via `httpx` directly instead of the SDK's
-  client class. Worth re-checking against a newer `acp-sdk` release
-  before building anything more on top of the SDK client.
-- **Port 8000 (the quickstart's default) is commonly taken** by other dev
-  tools — this project uses 1337 instead (override with `ACP_BASE_URL`
-  if you run the server elsewhere).
-- **`uvicorn>=0.35` breaks `acp-sdk==1.0.3`** at import time
-  (`AttributeError: module 'uvicorn.config' has no attribute
-  'LoopSetupType'`) — a real version-compatibility gap between the two
-  packages, not anything specific to this setup. Pinned to `uvicorn<0.35`
-  here; re-check both packages' versions together before upgrading either.
-- No auth, persistence is one SQLite file (`coord.db`, WAL mode, 30s
-  busy timeout) holding the mailbox (last 5000 live,
-  `mailbox-archive-<date>.json` for older ones), the roster and the
-  claims; the old flat files stay on disk as the migration source only.
-  No restart resilience for in-flight state, single machine only
-  (`127.0.0.1`). Fine for this prototype's purpose; not meant to
-  survive into whatever the dedicated project becomes.
+```sh
+uv run tools/gen_schema.py            # after changing an op signature (CI checks with --check)
+uv run test_coord.py                  # server, PKI, renewal, OIDC, cert sources, A2A binding
+cd clients/ts && npm test             # TS client against the real Python server (+ @a2a-js/sdk interop)
+npm run bundle-plugin                 # refresh plugins/coord/client (CI fails if stale)
+```

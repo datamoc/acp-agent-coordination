@@ -1,9 +1,8 @@
-"""Client: proxy to a `coord-server` - attribute access becomes a /call round-trip.
+"""Python client proxy to a `coord-server` - used by the server's own tests and tools.
 
-The client only holds the identity bundle the administrator gave it (CA
-cert, its cert and key). It knows nothing about the CA: when the server
-hands back a renewed certificate ("certificate" in a response), the client
-checks it matches its own key and replaces its cert file in place.
+Agents use the TypeScript client (clients/ts: the `coord` CLI and CoordClient),
+which speaks the same wire contract (schema/ops.json). This one only holds an
+identity bundle too, and installs a renewed certificate the server hands back.
 """
 
 import json
@@ -21,7 +20,7 @@ from .service import CoordError
 
 
 class RemoteCoord:
-    """`token`: a fixed bearer string, or an object with token()/invalidate() (oidc_client.TokenProvider)."""
+    """`token`: a fixed bearer string, or an object with token()/invalidate() (see clients/ts/src/oidc.ts for the real one)."""
 
     def __init__(self, url: str, ca=None, cert=None, key=None, token=None, insecure=False):
         self.url = url.rstrip("/") + "/call"

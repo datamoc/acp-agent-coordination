@@ -1,0 +1,1404 @@
+{
+ "version": 1,
+ "transport": "POST /call {op, args}",
+ "enums": {
+  "message_kinds": [
+   "info",
+   "question",
+   "advice",
+   "proposal",
+   "decision",
+   "review",
+   "warning",
+   "done"
+  ],
+  "roles": [
+   "advisor",
+   "reviewer",
+   "coeditor",
+   "delegate"
+  ],
+  "stances": [
+   "support",
+   "object",
+   "abstain",
+   "need-more-info"
+  ],
+  "doc_kinds": [
+   "note",
+   "diagnosis",
+   "plan",
+   "proposal",
+   "decision",
+   "review",
+   "adr"
+  ],
+  "memory_kinds": [
+   "overview",
+   "convention",
+   "architecture",
+   "decision",
+   "pitfall",
+   "glossary"
+  ],
+  "consensus_rules": [
+   "unanimous",
+   "majority",
+   "no-objection"
+  ]
+ },
+ "ops": {
+  "ask": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "claim",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "to",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "body",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "role",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "kind",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "client_id",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "check": {
+   "kind": "read",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "files",
+     "type": "string[]",
+     "nullable": false,
+     "required": true
+    }
+   ]
+  },
+  "claim": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "scope",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "tree",
+     "type": "boolean",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "note",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "ttl",
+     "type": "integer",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "release_on_commit",
+     "type": "boolean",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "client_id",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "context": {
+   "kind": "read",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    }
+   ]
+  },
+  "decide": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "discussion",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "decision",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "proposal",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "consensus",
+     "type": "boolean",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "reason",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    }
+   ]
+  },
+  "discuss": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "topic",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "claim",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "participants",
+     "type": "string[]",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "rule",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "quorum",
+     "type": "integer",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "deadline",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "client_id",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "discussion": {
+   "kind": "read",
+   "params": [
+    {
+     "name": "discussion",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    }
+   ]
+  },
+  "discussions": {
+   "kind": "read",
+   "params": [
+    {
+     "name": "project",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "status",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    }
+   ]
+  },
+  "doc_create": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "title",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "kind",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "content",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "client_id",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "doc_edit": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "document",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "base_revision",
+     "type": "integer",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "content",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "message",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "client_id",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "doc_history": {
+   "kind": "read",
+   "params": [
+    {
+     "name": "document",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    }
+   ]
+  },
+  "doc_patch": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "document",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "base_revision",
+     "type": "integer",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "patch",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "message",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "client_id",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "doc_show": {
+   "kind": "read",
+   "params": [
+    {
+     "name": "document",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "revision",
+     "type": "integer",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "docs": {
+   "kind": "read",
+   "params": [
+    {
+     "name": "project",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "kind",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "end": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    }
+   ]
+  },
+  "events": {
+   "kind": "read",
+   "params": [
+    {
+     "name": "after",
+     "type": "integer",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "project",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "limit",
+     "type": "integer",
+     "nullable": false,
+     "required": false
+    }
+   ]
+  },
+  "fence_check": {
+   "kind": "read",
+   "params": [
+    {
+     "name": "claim",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "fence",
+     "type": "integer",
+     "nullable": false,
+     "required": true
+    }
+   ]
+  },
+  "grant": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "claim",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "to",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "role",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    }
+   ]
+  },
+  "heartbeat": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "status",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    }
+   ]
+  },
+  "inbox": {
+   "kind": "read",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "after",
+     "type": "integer",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "to_me",
+     "type": "boolean",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "sender",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "kind",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "project",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "limit",
+     "type": "integer",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "unresolved",
+     "type": "boolean",
+     "nullable": false,
+     "required": false
+    }
+   ]
+  },
+  "locks": {
+   "kind": "read",
+   "params": [
+    {
+     "name": "project",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "all",
+     "type": "boolean",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "owner_session",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "memory": {
+   "kind": "read",
+   "params": [
+    {
+     "name": "project",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "kind",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "query",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "include_archived",
+     "type": "boolean",
+     "nullable": false,
+     "required": false
+    }
+   ]
+  },
+  "memory_add": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "kind",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "title",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "content",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "source",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "client_id",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "memory_edit": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "memory",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "base_revision",
+     "type": "integer",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "content",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "status",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "poll": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    }
+   ]
+  },
+  "post": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "body",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "kind",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "to",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "reply_to",
+     "type": "integer",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "claim",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "client_id",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "post_commit": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "sha",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "files",
+     "type": "string[]",
+     "nullable": false,
+     "required": true
+    }
+   ]
+  },
+  "presence": {
+   "kind": "read",
+   "params": [
+    {
+     "name": "project",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "include_dead",
+     "type": "boolean",
+     "nullable": false,
+     "required": false
+    }
+   ]
+  },
+  "profile_set": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "provider",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "model_id",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "model_family",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "category",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "reasoning_level",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "capabilities",
+     "type": "string[]",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "projects": {
+   "kind": "read",
+   "params": []
+  },
+  "propose": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "discussion",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "body",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "client_id",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "react": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "proposal",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "stance",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "comment",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    }
+   ]
+  },
+  "release": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "claim",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "all",
+     "type": "boolean",
+     "nullable": false,
+     "required": false
+    }
+   ]
+  },
+  "renew": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "claim",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "ttl",
+     "type": "integer",
+     "nullable": false,
+     "required": false
+    }
+   ]
+  },
+  "reply": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "message",
+     "type": "integer",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "body",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "kind",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "client_id",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "resolve": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "message",
+     "type": "integer",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "resolution",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "client_id",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "revoke": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "claim",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "to",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "role",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    }
+   ]
+  },
+  "role_accept": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "claim",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "role",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    }
+   ]
+  },
+  "role_decline": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "claim",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "role",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "reason",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    }
+   ]
+  },
+  "roles": {
+   "kind": "read",
+   "params": [
+    {
+     "name": "claim",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    }
+   ]
+  },
+  "status": {
+   "kind": "read",
+   "params": [
+    {
+     "name": "project",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "suggest": {
+   "kind": "read",
+   "params": [
+    {
+     "name": "project",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "category",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "capability",
+     "type": "string[]",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "reasoning_level",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "exclude_session",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "task_accept": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "task",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    }
+   ]
+  },
+  "task_cancel": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "task",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "note",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    }
+   ]
+  },
+  "task_create": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "title",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "description",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "priority",
+     "type": "integer",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "claim",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "assign",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "category",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "client_id",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "task_decline": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "task",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "reason",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    }
+   ]
+  },
+  "task_done": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "task",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "note",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    }
+   ]
+  },
+  "task_get": {
+   "kind": "read",
+   "params": [
+    {
+     "name": "task",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    }
+   ]
+  },
+  "tasks": {
+   "kind": "read",
+   "params": [
+    {
+     "name": "project",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "status",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "assigned_session",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "thread": {
+   "kind": "read",
+   "params": [
+    {
+     "name": "message",
+     "type": "integer",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "whoami": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "family",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "project",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "client_id",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  }
+ }
+}

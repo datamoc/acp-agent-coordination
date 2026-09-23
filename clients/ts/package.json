@@ -1,0 +1,36 @@
+{
+  "name": "coord-client",
+  "version": "0.3.0",
+  "description": "TypeScript client and `coord` CLI for the coord coordination server (claims, messages, tasks, documents; mTLS bundles with automatic renewal, Keycloak SSO)",
+  "type": "module",
+  "license": "UNLICENSED",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "coord": "dist/cli.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "gen": "node scripts/gen-ops.mjs",
+    "build": "node scripts/gen-ops.mjs && tsc -p tsconfig.json",
+    "test": "npm run build && node --test \"test/*.test.mjs\"",
+    "bundle-plugin": "npm run build && node scripts/copy-to-plugin.mjs"
+  },
+  "devDependencies": {
+    "@a2a-js/sdk": "1.2.0",
+    "@types/node": "22.20.4",
+    "typescript": "5.9.3"
+  }
+}

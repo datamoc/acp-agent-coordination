@@ -1,0 +1,420 @@
+#!/usr/bin/env node
+/**
+ * coord - the agents' coordination CLI (TypeScript). Same commands, output and config as coord 0.2.1.
+ *
+ * Remote: COORD_SERVER (+ mTLS bundle or Keycloak, from ~/.config/coord/env or COORD_IDENTITY).
+ * Local:  no COORD_SERVER - ops run on the repo's coord2.db through `coord-local` (no server).
+ * Session: `coord whoami <family>` prints the id; pass it as COORD_SESSION (or .coord-session).
+ */
+import { randomUUID } from "node:crypto";
+import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { CoordClient, tokenSource, transportFromEnv } from "./client.js";
+import { ConfigError, loadConfig } from "./config.js";
+import { CoordError } from "./errors.js";
+import { unifiedDiff } from "./diff.js";
+import { human } from "./format.js";
+import { detectProject, git, rel, repoRoot } from "./git.js";
+import { ENUMS } from "./ops.generated.js";
+import { TokenProvider } from "./oidc.js";
+class UsageError extends Error {
+}
+const K = ENUMS;
+const s = (flag, extra = {}) => ({ flag, kind: "str", ...extra });
+const i = (flag, extra = {}) => ({ flag, kind: "int", ...extra });
+const b = (flag) => ({ flag, kind: "bool", default: false });
+const kind = (def) => s("--kind", { default: def, choices: K.message_kinds });
+const COMMANDS = {
+    whoami: { help: "take a session name: <family>-NN", pos: [{ name: "family" }], opts: [s("--project")] },
+    heartbeat: { pos: [{ name: "status", nargs: "?", default: "" }] },
+    end: { help: "end this session (its claims lapse)" },
+    login: { help: "SSO device login (Keycloak): sign in once in a browser; tokens refresh by themselves" },
+    logout: { help: "forget the stored SSO tokens" },
+    presence: { opts: [b("--all"), s("--project")] },
+    post: { pos: [{ name: "body" }], opts: [s("--to"), kind("info"), s("--claim"), s("--client-id")] },
+    reply: { pos: [{ name: "message", type: "int" }, { name: "body" }], opts: [kind("info"), s("--client-id")] },
+    inbox: { opts: [i("--after"), b("--to-me"), s("--from", { dest: "sender" }), s("--kind"), i("--limit", { default: 20 }),
+            b("--all"), b("--unresolved"), s("--project")] },
+    thread: { pos: [{ name: "message", type: "int" }] },
+    resolve: { pos: [{ name: "message", type: "int" }, { name: "resolution", nargs: "?", default: "" }] },
+    poll: { help: "new messages, your claims, tasks and discussions since the last poll" },
+    claim: { pos: [{ name: "scope" }], opts: [b("--tree"), s("--note", { default: "" }), i("--ttl", { default: 7200 }),
+            b("--release-on-commit"), s("--client-id")] },
+    renew: { pos: [{ name: "claim" }], opts: [i("--ttl", { default: 7200 })] },
+    release: { pos: [{ name: "claim", nargs: "?" }], opts: [b("--all")] },
+    locks: { opts: [b("--all"), s("--project")] },
+    "fence-check": { pos: [{ name: "claim" }, { name: "fence", type: "int" }] },
+    grant: { pos: [{ name: "claim" }, { name: "to" }, { name: "role", choices: K.roles }] },
+    revoke: { pos: [{ name: "claim" }, { name: "to" }, { name: "role", choices: K.roles }] },
+    roles: { pos: [{ name: "claim" }] },
+    role: { help: "answer a coeditor/delegate role offered on someone's claim", sub: {
+            accept: { pos: [{ name: "claim" }, { name: "role", choices: K.roles }] },
+            decline: { pos: [{ name: "claim" }, { name: "role", choices: K.roles }, { name: "reason", nargs: "?", default: "" }] },
+        } },
+    ask: { pos: [{ name: "body" }], opts: [s("--claim", { required: true }), s("--to", { required: true }),
+            s("--role", { default: "advisor", choices: K.roles }), kind("question")] },
+    check: { pos: [{ name: "files", nargs: "*" }] },
+    "post-commit": { opts: [s("--sha")] },
+    "install-hooks": { help: "git pre-commit (coord check) and post-commit hooks" },
+    discuss: { help: "open a discussion; consensus is computed from the participants' stances",
+        pos: [{ name: "topic" }], opts: [s("--claim"), s("--with", { dest: "with_" }),
+            s("--rule", { default: "unanimous", choices: K.consensus_rules }), i("--quorum"),
+            s("--deadline")] },
+    propose: { pos: [{ name: "discussion" }, { name: "body" }] },
+    react: { pos: [{ name: "proposal" }, { name: "stance", choices: K.stances }, { name: "comment", nargs: "?", default: "" }] },
+    discussion: { pos: [{ name: "discussion" }] },
+    discussions: { opts: [s("--project")] },
+    decide: { help: "close a discussion; refused without consensus unless the opener passes --no-consensus \"reason\"",
+        pos: [{ name: "discussion" }, { name: "decision" }], opts: [s("--proposal"), s("--no-consensus"), s("--reason", { default: "" })] },
+    doc: { help: "collaborative documents", sub: {
+            create: { pos: [{ name: "title" }], opts: [s("--kind", { default: "note", choices: K.doc_kinds }), s("--file"), s("--content", { default: "" })] },
+            show: { pos: [{ name: "document" }], opts: [i("--revision")] },
+            edit: { pos: [{ name: "document" }], opts: [i("--base-revision", { required: true }), s("--file"), s("--content"),
+                    s("--message", { alias: "-m", default: "" })] },
+            patch: { help: "edit with a unified diff - only the change is sent; non-overlapping concurrent edits merge",
+                pos: [{ name: "document" }], opts: [i("--base-revision", { required: true }), s("--file"), s("--from"),
+                    s("--message", { alias: "-m", default: "" })] },
+            history: { pos: [{ name: "document" }] },
+            list: { opts: [s("--kind")] },
+        } },
+    tasks: { opts: [s("--status"), s("--project")] },
+    task: { sub: {
+            create: { pos: [{ name: "title" }], opts: [s("--description", { default: "" }), i("--priority", { default: 0 }), s("--claim"),
+                    s("--assign"), s("--category")] },
+            accept: { pos: [{ name: "task" }] },
+            done: { pos: [{ name: "task" }, { name: "note", nargs: "?", default: "" }] },
+            decline: { pos: [{ name: "task" }, { name: "reason", nargs: "?", default: "" }] },
+            show: { pos: [{ name: "task" }] },
+            cancel: { pos: [{ name: "task" }, { name: "note", nargs: "?", default: "" }] },
+            notify: { pos: [{ name: "task" }], opts: [s("--url", { required: true }), s("--token"), s("--auth-scheme"), s("--auth-credentials")] },
+        } },
+    memory: { sub: {
+            show: { opts: [s("--kind", { choices: K.memory_kinds })] },
+            search: { pos: [{ name: "query" }] },
+            add: { pos: [{ name: "kind", choices: K.memory_kinds }, { name: "title" }], opts: [s("--file"), s("--content"), s("--source", { default: "" })] },
+            edit: { pos: [{ name: "memory" }], opts: [i("--base-revision", { required: true }), s("--file"), s("--content"), b("--archive")] },
+        } },
+    context: { help: "start-of-session view: overview, memory, my claims, tasks, discussions, unread" },
+    profile: { opts: [s("--provider"), s("--model"), s("--family"), s("--category"), s("--reasoning"), { flag: "--capability", kind: "append" }] },
+    suggest: { help: "suggest agents for a task (hint only; you choose)",
+        opts: [s("--task"), s("--prefer-category"), { flag: "--capability", kind: "append" }, s("--reasoning")] },
+    "agent-card": { help: "the server's A2A Agent Card (skills, security schemes, endpoint)" },
+    projects: {},
+    status: { opts: [s("--project")] },
+    events: { opts: [i("--after", { default: 0 })] },
+};
+const dest = (o) => o.dest ?? o.flag.replace(/^--/, "").replace(/-/g, "_");
+function usage(path, c) {
+    if (c.sub)
+        return `usage: coord ${path.join(" ")} {${Object.keys(c.sub).join(",")}} ...`;
+    const opts = (c.opts ?? []).map((o) => (o.required ? "" : "[") + o.flag + (o.kind === "bool" ? "" : ` ${dest(o).toUpperCase()}`) + (o.required ? "" : "]"));
+    const pos = (c.pos ?? []).map((p) => (p.nargs === "?" ? `[${p.name}]` : p.nargs === "*" ? `[${p.name} ...]` : p.name));
+    return `usage: coord ${path.join(" ")} ${[...opts, ...pos].join(" ")}`.trimEnd() + (c.help ? `\n\n${c.help}` : "");
+}
+function topUsage() {
+    return "usage: coord [--json] <command> ...\n\ncommands:\n"
+        + Object.entries(COMMANDS).map(([n, c]) => `  ${n.padEnd(14)}${c.help ?? ""}`).join("\n")
+        + "\n\nRun `coord <command> --help` for its arguments.";
+}
+function convert(v, type, choices, what) {
+    if (choices && !choices.includes(v))
+        throw new UsageError(`argument ${what}: invalid choice: '${v}' (choose from ${choices.join(", ")})`);
+    if (type === "int") {
+        if (!/^-?\d+$/.test(v))
+            throw new UsageError(`argument ${what}: invalid int value: '${v}'`);
+        return Number(v);
+    }
+    return v;
+}
+export function parse(argv) {
+    let json = false;
+    const tokens = argv.filter((t) => (t === "--json" ? ((json = true), false) : true));
+    const path = [];
+    let spec = { sub: COMMANDS };
+    while (spec.sub) {
+        const name = tokens.shift();
+        if (!name || name === "-h" || name === "--help")
+            throw new UsageError(path.length ? usage(path, spec) : topUsage());
+        if (!spec.sub[name])
+            throw new UsageError(`${path.length ? usage(path, spec) : "usage: coord [--json] <command> ..."}\ncoord: invalid choice: '${name}'`);
+        path.push(name);
+        spec = spec.sub[name];
+    }
+    const ns = {};
+    for (const o of spec.opts ?? [])
+        ns[dest(o)] = o.kind === "append" ? null : o.default ?? null;
+    for (const p of spec.pos ?? [])
+        ns[p.name] = p.nargs === "*" ? [] : p.default ?? null;
+    const positionals = [];
+    const seen = new Set();
+    while (tokens.length) {
+        const t = tokens.shift();
+        if (t === "-h" || t === "--help")
+            throw new UsageError(usage(path, spec));
+        if (t === "--") {
+            positionals.push(...tokens.splice(0));
+            break;
+        }
+        if (t.startsWith("-") && t.length > 1 && !/^-\d/.test(t)) {
+            const [flag, inline] = t.includes("=") ? [t.slice(0, t.indexOf("=")), t.slice(t.indexOf("=") + 1)] : [t, undefined];
+            const o = (spec.opts ?? []).find((x) => x.flag === flag || x.alias === flag);
+            if (!o)
+                throw new UsageError(`${usage(path, spec)}\ncoord: unrecognized arguments: ${t}`);
+            seen.add(o.flag);
+            if (o.kind === "bool") {
+                ns[dest(o)] = true;
+                continue;
+            }
+            const v = inline ?? tokens.shift();
+            if (v === undefined)
+                throw new UsageError(`argument ${o.flag}: expected one argument`);
+            if (o.kind === "append")
+                (ns[dest(o)] ??= []).push(v);
+            else
+                ns[dest(o)] = convert(v, o.kind === "int" ? "int" : "str", o.choices, o.flag);
+            continue;
+        }
+        positionals.push(t);
+    }
+    for (const o of spec.opts ?? [])
+        if (o.required && !seen.has(o.flag))
+            throw new UsageError(`${usage(path, spec)}\ncoord: the following arguments are required: ${o.flag}`);
+    const pos = spec.pos ?? [];
+    for (const p of pos) {
+        if (p.nargs === "*") {
+            ns[p.name] = positionals.splice(0).map((v) => convert(v, p.type, p.choices, p.name));
+            continue;
+        }
+        const v = positionals.shift();
+        if (v === undefined) {
+            if (p.nargs === "?")
+                continue;
+            throw new UsageError(`${usage(path, spec)}\ncoord: the following arguments are required: ${pos.filter((x) => !x.nargs).map((x) => x.name).join(", ")}`);
+        }
+        ns[p.name] = convert(v, p.type, p.choices, p.name);
+    }
+    if (positionals.length)
+        throw new UsageError(`${usage(path, spec)}\ncoord: unrecognized arguments: ${positionals.join(" ")}`);
+    return { path, ns, json };
+}
+// --- commands --------------------------------------------------------------
+const sessionFile = () => join(repoRoot(), ".coord-session");
+function loadSession() {
+    if (process.env.COORD_SESSION)
+        return process.env.COORD_SESSION;
+    const f = sessionFile();
+    return existsSync(f) ? readFileSync(f, "utf8").trim() : null;
+}
+function readContent(a) {
+    if (a.file)
+        return readFileSync(a.file, "utf8");
+    if (a.content !== null && a.content !== undefined)
+        return a.content;
+    return readFileSync(0, "utf8"); // stdin
+}
+const uuid = () => randomUUID();
+const gitLines = (...args) => git(...args).split("\n").filter(Boolean);
+export async function run(path, a, c) {
+    const S = loadSession;
+    const call = (op, args) => c.call(op, args);
+    const cmd = path[0];
+    switch (cmd) {
+        case "whoami": {
+            const r = await call("whoami", { family: a.family, project: a.project || detectProject(), client_id: uuid() });
+            // .coord-session is shared by every session in this checkout: never overwrite one that still
+            // belongs to a live session, or that session would silently start acting as this one.
+            let old = process.env.COORD_SESSION ? null : loadSession();
+            if (old) {
+                try {
+                    await call("context", { session: old });
+                }
+                catch (e) {
+                    if (e instanceof CoordError)
+                        old = null;
+                    else
+                        throw e;
+                }
+            }
+            if (old)
+                r.warning = `${sessionFile()} belongs to another live session; left as is - prefix your commands with COORD_SESSION=${r.session_id}`;
+            else if (!process.env.COORD_SESSION) {
+                try {
+                    writeFileSync(sessionFile(), r.session_id + "\n");
+                }
+                catch { /* read-only */ }
+            }
+            return [cmd, r, 0];
+        }
+        case "heartbeat": return [cmd, await call("heartbeat", { session: S(), status: a.status }), 0];
+        case "end": return [cmd, await call("end", { session: S() }), 0];
+        case "presence": return [cmd, await call("presence", { project: a.project, include_dead: a.all }), 0];
+        case "post": return [cmd, await call("post", { session: S(), body: a.body, kind: a.kind, to: a.to, claim: a.claim, client_id: a.client_id || uuid() }), 0];
+        case "reply": return [cmd, await call("reply", { session: S(), message: a.message, body: a.body, kind: a.kind, client_id: a.client_id || uuid() }), 0];
+        case "inbox": return [cmd, await call("inbox", { session: S(), after: a.after, to_me: a.to_me, sender: a.sender, kind: a.kind,
+                project: a.project, limit: a.all ? null : a.limit, unresolved: a.unresolved }), 0];
+        case "thread": return [cmd, await call("thread", { message: a.message, session: S() }), 0];
+        case "resolve": return [cmd, await call("resolve", { session: S(), message: a.message, resolution: a.resolution }), 0];
+        case "poll": return [cmd, await call("poll", { session: S() }), 0];
+        case "claim": return [cmd, await call("claim", { session: S(), scope: rel(a.scope), tree: a.tree || null, note: a.note, ttl: a.ttl,
+                release_on_commit: a.release_on_commit, client_id: a.client_id || uuid() }), 0];
+        case "renew": return [cmd, await call("renew", { session: S(), claim: a.claim, ttl: a.ttl }), 0];
+        case "release": return [cmd, await call("release", { session: S(), claim: a.claim, all: a.all }), 0];
+        case "locks": return [cmd, await call("locks", { project: a.project || detectProject(), all: a.all }), 0];
+        case "fence-check": return [cmd, await call("fence_check", { claim: a.claim, fence: a.fence }), 0];
+        case "grant":
+        case "revoke": return [cmd, await call(cmd, { session: S(), claim: a.claim, to: a.to, role: a.role }), 0];
+        case "roles": return [cmd, await call("roles", { claim: a.claim }), 0];
+        case "role": return [cmd, path[1] === "accept" ? await call("role_accept", { session: S(), claim: a.claim, role: a.role })
+                : await call("role_decline", { session: S(), claim: a.claim, role: a.role, reason: a.reason }), 0];
+        case "ask": return [cmd, await call("ask", { session: S(), claim: a.claim, to: a.to, body: a.body, role: a.role, kind: a.kind, client_id: uuid() }), 0];
+        case "check": {
+            const files = a.files.length ? a.files.map(rel) : gitLines("diff", "--cached", "--name-only");
+            const r = await call("check", { session: S(), files });
+            return [cmd, r, r.ok ? 0 : 1];
+        }
+        case "post-commit": {
+            const sha = a.sha || git("rev-parse", "HEAD");
+            return [cmd, await call("post_commit", { session: S(), sha, files: gitLines("diff-tree", "--no-commit-id", "--name-only", "-r", sha) }), 0];
+        }
+        case "install-hooks": {
+            const hooks = join(repoRoot(), ".git", "hooks");
+            const exe = `"${process.execPath}" "${fileURLToPath(import.meta.url)}"`;
+            const guard = '[ -z "$COORD_SESSION" ] && [ ! -f .coord-session ] && exit 0';
+            writeFileSync(join(hooks, "pre-commit"), `#!/bin/sh\n${guard}\n${exe} check\n`);
+            writeFileSync(join(hooks, "post-commit"), `#!/bin/sh\n${guard}\n${exe} post-commit || true\n`);
+            for (const h of ["pre-commit", "post-commit"]) {
+                try {
+                    chmodSync(join(hooks, h), 0o755);
+                }
+                catch { /* not POSIX */ }
+            }
+            return [cmd, { installed: [join(hooks, "pre-commit"), join(hooks, "post-commit")] }, 0];
+        }
+        case "discuss": return [cmd, await call("discuss", { session: S(), topic: a.topic, claim: a.claim, rule: a.rule, quorum: a.quorum,
+                deadline: a.deadline,
+                participants: a.with_ ? String(a.with_).split(",").map((x) => x.trim()).filter(Boolean) : null,
+                client_id: uuid() }), 0];
+        case "propose": return [cmd, await call("propose", { session: S(), discussion: a.discussion, body: a.body, client_id: uuid() }), 0];
+        case "react": return [cmd, await call("react", { session: S(), proposal: a.proposal, stance: a.stance, comment: a.comment }), 0];
+        case "discussion": return [cmd, await call("discussion", { discussion: a.discussion }), 0];
+        case "discussions": return [cmd, await call("discussions", { project: a.project || detectProject() }), 0];
+        case "decide": return [cmd, await call("decide", { session: S(), discussion: a.discussion, decision: a.decision, proposal: a.proposal,
+                consensus: a.no_consensus === null,
+                reason: a.no_consensus ?? a.reason }), 0];
+        case "doc": {
+            switch (path[1]) {
+                case "create": return ["doc", await call("doc_create", { session: S(), title: a.title, kind: a.kind, content: a.file ? readContent(a) : a.content, client_id: uuid() }), 0];
+                case "show": return ["doc-show", await call("doc_show", { document: a.document, revision: a.revision }), 0];
+                case "edit": return ["doc", await call("doc_edit", { session: S(), document: a.document, base_revision: a.base_revision, content: readContent(a), message: a.message, client_id: uuid() }), 0];
+                case "patch": { // --from: diff the edited file against that revision here, send only the diff
+                    let patch;
+                    if (a.from) {
+                        const base = await call("doc_show", { document: a.document, revision: a.base_revision });
+                        patch = unifiedDiff(base.content, readFileSync(a.from, "utf8"), 3, [`${a.document}@r${a.base_revision}`, a.from]);
+                        if (!patch)
+                            throw new CoordError("no_change", `${a.from} is identical to ${a.document} revision ${a.base_revision}`);
+                    }
+                    else {
+                        patch = a.file ? readFileSync(a.file, "utf8") : readFileSync(0, "utf8");
+                    }
+                    return ["doc", await call("doc_patch", { session: S(), document: a.document, base_revision: a.base_revision,
+                            patch, message: a.message, client_id: uuid() }), 0];
+                }
+                case "history": return ["doc", await call("doc_history", { document: a.document }), 0];
+                default: return ["doc", await call("docs", { project: detectProject(), kind: a.kind }), 0];
+            }
+        }
+        case "tasks": return [cmd, await call("tasks", { project: a.project || detectProject(), status: a.status }), 0];
+        case "task": {
+            switch (path[1]) {
+                case "create": return ["task", await call("task_create", { session: S(), title: a.title, description: a.description, priority: a.priority,
+                        claim: a.claim, assign: a.assign, category: a.category, client_id: uuid() }), 0];
+                case "accept": return ["task", await call("task_accept", { session: S(), task: a.task }), 0];
+                case "show": return ["task", await call("task_get", { task: a.task }), 0];
+                case "decline": return ["task", await call("task_decline", { session: S(), task: a.task, reason: a.reason }), 0];
+                case "cancel": return ["task", await call("task_cancel", { session: S(), task: a.task, note: a.note }), 0];
+                case "notify": { // A2A push notifications: the server POSTs status updates to --url
+                    const auth = a.auth_scheme ? { authentication: { scheme: a.auth_scheme, credentials: a.auth_credentials ?? "" } } : {};
+                    return ["task", await c.a2a("CreateTaskPushNotificationConfig", { taskId: a.task, url: a.url, ...(a.token ? { token: a.token } : {}), ...auth }), 0];
+                }
+                default: return ["task", await call("task_done", { session: S(), task: a.task, note: a.note }), 0];
+            }
+        }
+        case "memory": {
+            switch (path[1]) {
+                case "show": return ["memory", await call("memory", { project: detectProject(), kind: a.kind }), 0];
+                case "search": return ["memory", await call("memory", { project: detectProject(), query: a.query }), 0];
+                case "add": return ["memory-add", await call("memory_add", { session: S(), kind: a.kind, title: a.title, content: readContent(a), source: a.source, client_id: uuid() }), 0];
+                default: return ["memory-edit", await call("memory_edit", { session: S(), memory: a.memory, base_revision: a.base_revision, content: readContent(a),
+                        status: a.archive ? "archived" : null }), 0];
+            }
+        }
+        case "context": return [cmd, await call("context", { session: S() }), 0];
+        case "profile": return [cmd, await call("profile_set", { session: S(), provider: a.provider, model_id: a.model, model_family: a.family,
+                category: a.category, reasoning_level: a.reasoning, capabilities: a.capability }), 0];
+        case "suggest": return [cmd, await call("suggest", { project: detectProject(), category: a.prefer_category, capability: a.capability,
+                reasoning_level: a.reasoning, exclude_session: S() }), 0];
+        case "agent-card": return [cmd, await c.agentCard(), 0];
+        case "projects": return [cmd, await call("projects", {}), 0];
+        case "status": return [cmd, await call("status", { project: a.project }), 0];
+        case "events": return [cmd, await call("events", { after: a.after, project: detectProject() }), 0];
+    }
+    throw new UsageError(`unhandled command ${cmd}`);
+}
+export async function main(argv = process.argv.slice(2)) {
+    let parsed;
+    try {
+        parsed = parse(argv);
+    }
+    catch (e) {
+        if (e instanceof UsageError) {
+            const help = argv.includes("-h") || argv.includes("--help") || !argv.filter((x) => x !== "--json").length;
+            (help ? process.stdout : process.stderr).write(e.message + "\n");
+            return help ? 0 : 2;
+        }
+        throw e;
+    }
+    const { path, ns, json } = parsed;
+    let cmd, r, code;
+    try {
+        loadConfig(process.env);
+        if (path[0] === "login" || path[0] === "logout") {
+            const tp = tokenSource(process.env);
+            if (!(tp instanceof TokenProvider)) {
+                throw new CoordError("oidc_config", "set COORD_OIDC_ISSUER and COORD_OIDC_CLIENT_ID (and unset COORD_TOKEN) to use SSO login");
+            }
+            [cmd, r, code] = [path[0], path[0] === "login" ? await tp.login() : await tp.logout(), 0];
+        }
+        else {
+            [cmd, r, code] = await run(path, ns, new CoordClient(transportFromEnv(process.env)));
+        }
+    }
+    catch (e) {
+        if (e instanceof ConfigError) {
+            process.stderr.write(`coord: ${e.message}\n`);
+            return 1;
+        }
+        if (!(e instanceof CoordError))
+            throw e;
+        if (json)
+            process.stdout.write(JSON.stringify({ ok: false, error: e.code, message: e.message, data: e.data }) + "\n");
+        else
+            process.stderr.write(`error (${e.code}): ${e.message}\n`);
+        return 1;
+    }
+    if (json)
+        process.stdout.write(JSON.stringify(r, null, 2) + "\n");
+    else {
+        if (cmd === "whoami")
+            process.stdout.write(`you are ${r.name} (gen ${r.generation}, project ${r.project})\nexport COORD_SESSION=${r.session_id}\n`);
+        else
+            process.stdout.write(human(cmd, r) + "\n");
+        if (r && typeof r === "object" && !Array.isArray(r) && r.warning)
+            process.stderr.write(`warning: ${r.warning}\n`);
+    }
+    return code;
+}
+if (process.argv[1] && fileURLToPath(import.meta.url) === (await import("node:fs")).realpathSync(process.argv[1])) {
+    main().then((c) => process.exit(c), (e) => { process.stderr.write(`coord: ${e?.stack ?? e}\n`); process.exit(1); });
+}

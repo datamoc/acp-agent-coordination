@@ -1,20 +1,15 @@
 [project]
 name = "acp-agent-coordination"
-version = "0.2.1"
-description = "Local Agent Communication Protocol server so concurrent coding sessions can coordinate (mailbox + presence)"
+version = "0.3.0"
+description = "coord server and certificate management: claims, messages, tasks for concurrent agent sessions (clients: clients/ts)"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = [
-    "acp-sdk>=1.0.3",
-    "uvicorn<0.35",
-]
+dependencies = []
 
 [project.scripts]
-acp-coordination-server = "ACP_server:main"
-acp-coordination-client = "ACP_client:main"
-coord = "coord:main"
 coord-server = "coordination.server:main"
 coord-admin = "coordination.pki:main"
+coord-local = "coordination.local:main"
 
 [project.optional-dependencies]
 gitlab = [
@@ -26,7 +21,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["ACP_server", "ACP_client", "store", "coord"]
+py-modules = []
 packages = ["coordination"]
 
 [tool.uv]

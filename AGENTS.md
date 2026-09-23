@@ -10,42 +10,29 @@
 
 **Token economy:** In coordination, ask before every agent spawn: "Is this automatable?" If yes, script it. If no, spawn the agent. See CLAUDE.md for the full principle and examples.
 
-## Coordination server (this repo)
+## This repo
 
-- Start: `uv run ACP_server.py` (`-v` for the per-call traffic log) → `http://localhost:1337`. Verify: `curl http://localhost:1337/agents`.
-- Loopback only: never bind `0.0.0.0` or expose the port — no auth (see README `## Security`).
-- Optional HTTPS with `ACP_TLS_CERT`/`ACP_TLS_KEY` (client: `ACP_TLS_CA` or `ACP_TLS_INSECURE=1`) — see README `## HTTPS (optional)`. Still no auth; TLS only encrypts the transport.
-- CLI: `uv run ACP_client.py <agent> [input]` (agents: `post`, `inbox`, `resolve`, `claim`, `release`, `locks`, `status`, `heartbeat`, `presence`, `echo`).
+- Server: Python stdlib (`coordination/`): `coord-server` (+ A2A v1.0 binding in `a2a.py`), `coord-admin` (local CA), `coord-local` (local-mode bridge).
+- Client: TypeScript (`clients/ts`): the `coord` CLI and `CoordClient`; the plugin `plugins/coord` ships its compiled copy (`npm run bundle-plugin`).
+- Contract: `schema/ops.json` is generated from `coordination/service.py` (`uv run tools/gen_schema.py`); both sides are tested against it. No ACP, no MCP transport.
+- Loopback only unless TLS + mTLS or Keycloak are configured (README `## Security and identities`).
 
-## Coordination v2 (`coord`)
+## Using coord (agents)
 
-- Agents run the `coord` command only (on PATH, works from any directory) - never `coord.py`.
-- `coord whoami <family>` then `COORD_SESSION=<uuid>` on later commands; `coord context` at session start, `coord poll` when idle.
-- Identity (mTLS): comes from `~/.config/coord/env`, or `COORD_IDENTITY=<name>`; the administrator sets it up once with `coord-admin enroll <client-name>`; the server renews the cert on its own (agents do nothing).
-- Keycloak mode: tokens refresh by themselves; if a command says `run coord login`, ask the human to run it (it needs a browser).
-- Roles: `coord` = client (agents), `coord-server` = server, `coord-admin` = certificate management (humans only).
-- Claim with `coord claim <path>` (dir/ = tree), keep it while asking for help: `coord ask --claim C12 --to <session> "..."`.
-- Long analyses go in `coord doc create`; debates in `coord discuss`/`propose`/`react`/`decide`. Full reference: README `## Coordination v2`.
+- Run the `coord` command only (on PATH, or `node plugins/coord/client/cli.js`), from any directory.
+- `coord --json whoami <family>`, then `COORD_SESSION=<id>` on every later command; `coord context` at start, `coord poll` when idle.
+- Identity (mTLS bundle or Keycloak) comes from `~/.config/coord/env` or `COORD_IDENTITY=<name>`; the human sets it up (`coord-admin enroll <client-name>`, `coord login`). Renewal is automatic.
+- Claim before editing (`coord claim <path>`, `dir/` = tree); keep it while asking for help: `coord ask --claim C12 --to <session> "..."`.
+- Delegate with `coord task create "..." --assign <session>`; long analyses in `coord doc create`; debates in `coord discuss`/`propose`/`react`/`decide`.
+- Never touch `pki/`, certificates, `~/.config/coord/`, `coord-admin` or `coord-server`.
 
 ## GitLab
 
 - Internal projects live on GitLab: use `glab` (issues, MRs, CI) - it acts as the human, so no merge/approve/close without being asked.
 - Reference `#issue` / `!mr` in `coord claim --note`, task titles and `--kind done` posts.
-- CI: `.gitlab-ci.yml` (same suites as `.github/workflows/ci.yml`); GitLab API code uses the optional extra: `uv sync --extra gitlab` (python-gitlab).
-
-## Mailbox conventions
-
-- Post as `"<session-name>: <message>"`; replies reference numbers (`"you: re: #66 ..."`).
-- `inbox` lines look like `#66 [at] from: message`; catch up with `inbox #N`, `inbox <session>`, or `inbox <session> #N` (`inbox 5` = last 5).
-- Claim work by posting `"you: re: #N taking this"`; mark done with `resolve "#N: <note>"`.
-- Live mailbox keeps the last 5000; older entries archive to `mailbox-archive-<date>.json` (same dir, gitignored).
-- Before broad work: `locks`, then `claim "<you>: <file-or-area>: <note>"` (2h hold, re-claim to extend); `release` when done. Expired claims can be taken over.
-- Stay live with `heartbeat "<session>: <status>"`; check who's live with `presence`; triage with `status`.
-- Full session protocol lives in README `## Session protocol`.
 
 ## Dev
 
-- Smoke test: `uv run smoke_test.py` (temp-dir round-trip, no live server needed).
-- v2 test: `uv run test_coord.py` (temp dirs; multiprocess race, HTTP, OIDC, mTLS).
-- TLS test: `uv run test_tls.py` (real subprocess, real HTTPS handshake, scratch port via `ACP_PORT` — never touches a live dev server on 1337; skips if `openssl` isn't on PATH).
-- Runtime state (`mailbox.json`, `mailbox-archive-*.json`, `presence.json`, `locks.json`, `server*.log`, `coord2.db`, `.coord-session`, `pki/`) is gitignored; never commit it.
+- Python: `uv run tools/gen_schema.py --check` and `uv run test_coord.py` (temp dirs; claim race, PKI, renewal, OIDC, cert sources, A2A).
+- TS: `cd clients/ts && npm test` (against the real Python server, incl. @a2a-js/sdk interop); `npm run bundle-plugin` after client changes (CI checks it).
+- Runtime state (`coord2.db*`, `.coord-session`, `pki/`, `clients/ts/node_modules`, `clients/ts/dist`) is gitignored; never commit it.

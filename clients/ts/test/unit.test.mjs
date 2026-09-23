@@ -1,0 +1,111 @@
+import assert from "node:assert/strict";
+import { mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { test } from "node:test";
+import { parse, run } from "../dist/cli.js";
+import { CoordClient } from "../dist/client.js";
+import { loadConfig } from "../dist/config.js";
+import { canonicalProject } from "../dist/git.js";
+import { OPS } from "../dist/ops.generated.js";
+import { bypassProxy } from "../dist/transport.js";
+import { REPO, tmp } from "./helpers.mjs";
+
+test("project ids match the shared vectors (same as the Python server)", () => {
+  const { vectors } = JSON.parse(readFileSync(join(REPO, "schema/project-vectors.json"), "utf8"));
+  for (const [url, id] of vectors) assert.equal(canonicalProject(url), id, url);
+});
+
+test("config: env wins, only COORD_*, relative paths from the file's real dir, pointer file", () => {
+  const home = tmp();
+  const dir = join(home, "coord", "alice");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "env"), "# comment\nexport COORD_SERVER=https://localhost:1338\nCOORD_CA=ca.crt\nCOORD_KEY='~/k.key'\nCOORD_PROJECT=from-file\nOTHER=x\n");
+  const env = { XDG_CONFIG_HOME: home, COORD_PROJECT: "from-env" };
+  try {
+    symlinkSync(join("alice", "env"), join(home, "coord", "env"));                     // default = symlink
+  } catch {                                                                            // Windows w/o privilege
+    writeFileSync(join(home, "coord", "env"), "COORD_IDENTITY=alice\n");
+  }
+  assert.equal(loadConfig(env), realpathSync(join(dir, "env")));                      // Windows: 8.3 temp names
+  assert.equal(env.COORD_SERVER, "https://localhost:1338");
+  assert.equal(env.COORD_CA, join(realpathSync(dir), "ca.crt"));                       // real dir, not the link's
+  assert.equal(env.COORD_KEY, join(homedir(), "k.key"));
+  assert.equal(env.COORD_PROJECT, "from-env");
+  assert.equal(env.OTHER, undefined);
+  const home2 = tmp();                                                                 // default = pointer file
+  mkdirSync(join(home2, "coord", "bob"), { recursive: true });
+  writeFileSync(join(home2, "coord", "bob", "env"), "COORD_SERVER=https://b\n");
+  writeFileSync(join(home2, "coord", "env"), "# default identity\nCOORD_IDENTITY=bob\n");
+  const env2 = { XDG_CONFIG_HOME: home2 };
+  loadConfig(env2);
+  assert.equal(env2.COORD_SERVER, "https://b");
+  assert.throws(() => loadConfig({ XDG_CONFIG_HOME: home2, COORD_IDENTITY: "ghost" }), /coord-admin enroll/);
+});
+
+test("argument parsing: defaults, ints, choices, required, --json anywhere, aliases", () => {
+  const p = parse(["claim", "src/", "--tree", "--note=why", "--json"]);
+  assert.deepEqual(p.path, ["claim"]);
+  assert.equal(p.json, true);
+  assert.equal(p.ns.tree, true);
+  assert.equal(p.ns.note, "why");
+  assert.equal(p.ns.ttl, 7200);
+  assert.equal(parse(["reply", "12", "ok"]).ns.message, 12);
+  assert.equal(parse(["doc", "edit", "DOC1", "--base-revision", "3", "-m", "msg", "--content", "x"]).ns.message, "msg");
+  assert.deepEqual(parse(["profile", "--capability", "a", "--capability", "b"]).ns.capability, ["a", "b"]);
+  assert.throws(() => parse(["post", "hi", "--kind", "nope"]), /invalid choice/);
+  assert.throws(() => parse(["ask", "hi", "--to", "x"]), /required: --claim/);
+  assert.throws(() => parse(["reply", "x", "y"]), /invalid int/);
+  assert.throws(() => parse(["claim", "a", "b"]), /unrecognized/);
+});
+
+test("every CLI command sends a known op with only known params and all required ones", async () => {
+  const sent = [];
+  const fake = new CoordClient({ async send(op, args) { sent.push([op, args]); return { ok: true, result: fakeResult(op) }; } });
+  const fakeResult = (op) => ({ whoami: { session_id: "s", name: "x-01", generation: 1, project: "p" }, check: { ok: true, conflicts: [] } })[op] ?? {};
+  const samples = [
+    ["whoami", "x"], ["heartbeat", "busy"], ["end"], ["presence", "--all"], ["post", "hi", "--to", "b-01", "--kind", "question", "--claim", "C1"],
+    ["reply", "3", "ok"], ["inbox", "--after", "2", "--to-me", "--from", "b-01", "--unresolved", "--all"], ["thread", "3"], ["resolve", "3", "done"],
+    ["poll"], ["claim", "src/", "--tree", "--release-on-commit"], ["renew", "C1"], ["release", "--all"], ["locks", "--all"],
+    ["fence-check", "C1", "4"], ["grant", "C1", "b-01", "delegate"], ["revoke", "C1", "b-01", "delegate"], ["roles", "C1"],
+    ["ask", "why?", "--claim", "C1", "--to", "b-01"], ["check", "a.py"], ["post-commit", "--sha", "abc"], ["discuss", "topic", "--with", "b-01,c-01", "--rule", "majority", "--quorum", "3", "--deadline", "48h"],
+    ["propose", "D1", "idea"], ["react", "P1", "support", "+1"], ["discussion", "D1"], ["discussions"], ["decide", "D1", "go", "--proposal", "P1", "--no-consensus", "deadline"],
+    ["doc", "create", "T", "--content", "x"], ["doc", "show", "DOC1"], ["doc", "edit", "DOC1", "--base-revision", "1", "--content", "y"],
+    ["doc", "history", "DOC1"], ["doc", "patch", "DOC1", "--base-revision", "1", "--file", "/dev/null"], ["doc", "list"], ["tasks", "--status", "open"], ["task", "create", "T", "--assign", "b-01"],
+    ["task", "accept", "T1"], ["task", "done", "T1", "note"], ["task", "show", "T1"], ["task", "cancel", "T1"], ["task", "decline", "T1", "busy"],
+    ["role", "accept", "C1", "delegate"], ["role", "decline", "C1", "coeditor", "not mine"], ["memory", "show"], ["memory", "search", "q"],
+    ["memory", "add", "pitfall", "T", "--content", "c"], ["memory", "edit", "M1", "--base-revision", "1", "--content", "c", "--archive"],
+    ["context"], ["profile", "--category", "reasoning", "--capability", "debugging"], ["suggest", "--prefer-category", "reasoning"],
+    ["projects"], ["status"], ["events"],
+  ];
+  process.env.COORD_SESSION = "s";
+  process.env.COORD_PROJECT = "p";
+  try {
+    for (const argv of samples) {
+      const { path, ns } = parse(argv);
+      await run(path, ns, fake);
+    }
+  } finally {
+    delete process.env.COORD_SESSION;
+    delete process.env.COORD_PROJECT;
+  }
+  const schema = JSON.parse(readFileSync(join(REPO, "schema/ops.json"), "utf8")).ops;
+  for (const [op, args] of sent) {
+    assert.ok(OPS[op], `unknown op ${op}`);
+    const names = schema[op].params.map((p) => p.name);
+    for (const k of Object.keys(args)) assert.ok(names.includes(k), `${op}: unknown param ${k}`);
+    for (const p of schema[op].params) if (p.required) assert.ok(args[p.name] !== undefined && args[p.name] !== null, `${op}: missing ${p.name}`);
+  }
+  const used = new Set(sent.map(([op]) => op));
+  assert.deepEqual(Object.keys(OPS).filter((op) => !used.has(op)), [], "every server op is reachable from the CLI");
+});
+
+test("NO_PROXY handling", () => {
+  const env = { NO_PROXY: "localhost,.dci.local,exact.example" };
+  assert.ok(bypassProxy("127.0.0.1", env));
+  assert.ok(bypassProxy("gitlab.dci.local", env));
+  assert.ok(bypassProxy("dci.local", env));
+  assert.ok(bypassProxy("exact.example", env));
+  assert.ok(!bypassProxy("other.example", env));
+  assert.ok(bypassProxy("anything", { no_proxy: "*" }));
+});

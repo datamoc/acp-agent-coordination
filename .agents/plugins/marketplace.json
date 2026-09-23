@@ -1,14 +1,14 @@
 {
   "name": "acp-agent-coordination",
   "interface": {
-    "displayName": "ACP Agent Coordination"
+    "displayName": "coord agent coordination"
   },
   "plugins": [
     {
-      "name": "acp",
+      "name": "coord",
       "source": {
         "source": "local",
-        "path": "./plugins/acp"
+        "path": "./plugins/coord"
       },
       "policy": {
         "installation": "AVAILABLE",

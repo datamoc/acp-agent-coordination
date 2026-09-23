@@ -3,13 +3,23 @@ on: [push, pull_request]
 jobs:
   test:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - run: uv run smoke_test.py
-      - run: uv run test_store.py
-      - run: uv run test_coord.py
-      - run: uv run test_tls.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: uv sync --locked
+      - run: uv run tools/gen_schema.py --check       # the wire contract matches the server
+      - run: uv run test_coord.py                     # server, PKI, renewal, OIDC, cert sources
+      - run: npm ci
+        working-directory: clients/ts
+      - run: npm test                                 # TS client against the real Python server
+        working-directory: clients/ts
+      - run: npm run bundle-plugin && git diff --exit-code -- plugins/coord/client
+        working-directory: clients/ts
+        shell: bash

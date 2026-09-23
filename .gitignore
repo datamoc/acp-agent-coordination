@@ -29,3 +29,7 @@ coord2.db*
 pki/
 *.crt
 *.csr
+
+# TS client build output and dependencies (plugins/coord/client is the committed bundle)
+clients/ts/node_modules/
+clients/ts/dist/

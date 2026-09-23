@@ -31,6 +31,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from . import state_home
+from . import a2a
 from .net import is_loopback
 from .service import READ_OPS, WRITE_OPS, Coord, CoordError
 
@@ -81,18 +82,21 @@ class OIDCIntrospector:
         return best
 
 
-def make_handler(coord, oidc: OIDCIntrospector | None, mtls: bool, authority=None):
+def make_handler(coord, oidc: OIDCIntrospector | None, mtls: bool, authority=None, pusher=None,
+                 public_url: str | None = None, version: str = "0"):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):
             pass
 
-        def _send(self, code: int, payload: dict):
-            if getattr(self, "_renewal", None):
+        def _send(self, code: int, payload: dict, content_type: str = "application/json", renewal_in_body=True):
+            if getattr(self, "_renewal", None) and renewal_in_body:
                 payload["certificate"] = self._renewal
             body = json.dumps(payload).encode()
             self.send_response(code)
-            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
+            if getattr(self, "_renewal", None) and not renewal_in_body:
+                self.send_header("Coord-Certificate", a2a.certificate_header(self._renewal))
             self.end_headers()
             self.wfile.write(body)
 
@@ -126,43 +130,95 @@ def make_handler(coord, oidc: OIDCIntrospector | None, mtls: bool, authority=Non
                 return f"oidc:{info.get('sub')}", info
             return None, None
 
+        def _base_url(self) -> str:
+            if public_url:
+                return public_url
+            scheme = "https" if isinstance(self.connection, ssl.SSLSocket) else "http"
+            return f"{scheme}://{self.headers.get('Host') or '%s:%s' % self.server.server_address[:2]}"
+
         def do_GET(self):
             if self.path == "/health":
                 return self._send(200, {"ok": True})
+            if self.path == "/.well-known/agent-card.json":
+                oidc_url = oidc.url.split("/protocol/openid-connect/")[0] + "/.well-known/openid-configuration" \
+                    if oidc else None
+                return self._send(200, a2a.agent_card(self._base_url(), mtls, oidc_url, version))
             self._send(404, {"ok": False, "error": "not_found"})
+
+        def _run_op(self, op: str, args: dict, principal, info):
+            """One coord op with the caller's identity checks - shared by /call and /a2a."""
+            if op not in READ_OPS | WRITE_OPS:
+                raise CoordError("bad_op", f"unknown op {op!r}")
+            args.pop("principal", None)                      # only the server sets it
+            if principal is not None:
+                if op == "whoami":
+                    args["principal"] = principal
+                elif args.get("session"):
+                    coord.check_principal(args["session"], principal)
+                if info is not None:
+                    project = args.get("project") or (
+                        coord.session_project(args["session"]) if args.get("session") else None) or (
+                        coord.task_get(args["task"])["project"] if args.get("task") and op.startswith("task_") else None
+                    ) or "default"
+                    need = PROJECT_ROLES["contributor"] if op in WRITE_OPS else PROJECT_ROLES["viewer"]
+                    if oidc.project_role(info, project) < need:
+                        raise CoordError("forbidden", f"no {'contributor' if need else 'viewer'} role "
+                                         f"on project {project}")
+            try:
+                result = getattr(coord, op)(**args)
+            except TypeError as e:
+                raise CoordError("bad_args", str(e))
+            if pusher is not None and op in a2a.TASK_OPS:
+                pusher.notify(result["task"])                # webhooks: accepted / done / cancelled
+            return result
+
+        def _body(self):
+            return json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
 
         def do_POST(self):
             self._renewal = None
+            if self.path == "/a2a":
+                return self._a2a()
             if self.path != "/call":
                 return self._send(404, {"ok": False, "error": "not_found"})
             try:
-                req = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
-                op, args = req.get("op"), dict(req.get("args") or {})
-                if op not in READ_OPS | WRITE_OPS:
-                    raise CoordError("bad_op", f"unknown op {op!r}")
+                req = self._body()
                 principal, info = self._identity()
-                if principal is not None:
-                    if op == "whoami":
-                        args["principal"] = principal
-                    elif args.get("session"):
-                        coord.check_principal(args["session"], principal)
-                    if info is not None:
-                        project = args.get("project") or (
-                            coord.session_project(args["session"]) if args.get("session") else None) or "default"
-                        need = PROJECT_ROLES["contributor"] if op in WRITE_OPS else PROJECT_ROLES["viewer"]
-                        if oidc.project_role(info, project) < need:
-                            raise CoordError("forbidden", f"no {'contributor' if need else 'viewer'} role "
-                                             f"on project {project}")
-                result = getattr(coord, op)(**args)
+                result = self._run_op(req.get("op"), dict(req.get("args") or {}), principal, info)
                 self._send(200, {"ok": True, "result": result})
             except CoordError as e:
-                code = {"unauthenticated": 401, "forbidden": 403, "bad_op": 400}.get(e.code, 409)
+                code = {"unauthenticated": 401, "forbidden": 403, "bad_op": 400, "bad_args": 400}.get(e.code, 409)
                 self._send(code, {"ok": False, "error": e.code, "message": str(e), "data": e.data})
-            except TypeError as e:
-                self._send(400, {"ok": False, "error": "bad_args", "message": str(e)})
             except Exception as e:
                 self._send(500, {"ok": False, "error": "internal", "message": repr(e)})
+
+        def _a2a(self):
+            send = lambda code, payload: self._send(code, payload, renewal_in_body=False)
+            try:
+                rpc = self._body()
+            except ValueError as e:
+                return send(200, {"jsonrpc": "2.0", "id": None, "error": {"code": a2a.PARSE_ERROR, "message": str(e)}})
+            try:
+                principal, info = self._identity()
+            except CoordError as e:
+                return send(401, {"jsonrpc": "2.0", "id": rpc.get("id") if isinstance(rpc, dict) else None,
+                                  "error": {"code": a2a.COORD_ERROR, "message": str(e), "data": {"error": e.code}}})
+            try:
+                status, out = a2a.handle(rpc, lambda op, args: self._run_op(op, args, principal, info),
+                                         pusher or a2a.Pusher(coord, []), principal)
+            except Exception as e:
+                status, out = 200, {"jsonrpc": "2.0", "id": rpc.get("id") if isinstance(rpc, dict) else None,
+                                    "error": {"code": a2a.INTERNAL, "message": repr(e)}}
+            send(status, out)
     return Handler
+
+
+def _version() -> str:
+    try:
+        from importlib.metadata import version
+        return version("acp-agent-coordination")
+    except Exception:
+        return "0"
 
 
 class _Server(ThreadingHTTPServer):
@@ -176,7 +232,8 @@ class _Server(ThreadingHTTPServer):
 
 def build_server(coord, host="127.0.0.1", port=1338, tls_cert=None, tls_key=None, client_ca=None,
                  crl=None, oidc: OIDCIntrospector | None = None,
-                 authority=None, cert_source=None) -> ThreadingHTTPServer:
+                 authority=None, cert_source=None, push_allow: list[str] | None = None,
+                 public_url: str | None = None) -> ThreadingHTTPServer:
     """`authority`: a pki.Authority (mTLS with our management) or None - local and OIDC
     modes never load the PKI code. `cert_source` (certsource.py) renews the server's own
     certificate; with an authority it defaults to the local one."""
@@ -188,7 +245,10 @@ def build_server(coord, host="127.0.0.1", port=1338, tls_cert=None, tls_key=None
                              "or --oidc-introspect-url")
     if client_ca and not (tls_cert and tls_key):
         raise SystemExit("--client-ca needs --tls-cert/--tls-key")
-    httpd = _Server((host, port), make_handler(coord, oidc, mtls=bool(client_ca), authority=authority))
+    pusher = a2a.Pusher(coord, push_allow or [], log=lambda m: print(f"coord-server: {m}", file=sys.stderr, flush=True))
+    httpd = _Server((host, port), make_handler(coord, oidc, mtls=bool(client_ca), authority=authority, pusher=pusher,
+                                               public_url=public_url, version=_version()))
+    httpd.pusher = pusher
     httpd.refresh_server_cert = lambda: False
     if tls_cert:
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -242,8 +302,13 @@ def main(argv=None) -> int:
     p.add_argument("--check-seconds", type=float,
                    help="how often to check the server cert (default 60 for watch, else 3600)")
     p.add_argument("--client-ca"); p.add_argument("--crl")
+    p.add_argument("--push-allow", default="", help="A2A push-notification webhooks may target these hosts "
+                   "(comma list; .suffix for a domain; loopback is always allowed), e.g. .dci.local")
+    p.add_argument("--public-url", help="base URL advertised in the A2A agent card (default: from the request)")
     p.add_argument("--oidc-introspect-url"); p.add_argument("--oidc-client-id")
     p.add_argument("--oidc-client-secret")
+    p.add_argument("--oidc-cache-seconds", type=int, default=60,
+                   help="how long a token's introspection result is reused (a revoked token may work that long)")
     a = p.parse_args(argv)
     authority = None
     source_kind = a.cert_source or ("local" if a.pki else "none")
@@ -265,10 +330,12 @@ def main(argv=None) -> int:
     oidc = None
     if a.oidc_introspect_url:
         oidc = OIDCIntrospector(a.oidc_introspect_url, a.oidc_client_id or "",
-                                os.environ.get("COORD_OIDC_SECRET") or a.oidc_client_secret or "")
+                                os.environ.get("COORD_OIDC_SECRET") or a.oidc_client_secret or "",
+                                cache_seconds=a.oidc_cache_seconds)
     try:
         httpd = build_server(Coord(a.db), a.listen, a.port, a.tls_cert, a.tls_key, a.client_ca, a.crl,
-                             oidc, authority, cert_source)
+                             oidc, authority, cert_source,
+                             push_allow=[h for h in a.push_allow.split(",") if h.strip()], public_url=a.public_url)
     except OSError as e:
         if e.errno != errno.EADDRINUSE:
             raise

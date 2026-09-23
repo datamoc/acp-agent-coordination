@@ -1,0 +1,14 @@
+{
+ "comment": "git remote URL -> coord project id. Every client must reproduce these exactly.",
+ "vectors": [
+  ["", "default"],
+  ["git@github.com:Org/Repo.git", "github.com/org/repo"],
+  ["https://user@github.com/org/repo", "github.com/org/repo"],
+  ["https://github.com/datamoc/acp-agent-coordination.git", "github.com/datamoc/acp-agent-coordination"],
+  ["https://gitlab.dci.local/team/sub/repo.git", "gitlab.dci.local/team/sub/repo"],
+  ["git@gitlab.dci.local:team/sub/repo.git", "gitlab.dci.local/team/sub/repo"],
+  ["ssh://git@gitlab.dci.local:2222/team/sub/repo.git", "gitlab.dci.local/team/sub/repo"],
+  ["https://oauth2:tok@gitlab.dci.local:443/team/sub/repo", "gitlab.dci.local/team/sub/repo"],
+  ["https://gitlab.dci.local/team/repo/", "gitlab.dci.local/team/repo"]
+ ]
+}

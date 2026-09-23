@@ -9,6 +9,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -149,12 +150,14 @@ def ask_keeps_claim_and_advisor_cannot_write():
     cl = c.claim(a, "src/parser/", tree=True)
     r = c.ask(a, cl["claim"], b["name"], "Second opinion on the deadlock?")
     assert r["kept"] and c.locks()[0]["owner"] == "claude-01"
-    assert {"session": "codex-01", "role": "advisor"} in c.roles(cl["claim"])
+    assert {"session": "codex-01", "role": "advisor", "status": "granted"} in c.roles(cl["claim"])   # advice: immediate
     assert c.inbox(b["session_id"], to_me=True)[0]["claim"] == cl["claim"]
     assert not c.check(b["session_id"], ["src/parser/x.py"])["ok"]       # advisor: no write
     raises("not_owner", c.release, b["session_id"], cl["claim"])
     raises("conflict", c.claim, b["session_id"], "src/parser/x.py")
-    c.grant(a, cl["claim"], b["name"], "delegate")                       # explicit subdomain
+    assert c.grant(a, cl["claim"], b["name"], "delegate")["status"] == "offered"   # duties: needs consent
+    raises("conflict", c.claim, b["session_id"], "src/parser/lexer/", tree=True)  # not in effect yet
+    c.role_accept(b["session_id"], cl["claim"], "delegate")
     c.claim(b["session_id"], "src/parser/lexer/", tree=True)
     assert c.check(b["session_id"], ["src/parser/x.py"])["ok"]
 
@@ -271,12 +274,257 @@ def consensus():
     raises("forbidden", c.decide, b, d["discussion"], "x")
     r = c.decide(a, d["discussion"], "Use BEGIN IMMEDIATE", proposal=p1["proposal"])
     show = c.discussion(d["discussion"])
-    assert show["status"] == "decided" and show["consensus"] and show["decided_by"] == "a-01"
+    assert show["status"] == "decided" and show["consensus"] and show["decided_by"] == "a-01"   # a, b support
     assert show["decision_document"] == r["document"]
     assert "BEGIN IMMEDIATE" in c.doc_show(r["document"])["content"]
     assert [m["kind"] for m in c.thread(show["thread"])] == ["question", "proposal", "proposal", "decision"]
     raises("closed", c.react, a, p1["proposal"], "object")
 
+
+@check
+def consensus_is_computed_not_declared():
+    """Point 1: `decide` records what the stances say, never what the decider claims."""
+    c, _ = fresh()
+    a, b, x = (c.whoami(n)["session_id"] for n in ("a", "b", "x"))
+    d = c.discuss(a, "open question")["discussion"]                       # open discussion
+    p = c.propose(a, d, "my idea")["proposal"]
+    err = raises("no_consensus", c.decide, a, d, "go", proposal=p)       # nobody else took a stance
+    assert "quorum not reached" in err.data["why"][0]                     # 0.2.1 recorded "consensus: yes"
+    raises("reason_required", c.decide, a, d, "go", proposal=p, consensus=False)
+    r = c.decide(a, d, "go", proposal=p, consensus=False, reason="nobody else around")
+    assert r["consensus"] is False and c.discussion(d)["consensus"] is False
+    d = c.discuss(a, "second")["discussion"]
+    p = c.propose(a, d, "idea")["proposal"]
+    c.react(b, p, "object", "breaks multi-process")
+    raises("no_consensus", c.decide, a, d, "go anyway", proposal=p)     # objections block a silent decision
+    r = c.decide(a, d, "go anyway", proposal=p, consensus=False, reason="deadline")
+    assert r["consensus"] is False and any("b-01" in w for w in r["why"])
+    detail = c.discussion(d)["consensus_detail"]
+    assert {q["name"]: q["stance"] for q in detail["participants"]} == {"a-01": "support", "b-01": "object"}
+    doc = c.doc_show(c.discussion(d)["decision_document"])["content"]
+    assert "consensus: no" in doc and "b-01: object" in doc and "reason: deadline" in doc
+    d = c.discuss(a, "third")["discussion"]                             # --no-consensus only lowers
+    p = c.propose(a, d, "idea")["proposal"]
+    c.react(b, p, "support")
+    assert c.decide(a, d, "go", proposal=p, consensus=False, reason="not convinced")["consensus"] is False
+    d = c.discuss(a, "fourth")["discussion"]
+    raises("no_consensus", c.decide, a, d, "no proposal")               # nothing to agree on
+    assert c.decide(a, d, "no proposal", consensus=False, reason="closing")["consensus"] is False
+
+
+@check
+def consensus_participants_rules_and_quorum():
+    """Points 2 and 3: named participants, unanimous / majority / no-objection, quorum."""
+    c, _ = fresh()
+    a, b, x, y = (c.whoami(n)["session_id"] for n in ("a", "b", "x", "y"))
+
+    def run(rule, stances, quorum=None, with_=("b-01", "x-01", "y-01")):
+        d = c.discuss(a, f"{rule} {stances}", participants=list(with_), rule=rule, quorum=quorum)["discussion"]
+        p = c.propose(a, d, "idea")["proposal"]
+        for sid, st in zip((b, x, y), stances):
+            if st:
+                c.react(sid, p, st)
+        ev = c.discussion(d)["proposals"][0]["consensus"]
+        r = c.decide(a, d, "decided", proposal=p) if ev["met"] else \
+            c.decide(a, d, "decided", proposal=p, consensus=False, reason="override")
+        return d, dict(r, why=ev["why"])
+
+    assert run("unanimous", ("support", "support", "support"))[1]["consensus"]
+    assert run("unanimous", ("support", "abstain", "support"))[1]["consensus"]           # abstain is fine
+    r = run("unanimous", ("support", "support", None))[1]
+    assert not r["consensus"] and any("no stance from y-01" in w for w in r["why"])     # silence blocks
+    assert not run("unanimous", ("support", "need-more-info", "support"))[1]["consensus"]
+    assert run("majority", ("support", "support", "object"))[1]["consensus"]            # a, b, x: 3 of 4
+    r = run("majority", ("support", "object", None))[1]                                 # a, b: 2 of 4 - a tie
+    assert not r["consensus"] and "2 of 4" in r["why"][0]
+    assert run("no-objection", (None, None, None))[1]["consensus"] is False               # quorum 2: only a
+    assert run("no-objection", ("abstain", None, None))[1]["consensus"]                  # silence = consent
+    assert not run("no-objection", (None, "object", None))[1]["consensus"]
+    r = run("no-objection", ("support", None, None), quorum=3)[1]
+    assert not r["consensus"] and "quorum not reached" in r["why"][0]
+    # only participants count: an outsider's objection is shown, not counted
+    d = c.discuss(a, "pair", participants=["b-01"])["discussion"]
+    p = c.propose(b, d, "b's idea")["proposal"]                          # author b: implied support
+    c.react(x, p, "object")
+    show = c.discussion(d)
+    assert show["participants"] == ["a-01", "b-01"] and show["rule"] == "unanimous" and show["quorum"] == 2
+    ev = show["proposals"][0]["consensus"]
+    assert ev["met"] and [q["implied"] for q in ev["participants"]] == [True, True]
+    assert show["proposals"][0]["tally"]["object"] == 1                   # visible in the tally
+    assert c.decide(a, d, "adopt b's idea", proposal=p)["consensus"]
+    raises("bad_rule", c.discuss, a, "t", rule="dictator")
+    raises("bad_quorum", c.discuss, a, "t", participants=["b-01"], quorum=3)
+    raises("unknown_recipient", c.discuss, a, "t", participants=["ghost-01"])
+
+
+def _dms(c, session):
+    return [m["body"] for m in c.inbox(session, to_me=True, limit=None)]
+
+
+@check
+def joint_decisions_deadlines_and_notifications():
+    """4-5: objections block a silent decision; any participant may decide once consensus is
+    reached; after the deadline silence counts as agreement; invitations and outcomes are DMs."""
+    c, clock = fresh()
+    a, b, x, out = (c.whoami(n)["session_id"] for n in ("a", "b", "x", "out"))
+    d = c.discuss(a, "Lock strategy?", participants=["b-01", "x-01"], deadline="48h")
+    assert d["deadline"] and any("[" + d["discussion"] + "] a-01 asks for your agreement" in m for m in _dms(c, b))
+    p = c.propose(a, d["discussion"], "BEGIN IMMEDIATE")["proposal"]
+    c.react(b, p, "support")
+    err = raises("no_consensus", c.decide, a, d["discussion"], "go", proposal=p)
+    assert any("no stance from x-01" in w for w in err.data["why"])       # silence, before the deadline
+    raises("forbidden", c.decide, out, d["discussion"], "go", proposal=p)  # not a participant
+    raises("forbidden", c.decide, b, d["discussion"], "go", proposal=p,     # participants can't override
+           consensus=False, reason="impatient")
+    for _ in range(49 * 3):                                               # 49 h pass; agents stay live
+        clock.t += 1200
+        for sid in (a, b, x):
+            c.heartbeat(sid)
+    ev = c.discussion(d["discussion"])["proposals"][0]["consensus"]
+    assert ev["met"] and [q.get("silent_past_deadline", False) for q in ev["participants"]] == [False, False, True]
+    r = c.decide(b, d["discussion"], "BEGIN IMMEDIATE it is", proposal=p)   # joint: a participant decides
+    assert r["consensus"] and c.discussion(d["discussion"])["decided_by"] == "b-01"
+    assert any("decided" in m and "consensus: yes" in m for m in _dms(c, a))
+    assert any("decided" in m for m in _dms(c, x))
+    doc = c.doc_show(r["document"])["content"]
+    assert "x-01: support (implied)" in doc
+    raises("bad_deadline", c.discuss, a, "t", deadline="yesterday")
+    raises("bad_deadline", c.discuss, a, "t", deadline="1970-01-01T00:00Z")   # past (the test clock is 1970)
+
+
+@check
+def tasks_and_roles_are_mutual():
+    """6: an assignment is an offer the assignee accepts or declines; coeditor/delegate roles too."""
+    c, _ = fresh()
+    a, b, x = (c.whoami(n)["session_id"] for n in ("a", "b", "x"))
+    t = c.task_create(a, "Review the parser", assign="b-01")["task"]
+    assert c.task_get(t)["status"] == "offered" and c.task_get(t)["assigned"] == "b-01"
+    assert any(f"[{t}] a-01 offers you a task" in m for m in _dms(c, b))
+    assert [x["task"] for x in c.poll(b)["tasks"]] == [t]                # the offer shows in b's poll
+    raises("forbidden", c.task_accept, x, t)                            # not offered to x
+    c.task_accept(b, t)
+    assert c.task_get(t)["status"] == "accepted" and any("b-01 accepted" in m for m in _dms(c, a))
+    t2 = c.task_create(a, "Rewrite docs", assign="b-01")["task"]
+    r = c.task_decline(b, t2, "no time this week")
+    assert r["status"] == "open" and c.task_get(t2)["assigned"] is None
+    assert "no time this week" in c.task_get(t2)["note"] and any("b-01 declined" in m for m in _dms(c, a))
+    c.task_accept(x, t2)                                                  # back to open: anyone may take it
+    raises("forbidden", c.task_decline, b, t2)                            # no longer b's
+    # roles: advice is immediate, duties need consent
+    cl = c.claim(a, "src/", tree=True)["claim"]
+    assert c.grant(a, cl, "x-01", "reviewer")["status"] == "granted"
+    assert c.grant(a, cl, "b-01", "coeditor")["status"] == "offered"
+    assert any(f"offers you the coeditor role" in m for m in _dms(c, b))
+    assert {"session": "b-01", "role": "coeditor", "status": "offered"} in c.roles(cl)
+    c.role_decline(b, cl, "coeditor", "not my area")
+    assert all(r["session"] != "b-01" for r in c.roles(cl)) and any("declined the coeditor" in m for m in _dms(c, a))
+    raises("missing", c.role_accept, b, cl, "coeditor")                   # nothing left to accept
+    c.grant(a, cl, "b-01", "delegate")
+    assert c.role_accept(b, cl, "delegate")["status"] == "granted"
+    assert c.grant(a, cl, "b-01", "delegate")["status"] == "granted"      # re-granting keeps it
+
+@check
+def old_database_is_migrated():
+    """A coord2.db from 0.2.x (no rule/quorum columns) opens and gets the defaults."""
+    import sqlite3
+    path = TMP / "old.db"
+    c = Coord(path)
+    with sqlite3.connect(path) as db:                                   # rebuild the 0.2.x table
+        db.executescript("DROP TABLE discussions; CREATE TABLE discussions(id INTEGER PRIMARY KEY"
+                         " AUTOINCREMENT, project_id TEXT NOT NULL, created_by TEXT NOT NULL,"
+                         " created_by_name TEXT NOT NULL, topic TEXT NOT NULL, status TEXT NOT NULL"
+                         " DEFAULT 'open', claim_id INTEGER, message_id INTEGER, decision TEXT,"
+                         " consensus INTEGER, decided_by TEXT, decided_at REAL,"
+                         " decision_document_id INTEGER, created_at REAL NOT NULL);")
+        db.execute("INSERT INTO discussions(project_id, created_by, created_by_name, topic, created_at)"
+                   " VALUES('default', 'x', 'x-01', 'from 0.2.1', 0)")
+        db.execute("CREATE TABLE requests(id INTEGER PRIMARY KEY, body TEXT)")      # unused 0.2.x table
+    c = Coord(path)
+    with sqlite3.connect(path) as db:
+        assert not db.execute("SELECT 1 FROM sqlite_master WHERE name='requests'").fetchone()   # empty: dropped
+        db.execute("CREATE TABLE requests(id INTEGER PRIMARY KEY, body TEXT)")
+        db.execute("INSERT INTO requests(body) VALUES('keep me')")
+    Coord(path)
+    with sqlite3.connect(path) as db:                                   # not empty: never dropped
+        assert db.execute("SELECT body FROM requests").fetchone()[0] == "keep me"
+    show = c.discussion("D1")
+    assert show["rule"] == "unanimous" and show["quorum"] == 2 and show["topic"] == "from 0.2.1"
+
+def _udiff(a: str, b: str) -> str:
+    """diff -u of two texts (difflib + GNU's "\\ No newline at end of file")."""
+    import difflib
+    return "".join(l if l.endswith("\n") else l + "\n\\ No newline at end of file\n"
+                   for l in difflib.unified_diff(a.splitlines(True), b.splitlines(True), "a", "b"))
+
+
+@check
+def textpatch_engine():
+    import random
+    from coordination import textpatch as tp
+    random.seed(11)
+    words = ["alpha", "beta", "", "## Title", "- item", "--- rule", "+ plus", "@@ x", "\\ back"]
+    n = 0
+    for _ in range(1500):                                              # diff -> apply round-trips
+        a = "\n".join(random.choice(words) for _ in range(random.randint(0, 25))) + ("\n" if random.random() < .7 else "")
+        bl = a.splitlines()
+        for _ in range(random.randint(1, 4)):
+            r = random.random()
+            if r < .4 and bl:
+                bl.pop(random.randrange(len(bl)))
+            elif r < .8:
+                bl.insert(random.randint(0, len(bl)), random.choice(words))
+            elif bl:
+                bl[random.randrange(len(bl))] += "!"
+        b = "\n".join(bl) + ("\n" if bl and random.random() < .7 else "")
+        if a != b:
+            assert tp.apply(a, _udiff(a, b))[0] == b, (a, b)
+            n += 1
+    assert n > 1000
+    crlf = "one\r\ntwo\r\n"                                              # CRLF documents stay CRLF
+    assert tp.apply(crlf, "@@ -1,2 +1,2 @@\n one\r\n-two\r\n+TWO\r\n")[0] == "one\r\nTWO\r\n"
+    for bad in ("hello", "@@ -1,2 +1,2 @@\n x\n", "@@ -1 +1 @@\n*bad\n"):
+        try:
+            tp.parse(bad)
+            raise AssertionError(bad)
+        except tp.PatchError:
+            pass
+
+
+@check
+def doc_patch_merges_concurrent_edits():
+    c, _ = fresh()
+    a = c.whoami("a")["session_id"]; b = c.whoami("b")["session_id"]
+    sections = "\n".join(f"## Section {i}\n" + "\n".join(f"line {i}.{j}" for j in range(8)) + "\n" for i in range(1, 6))
+    doc = c.doc_create(a, "Design", content=sections)["document"]
+    r1 = c.doc_show(doc)["content"]
+    only_s1 = r1.replace("line 1.3", "line 1.3 - clarified by a")         # a edits section 1 from r1
+    only_s4 = r1.replace("line 4.5", "line 4.5 - fixed by b")             # b edits section 4 from r1
+    assert c.doc_patch(b, doc, 1, _udiff(r1, only_s4))["merged"] is False  # b first: r2
+    r = c.doc_patch(a, doc, 1, _udiff(r1, only_s1))                        # a's r1 patch lands on r2
+    assert r["merged"] and r["revision"] == 3
+    final = c.doc_show(doc)["content"]
+    assert "clarified by a" in final and "fixed by b" in final             # both edits kept
+    assert "merged onto r2" in c.doc_history(doc)[-1]["message"]
+    # overlapping edits are refused, with the current content and the conflicting hunk
+    clash = r1.replace("line 4.5", "line 4.5 - a's other idea")
+    err = raises("revision_conflict", c.doc_patch, a, doc, 1, _udiff(r1, clash))
+    assert err.data["current_revision"] == 3 and "fixed by b" in err.data["current_content"]
+    assert err.data["failed_hunks"][0].startswith("@@")
+    # a patch that does not even match its own base revision
+    raises("patch_invalid", c.doc_patch, a, doc, 3, _udiff("unrelated\n", "text\n"))
+    raises("patch_invalid", c.doc_patch, a, doc, 3, "not a diff")
+    raises("missing", c.doc_patch, a, doc, 99, _udiff(r1, only_s1))
+    small = c.doc_create(a, "Small", content="x\n")["document"]
+    raises("no_change", c.doc_patch, a, small, 1, "@@ -1 +1 @@\n-x\n+x\n")
+    edit = _udiff(final, final.replace("line 2.0", "line 2.0 edited"))
+    first = c.doc_patch(a, doc, 3, edit, client_id="k1")
+    again = c.doc_patch(a, doc, 3, edit, client_id="k1")                  # a retried call is replayed
+    assert again["replayed"] and again["revision"] == first["revision"] == 4
+    assert c.doc_show(doc)["revision"] == 4
+    # a final document cannot be patched
+    d = c.discuss(a, "t")["discussion"]
+    dec = c.decide(a, d, "x", consensus=False, reason="test")["document"]
+    raises("final", c.doc_patch, a, dec, 1, _udiff("a\n", "b\n"))
 
 @check
 def documents():
@@ -429,24 +677,16 @@ def mtls_with_crl():
             raise AssertionError
         except CoordError as err:
             assert err.code == "forbidden"
-        # the real CLI over mTLS (whoami used to pass a positional arg RemoteCoord can't send)
         import os
         import subprocess
-        env = dict(os.environ, COORD_SERVER=url, COORD_CA=str(d / "ca.crt"), COORD_CERT=str(acrt),
-                   COORD_KEY=str(akey), COORD_PROJECT="mtls-cli")
-        env.pop("COORD_SESSION", None)
-        p = subprocess.run([sys.executable, str(Path(__file__).parent / "coord.py"), "--json", "whoami", "cli"],
-                           env=env, capture_output=True, text=True, cwd=TMP)
-        assert p.returncode == 0 and json.loads(p.stdout)["name"].startswith("cli-"), p.stdout + p.stderr
         # one-step enroll (management CLI): identity bundle + default link; the client then
         # needs only COORD_IDENTITY
         cfg_home = TMP / "xdg"
         base = {k: v for k, v in os.environ.items() if not k.startswith("COORD_")}
         base.update(XDG_CONFIG_HOME=str(cfg_home), COORD_PROJECT="enroll", PYTHONPATH=str(Path(__file__).parent))
 
-        def cli(*args, admin=False, **extra):
-            cmd = [sys.executable, "-m", "coordination.pki", "--dir", str(d)] if admin else \
-                [sys.executable, str(Path(__file__).parent / "coord.py"), "--json"]
+        def cli(*args, admin=True, **extra):
+            cmd = [sys.executable, "-m", "coordination.pki", "--dir", str(d)]
             p = subprocess.run(cmd + list(args), env=dict(base, **extra), capture_output=True, text=True, cwd=TMP)
             assert p.returncode == 0, p.stdout + p.stderr
             return json.loads(p.stdout)
@@ -457,7 +697,9 @@ def mtls_with_crl():
             assert oct((cfg_home / "coord" / "agent-a" / "agent.key").stat().st_mode & 0o777) == "0o600"
         r = cli("enroll", "agent-b", "--url", url, admin=True)        # agent-b was revoked above
         assert not r["cert_reused"] and not r["default"]
-        assert cli("whoami", "x", COORD_IDENTITY="agent-a")["name"].startswith("x-")
+        bundle = cfg_home / "coord" / "agent-a"                        # the bundle alone is enough
+        via = RemoteCoord(url, ca=str(bundle / "ca.crt"), cert=str(bundle / "agent.crt"), key=str(bundle / "agent.key"))
+        assert via.whoami(family="x")["name"].startswith("x-")
         assert cli("enroll", "agent-b", "--url", url, "--default", admin=True)["default"]
     finally:
         httpd.shutdown()
@@ -599,137 +841,62 @@ def old_ca_is_upgraded_for_strict_clients():
         else:
             os.environ["XDG_CONFIG_HOME"] = saved
 
-class FakeKeycloak:
-    """Just enough of a Keycloak realm: discovery, token (client credentials, refresh with
-    rotation, device code), device authorization, introspection, revocation."""
-
-    def __init__(self):
-        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-        import urllib.parse as up
-        self.active, self.refresh, self.requests, self.n = set(), set(), [], 0
-        self.pending = {}
-        kc = self
-
-        class H(BaseHTTPRequestHandler):
-            def log_message(self, *a):
-                pass
-
-            def reply(self, code, obj):
-                b = json.dumps(obj).encode()
-                self.send_response(code)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(b)))
-                self.end_headers()
-                self.wfile.write(b)
-
-            def do_GET(self):
-                base = kc.realm
-                self.reply(200, {"issuer": base, "token_endpoint": base + "/token",
-                                 "device_authorization_endpoint": base + "/device",
-                                 "introspection_endpoint": base + "/introspect"})
-
-            def do_POST(self):
-                f = dict(up.parse_qsl(self.rfile.read(int(self.headers["Content-Length"])).decode()))
-                path = self.path.rsplit("/", 1)[-1]
-                if path == "introspect":
-                    ok = f.get("token") in kc.active
-                    return self.reply(200, {"active": ok, "sub": "agent", "roles": ["coord:*:contributor"]}
-                                      if ok else {"active": False})
-                if path == "device":
-                    kc.pending["dc1"] = 1                      # one "authorization_pending" first
-                    return self.reply(200, {"device_code": "dc1", "user_code": "WDJB-MJHT", "interval": 0,
-                                            "expires_in": 60, "verification_uri": kc.realm + "/device-ui"})
-                g = f.get("grant_type")
-                kc.requests.append(g)
-                if g == "client_credentials" and f.get("client_secret") != "s3cret":
-                    return self.reply(401, {"error": "unauthorized_client", "error_description": "bad secret"})
-                if g == "refresh_token":
-                    if f.get("refresh_token") not in kc.refresh:
-                        return self.reply(400, {"error": "invalid_grant", "error_description": "Session not active"})
-                    kc.refresh.discard(f["refresh_token"])       # rotation: the old one is spent
-                if g.endswith("device_code"):
-                    if kc.pending.get(f.get("device_code"), 0) > 0:
-                        kc.pending[f["device_code"]] -= 1
-                        return self.reply(400, {"error": "authorization_pending"})
-                kc.n += 1
-                tok = {"access_token": f"at{kc.n}", "expires_in": 60, "token_type": "Bearer"}
-                kc.active.add(tok["access_token"])
-                if g != "client_credentials":
-                    tok["refresh_token"] = f"rt{kc.n}"
-                    kc.refresh.add(tok["refresh_token"])
-                self.reply(200, tok)
-
-        self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), H)
-        self.realm = f"http://127.0.0.1:{self.httpd.server_address[1]}/realms/corp"
-        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
-
-    def introspector(self):
-        return OIDCIntrospector(self.realm + "/introspect", "coord", "srv", cache_seconds=0)
-
-
 @check
-def keycloak_tokens_refresh_themselves():
-    from coordination.oidc_client import TokenProvider
-    kc = FakeKeycloak()
-    httpd = build_server(fresh()[0], "127.0.0.1", 0, oidc=kc.introspector())
+def a2a_binding():
+    """The A2A v1.0 face of the server: agent card per auth mode, JSON-RPC errors, webhook policy."""
+    from coordination import a2a
+
+    def rpc(url, method, params=None, token=None):
+        headers = {"Content-Type": "application/json", **({"Authorization": f"Bearer {token}"} if token else {})}
+        body = json.dumps({"jsonrpc": "2.0", "id": 7, "method": method, "params": params or {}}).encode()
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        try:
+            with opener.open(urllib.request.Request(url + "/a2a", data=body, headers=headers), timeout=10) as r:
+                return json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            return json.loads(e.read())
+
+    c, _ = fresh()
+    httpd = build_server(c, "127.0.0.1", 0, push_allow=[".dci.local"])
     url = f"http://127.0.0.1:{_serve(httpd)}"
-    clock = [time.time()]
     try:
-        # service account (client credentials): no human, token fetched, cached, refetched
-        tp = TokenProvider("agent-svc", issuer=kc.realm, client_secret="s3cret",
-                           state_dir=TMP / "oidc-a", clock=lambda: clock[0])
-        cl = RemoteCoord(url, token=tp)
-        sid = cl.whoami(family="svc")["session_id"]
-        cl.post(session=sid, body="hello from a service account")
-        assert kc.requests == ["client_credentials"]
-        if os.name != "nt":                                          # no POSIX modes on Windows
-            assert oct(tp.state_file.stat().st_mode & 0o777) == "0o600"
-        again = TokenProvider("agent-svc", issuer=kc.realm, client_secret="s3cret",
-                              state_dir=TMP / "oidc-a", clock=lambda: clock[0])
-        RemoteCoord(url, token=again).presence()                     # next process: cached token
-        assert kc.requests == ["client_credentials"]
-        clock[0] += 61                                               # the old bug: token expired
-        cl.heartbeat(session=sid, status="still here")
-        assert kc.requests == ["client_credentials"] * 2
-        kc.active.clear()                                            # revoked server-side
-        cl.heartbeat(session=sid, status="after revocation")         # 401 -> new token -> retry
-        assert kc.requests == ["client_credentials"] * 3
-        bad = TokenProvider("agent-svc", issuer=kc.realm, client_secret="nope", state_dir=TMP / "oidc-x")
-        raises("unauthenticated", RemoteCoord(url, token=bad).presence)
-
-        # a person (device login): `coord login` once, then refresh tokens do the rest
-        tp2 = TokenProvider("agent-cli", issuer=kc.realm, state_dir=TMP / "oidc-b", clock=lambda: clock[0])
-        err = raises("unauthenticated", RemoteCoord(url, token=tp2).presence)
-        assert "coord login" in str(err)
-        shown = []
-        assert tp2.login(show=shown.append, sleep=lambda s: None)["logged_in"]
-        assert "WDJB-MJHT" in shown[0]
-        cl2 = RemoteCoord(url, token=tp2)
-        sid2 = cl2.whoami(family="human")["session_id"]
-        rt_before = json.loads(tp2.state_file.read_text())["refresh_token"]
-        clock[0] += 61
-        cl2.heartbeat(session=sid2, status="refreshed")               # refresh grant, rotated
-        assert kc.requests[-1] == "refresh_token"
-        assert json.loads(tp2.state_file.read_text())["refresh_token"] != rt_before
-        kc.refresh.clear()                                           # SSO session ended
-        clock[0] += 61
-        err = raises("unauthenticated", cl2.presence)
-        assert "coord login" in str(err)
-        assert tp2.logout() == {"logged_out": False}                 # state already cleared
-
-        # the real CLI, configured only through COORD_OIDC_* (e.g. in ~/.config/coord/env)
-        import subprocess
-        env = {k: v for k, v in os.environ.items() if not k.startswith("COORD_")}
-        env.update(COORD_CONFIG=str(TMP / "no-such-config"), XDG_CONFIG_HOME=str(TMP / "xdg-oidc"),
-                   COORD_SERVER=url, COORD_OIDC_ISSUER=kc.realm, COORD_OIDC_CLIENT_ID="agent-svc",
-                   COORD_OIDC_CLIENT_SECRET="s3cret", COORD_PROJECT="kc")
-        for args in (["whoami", "cli"], ["presence"]):
-            p = subprocess.run([sys.executable, str(Path(__file__).parent / "coord.py"), "--json", *args],
-                               env=env, capture_output=True, text=True, cwd=TMP)
-            assert p.returncode == 0, p.stdout + p.stderr
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        card = json.loads(opener.open(url + "/.well-known/agent-card.json", timeout=10).read())
+        assert card["supportedInterfaces"][0] == {"url": url + "/a2a", "protocolBinding": "JSONRPC", "protocolVersion": "1.0"}
+        assert card["capabilities"]["pushNotifications"] and card["securitySchemes"] == {}
+        assert {s["id"] for s in card["skills"]} == {"coord-ops", "delegate"}
+        assert rpc(url, "NoSuchMethod")["error"]["code"] == a2a.METHOD_NOT_FOUND
+        assert rpc(url, "SubscribeToTask", {"id": "T1"})["error"]["code"] == a2a.UNSUPPORTED
+        assert rpc(url, "GetTask", {"id": "T99"})["error"]["code"] == a2a.TASK_NOT_FOUND
+        bad = opener.open(urllib.request.Request(url + "/a2a", data=b'{"id": 1}', headers={"Content-Type": "application/json"}))
+        assert json.loads(bad.read())["error"]["code"] == a2a.INVALID_REQUEST
+        sid = rpc(url, "SendMessage", {"message": {"messageId": "m", "role": "ROLE_USER",
+                                                   "parts": [{"data": {"op": "whoami", "args": {"family": "a"}}}]}}
+                  )["result"]["message"]["parts"][0]["data"]["session_id"]
+        t = rpc(url, "SendMessage", {"message": {"messageId": "m2", "role": "ROLE_USER", "parts": [{"text": "do it"}],
+                                                 "metadata": {"coord": {"session": sid}}}})["result"]["task"]
+        assert t["status"]["state"] == "TASK_STATE_SUBMITTED"
+        refused = rpc(url, "CreateTaskPushNotificationConfig", {"taskId": t["id"], "url": "http://10.0.0.5/hook"})
+        assert refused["error"]["code"] == a2a.INVALID_PARAMS                  # SSRF guard: not allowed
+        cfg = rpc(url, "CreateTaskPushNotificationConfig", {"taskId": t["id"], "url": "https://ci.dci.local/hook"})["result"]
+        assert rpc(url, "ListTaskPushNotificationConfigs", {"taskId": t["id"]})["result"]["configs"][0]["id"] == cfg["id"]
+        assert rpc(url, "DeleteTaskPushNotificationConfig", {"taskId": t["id"], "id": cfg["id"]})["result"] == {}
+        assert rpc(url, "ListTaskPushNotificationConfigs", {"taskId": t["id"]})["result"]["configs"] == []
+        assert rpc(url, "CancelTask", {"id": t["id"]})["error"]["code"] == a2a.INVALID_PARAMS   # needs a session
+        assert rpc(url, "CancelTask", {"id": t["id"], "metadata": {"coord": {"session": sid}}}
+                   )["result"]["status"]["state"] == "TASK_STATE_CANCELED"
+        assert rpc(url, "CancelTask", {"id": t["id"], "metadata": {"coord": {"session": sid}}}
+                   )["error"]["code"] == a2a.TASK_NOT_CANCELABLE
     finally:
         httpd.shutdown()
-        kc.httpd.shutdown()
+    assert a2a.host_allowed("http://127.0.0.1:9/x", []) and not a2a.host_allowed("file:///etc/passwd", ["*"])
+    assert a2a.host_allowed("https://a.dci.local/", [".dci.local"]) and not a2a.host_allowed("https://dci.local.evil.com/", [".dci.local"])
+    assert not a2a.host_allowed("http://169.254.169.254/", [".dci.local"])
+    # mTLS / OIDC servers advertise their scheme
+    card = a2a.agent_card("https://h", mtls=True, oidc_url=None, version="x")
+    assert card["securitySchemes"]["mtls"] == {"mtlsSecurityScheme": {"description": "client certificate from coord-admin enroll"}}
+    card = a2a.agent_card("https://h", mtls=False, oidc_url="https://sso/realms/r/.well-known/openid-configuration", version="x")
+    assert card["securitySchemes"]["oidc"]["openIdConnectSecurityScheme"]["openIdConnectUrl"].endswith("openid-configuration")
 
 _EXTERNAL_SCRIPT = r"""
 import json, shutil, socket, ssl, sys, threading, time
@@ -828,15 +995,13 @@ def corporate_oidc_with_external_cert_sources():
 _NO_PKI_SCRIPT = r"""
 import json, sys, threading
 sys.modules["coordination.pki"] = None          # any `import coordination.pki` now fails
-import coord
+from coordination import local
 from coordination.client import RemoteCoord
 from coordination.server import OIDCIntrospector, build_server
 from coordination.service import Coord
 
-# local mode: SQLite, no server, and not even the network client
-sys.modules.pop("coordination.client")
-assert coord.main(["whoami", "local"]) == 0
-assert "coordination.client" not in sys.modules and "coordination.oidc_client" not in sys.modules
+# local mode (coord-local, what the TS client runs): SQLite, no server, no PKI
+assert local.run({"db": sys.argv[1] + "-local", "op": "whoami", "args": {"family": "local"}})["ok"]
 
 class Resp:
     def __init__(self, b): self.b = b
@@ -865,69 +1030,6 @@ def local_and_oidc_modes_never_load_pki():
     p = subprocess.run([sys.executable, "-c", _NO_PKI_SCRIPT, str(TMP / "nopki.db")], env=env,
                        capture_output=True, text=True, cwd=TMP)
     assert p.returncode == 0 and p.stdout.strip().endswith("ok"), p.stdout + p.stderr
-
-@check
-def cli_roundtrip():
-    import os
-    import subprocess
-    env = dict(os.environ, COORD_DB=str(TMP / "cli.db"), COORD_PROJECT="cli-proj")
-    env.pop("COORD_SERVER", None)
-    here = Path(__file__).parent
-
-    def run(*args, session=None, ok=True):
-        e = dict(env, **({"COORD_SESSION": session} if session else {}))
-        p = subprocess.run([sys.executable, str(here / "coord.py"), "--json", *args], env=e,
-                           capture_output=True, text=True, cwd=TMP)
-        if ok:
-            assert p.returncode == 0, p.stdout + p.stderr
-        return json.loads(p.stdout) if p.stdout.strip() else None
-
-    s = run("whoami", "cli")["session_id"]
-    c = run("claim", "src/", session=s)
-    assert c["scope_type"] == "tree"
-    run("post", "--kind", "info", "starting", session=s)
-    assert run("inbox", session=s)[0]["body"] == "starting"
-    d = run("doc", "create", "--kind", "plan", "--content", "step 1", "Plan", session=s)
-    run("doc", "edit", d["document"], "--base-revision", "1", "--content", "step 2", session=s)
-    assert run("doc", "show", d["document"])["revision"] == 2
-    bad = run("doc", "edit", d["document"], "--base-revision", "1", "--content", "x", session=s, ok=False)
-    assert bad["error"] == "revision_conflict"
-    assert run("release", "--all", session=s)["released"] == [c["claim"]]
-    assert run("context", session=s)["me"]["project"] == "cli-proj"
-
-    # A second whoami in the same checkout must not hijack a live session's file.
-    (TMP / ".coord-session").unlink(missing_ok=True)
-    first = run("whoami", "cli")["session_id"]
-    assert (TMP / ".coord-session").read_text().strip() == first
-    second = run("whoami", "cli")
-    assert "warning" in second and (TMP / ".coord-session").read_text().strip() == first
-    run("end", session=first)
-    third = run("whoami", "cli")["session_id"]
-    assert (TMP / ".coord-session").read_text().strip() == third
-
-
-@check
-def config_file():
-    import coord
-    cfg = TMP / "cfgdir" / "env"
-    cfg.parent.mkdir()
-    cfg.write_text("# comment\nexport COORD_SERVER=https://localhost:1338\nCOORD_CA=pki/ca.crt\n"
-                   "COORD_KEY='~/k.key'\nCOORD_PROJECT=from-file\nOTHER=x\n")
-    saved = dict(os.environ)
-    try:
-        os.environ.update(COORD_CONFIG=str(cfg), COORD_PROJECT="from-env")
-        for k in ("COORD_SERVER", "COORD_CA", "COORD_KEY", "OTHER"):
-            os.environ.pop(k, None)
-        assert coord.load_config() == cfg.resolve()                 # Windows: 8.3 temp names
-        assert os.environ["COORD_SERVER"] == "https://localhost:1338"
-        assert os.environ["COORD_CA"] == str((cfg.parent / "pki/ca.crt").resolve())
-        assert os.environ["COORD_KEY"] == str(Path.home() / "k.key")
-        assert os.environ["COORD_PROJECT"] == "from-env"      # environment wins
-        assert "OTHER" not in os.environ                      # only COORD_* keys
-    finally:
-        os.environ.clear()
-        os.environ.update(saved)
-
 
 def main():
     failed = 0

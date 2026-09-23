@@ -1,7 +1,7 @@
-# GitLab CI: the same suites as .github/workflows/ci.yml.
+# GitLab CI: the same suites as .github/workflows/ci.yml (Python server + TS client).
 #
 # Project/group CI variables you may need on an internal instance:
-#   UV_IMAGE           an image with uv + Python (default below; mirror it if runners
+#   UV_IMAGE           an image with uv + Python (Node 22 is added if missing; mirror it if runners
 #                      cannot reach ghcr.io)
 #   CORPORATE_CA_PEM   "File" variable with the corporate root CA, when PyPI is reached
 #                      through a TLS-inspecting proxy (pyproject sets uv system-certs)
@@ -40,13 +40,15 @@ test:linux:
         cp "$CORPORATE_CA_PEM" /usr/local/share/ca-certificates/corporate-ca.crt && update-ca-certificates >/dev/null
       fi
     - uv sync --locked
+    - |
+      if ! command -v node >/dev/null; then
+        apt-get install -y -qq --no-install-recommends nodejs npm >/dev/null
+      fi
   script:
-    - uv run smoke_test.py
-    - uv run test_store.py
-    - uv run test_client.py
-    - uv run test_logging.py
+    - uv run tools/gen_schema.py --check
     - uv run test_coord.py
-    - uv run test_tls.py
+    - cd clients/ts && npm ci && npm test
+    - npm run bundle-plugin && git diff --exit-code -- ../../plugins/coord/client
   after_script:
     - uv cache prune --ci
 
@@ -56,10 +58,9 @@ test:windows:
   extends: .uv-cache
   script:
     - uv sync --locked
-    - uv run smoke_test.py
-    - uv run test_store.py
+    - uv run tools/gen_schema.py --check
     - uv run test_coord.py
-    - uv run test_tls.py
+    - cd clients/ts; npm ci; npm test
   rules:
     - if: $WINDOWS_RUNNER_TAG == null || $WINDOWS_RUNNER_TAG == ""
       when: never
