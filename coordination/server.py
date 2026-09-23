@@ -15,11 +15,15 @@ our management (local), an external renewer's files (watch: cert-manager,
 certmonger/AD CS) or a command (step-ca, AD CS scripts); it is loaded live.
 No certificate lives longer than pki.MAX_DAYS (47); longer ones are
 renewed at the first check or request.
+
+Logging goes to stderr: -q errors only, default adds warnings and
+certificate renewals, -v one line per request, -vv auth and op details.
 """
 
 import argparse
 import errno
 import json
+import logging
 import os
 import ssl
 import sys
@@ -36,6 +40,9 @@ from .net import is_loopback
 from .service import READ_OPS, WRITE_OPS, Coord, CoordError
 
 PROJECT_ROLES = {"viewer": 0, "contributor": 1, "admin": 2}
+VERBOSE = 15   # -v: one line per request, between INFO (default) and DEBUG (-vv)
+logging.addLevelName(VERBOSE, "VERBOSE")
+log = logging.getLogger("coord-server")
 
 
 class OIDCIntrospector:
@@ -56,6 +63,7 @@ class OIDCIntrospector:
         with self._lock:
             hit = self._cache.get(token)
             if hit and hit[0] > time.time():
+                log.debug("oidc: token introspection cached, sub=%s", hit[1].get("sub"))
                 return hit[1]
         data = urllib.parse.urlencode({"token": token, "client_id": self.client_id,
                                        "client_secret": self.client_secret}).encode()
@@ -63,6 +71,7 @@ class OIDCIntrospector:
                                      headers={"Content-Type": "application/x-www-form-urlencoded"})
         with self.opener(req, timeout=10) as resp:
             info = json.loads(resp.read())
+        log.debug("oidc: introspected token: active=%s sub=%s", info.get("active"), info.get("sub"))
         if not info.get("active"):
             raise CoordError("unauthenticated", "token is not active")
         with self._lock:
@@ -86,7 +95,10 @@ def make_handler(coord, oidc: OIDCIntrospector | None, mtls: bool, authority=Non
                  public_url: str | None = None, version: str = "0"):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):
-            pass
+            pass                                             # requests are logged by _send
+
+        def _start(self):
+            self._t0, self._op, self._who, self._renewal = time.monotonic(), None, None, None
 
         def _send(self, code: int, payload: dict, content_type: str = "application/json", renewal_in_body=True):
             if getattr(self, "_renewal", None) and renewal_in_body:
@@ -99,35 +111,45 @@ def make_handler(coord, oidc: OIDCIntrospector | None, mtls: bool, authority=Non
                 self.send_header("Coord-Certificate", a2a.certificate_header(self._renewal))
             self.end_headers()
             self.wfile.write(body)
+            if log.isEnabledFor(VERBOSE):
+                t0 = getattr(self, "_t0", None)
+                log.log(VERBOSE, "%s %s %s%s %d %s%s", self.client_address[0], self.command, self.path,
+                        f" {self._op}" if getattr(self, "_op", None) else "", code,
+                        getattr(self, "_who", None) or "-",
+                        f" {(time.monotonic() - t0) * 1000:.0f}ms" if t0 is not None else "")
 
         def _check_cert(self, cert: dict):
             """Ask management whether the cert is still valid; fetch a renewal when it is due."""
             if authority is None:
                 return
             if authority.status(cert.get("serialNumber", "")) != "V":
+                log.debug("mtls: certificate %s rejected: revoked or unknown", cert.get("serialNumber"))
                 raise CoordError("unauthenticated", "client certificate is revoked or unknown to the CA")
             try:
                 authority.confirm(cert["serialNumber"])   # in use: retire what it superseded
             except Exception as e:
-                print(f"coord-server: could not retire superseded certs: {e!r}", file=sys.stderr, flush=True)
+                log.warning("could not retire superseded certs: %r", e)
             if authority.due(ssl.cert_time_to_seconds(cert["notBefore"]), ssl.cert_time_to_seconds(cert["notAfter"])):
                 try:
                     self._renewal = authority.renew(self.connection.getpeercert(binary_form=True))
+                    log.info("client certificate %s renewed", cert["serialNumber"])
                 except Exception as e:   # a failed renewal must not fail the request
-                    print(f"coord-server: renewal failed: {e!r}", file=sys.stderr, flush=True)
+                    log.error("renewal failed: %r", e)
 
         def _identity(self):
             if mtls:
                 cert = self.connection.getpeercert()
                 self._check_cert(cert)
                 subject = dict(x[0] for x in cert.get("subject", ()))
-                return f"mtls:{subject.get('commonName')}", None
+                self._who = f"mtls:{subject.get('commonName')}"
+                return self._who, None
             if oidc:
                 auth = self.headers.get("Authorization", "")
                 if not auth.lower().startswith("bearer "):
                     raise CoordError("unauthenticated", "missing bearer token")
                 info = oidc.introspect(auth[7:].strip())
-                return f"oidc:{info.get('sub')}", info
+                self._who = f"oidc:{info.get('sub')}"
+                return self._who, info
             return None, None
 
         def _base_url(self) -> str:
@@ -137,6 +159,7 @@ def make_handler(coord, oidc: OIDCIntrospector | None, mtls: bool, authority=Non
             return f"{scheme}://{self.headers.get('Host') or '%s:%s' % self.server.server_address[:2]}"
 
         def do_GET(self):
+            self._start()
             if self.path == "/health":
                 return self._send(200, {"ok": True})
             if self.path == "/.well-known/agent-card.json":
@@ -147,6 +170,9 @@ def make_handler(coord, oidc: OIDCIntrospector | None, mtls: bool, authority=Non
 
         def _run_op(self, op: str, args: dict, principal, info):
             """One coord op with the caller's identity checks - shared by /call and /a2a."""
+            self._op = op
+            if log.isEnabledFor(logging.DEBUG):
+                log.debug("%s %s args=%s", principal or "-", op, json.dumps(args, default=str)[:300])
             if op not in READ_OPS | WRITE_OPS:
                 raise CoordError("bad_op", f"unknown op {op!r}")
             args.pop("principal", None)                      # only the server sets it
@@ -161,6 +187,8 @@ def make_handler(coord, oidc: OIDCIntrospector | None, mtls: bool, authority=Non
                         coord.task_get(args["task"])["project"] if args.get("task") and op.startswith("task_") else None
                     ) or "default"
                     need = PROJECT_ROLES["contributor"] if op in WRITE_OPS else PROJECT_ROLES["viewer"]
+                    log.debug("oidc: %s needs role %d on project %s, has %d", principal, need, project,
+                              oidc.project_role(info, project))
                     if oidc.project_role(info, project) < need:
                         raise CoordError("forbidden", f"no {'contributor' if need else 'viewer'} role "
                                          f"on project {project}")
@@ -169,6 +197,7 @@ def make_handler(coord, oidc: OIDCIntrospector | None, mtls: bool, authority=Non
             except TypeError as e:
                 raise CoordError("bad_args", str(e))
             if pusher is not None and op in a2a.TASK_OPS:
+                log.debug("push: notifying webhooks of task %s", result["task"])
                 pusher.notify(result["task"])                # webhooks: accepted / done / cancelled
             return result
 
@@ -176,7 +205,7 @@ def make_handler(coord, oidc: OIDCIntrospector | None, mtls: bool, authority=Non
             return json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
 
         def do_POST(self):
-            self._renewal = None
+            self._start()
             if self.path == "/a2a":
                 return self._a2a()
             if self.path != "/call":
@@ -188,8 +217,10 @@ def make_handler(coord, oidc: OIDCIntrospector | None, mtls: bool, authority=Non
                 self._send(200, {"ok": True, "result": result})
             except CoordError as e:
                 code = {"unauthenticated": 401, "forbidden": 403, "bad_op": 400, "bad_args": 400}.get(e.code, 409)
+                log.debug("%s: %s: %s", self._op or "-", e.code, e)
                 self._send(code, {"ok": False, "error": e.code, "message": str(e), "data": e.data})
             except Exception as e:
+                log.exception("internal error in %s", self._op or "-")
                 self._send(500, {"ok": False, "error": "internal", "message": repr(e)})
 
         def _a2a(self):
@@ -198,15 +229,18 @@ def make_handler(coord, oidc: OIDCIntrospector | None, mtls: bool, authority=Non
                 rpc = self._body()
             except ValueError as e:
                 return send(200, {"jsonrpc": "2.0", "id": None, "error": {"code": a2a.PARSE_ERROR, "message": str(e)}})
+            self._op = rpc.get("method") if isinstance(rpc, dict) else None
             try:
                 principal, info = self._identity()
             except CoordError as e:
+                log.debug("%s: %s: %s", self._op or "-", e.code, e)
                 return send(401, {"jsonrpc": "2.0", "id": rpc.get("id") if isinstance(rpc, dict) else None,
                                   "error": {"code": a2a.COORD_ERROR, "message": str(e), "data": {"error": e.code}}})
             try:
                 status, out = a2a.handle(rpc, lambda op, args: self._run_op(op, args, principal, info),
                                          pusher or a2a.Pusher(coord, []), principal)
             except Exception as e:
+                log.exception("internal error in %s", self._op or "-")
                 status, out = 200, {"jsonrpc": "2.0", "id": rpc.get("id") if isinstance(rpc, dict) else None,
                                     "error": {"code": a2a.INTERNAL, "message": repr(e)}}
             send(status, out)
@@ -245,7 +279,7 @@ def build_server(coord, host="127.0.0.1", port=1337, tls_cert=None, tls_key=None
                              "or --oidc-introspect-url")
     if client_ca and not (tls_cert and tls_key):
         raise SystemExit("--client-ca needs --tls-cert/--tls-key")
-    pusher = a2a.Pusher(coord, push_allow or [], log=lambda m: print(f"coord-server: {m}", file=sys.stderr, flush=True))
+    pusher = a2a.Pusher(coord, push_allow or [], log=log.warning)
     httpd = _Server((host, port), make_handler(coord, oidc, mtls=bool(client_ca), authority=authority, pusher=pusher,
                                                public_url=public_url, version=_version()))
     httpd.pusher = pusher
@@ -273,11 +307,9 @@ def build_server(coord, host="127.0.0.1", port=1337, tls_cert=None, tls_key=None
                         return False
                     ctx.load_cert_chain(tls_cert, tls_key)
                 except Exception as e:   # keep serving on the current cert, retry next check
-                    print(f"coord-server: server certificate renewal ({cert_source.name}) failed: {e!r}",
-                          file=sys.stderr, flush=True)
+                    log.error("server certificate renewal (%s) failed: %r", cert_source.name, e)
                     return False
-                print(f"coord-server: server certificate renewed ({cert_source.name}: {tls_cert})",
-                      file=sys.stderr, flush=True)
+                log.info("server certificate renewed (%s: %s)", cert_source.name, tls_cert)
                 return True
             httpd.refresh_server_cert = refresh_server_cert
     return httpd
@@ -286,6 +318,10 @@ def build_server(coord, host="127.0.0.1", port=1337, tls_cert=None, tls_key=None
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="coord-server", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    loud = p.add_mutually_exclusive_group()
+    loud.add_argument("-v", "--verbose", action="count", default=0,
+                      help="-v: log each request; -vv: also auth decisions, op arguments and errors")
+    loud.add_argument("-q", "--quiet", action="store_true", help="log errors only")
     p.add_argument("--listen", default="127.0.0.1")
     p.add_argument("--port", type=int, default=1337)   # 1337 = "leet": an old hacker nod, kept since 0.1
     p.add_argument("--db", default=os.environ.get("COORD_DB") or str(state_home() / "coord2.db"),
@@ -310,6 +346,11 @@ def main(argv=None) -> int:
     p.add_argument("--oidc-cache-seconds", type=int, default=60,
                    help="how long a token's introspection result is reused (a revoked token may work that long)")
     a = p.parse_args(argv)
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(logging.Formatter(("%(asctime)s " if a.verbose else "") + "coord-server: %(message)s"))
+    log.handlers[:], log.propagate = [handler], False
+    log.setLevel(logging.ERROR if a.quiet else logging.INFO if not a.verbose
+                 else VERBOSE if a.verbose == 1 else logging.DEBUG)
     authority = None
     source_kind = a.cert_source or ("local" if a.pki else "none")
     if a.pki:
