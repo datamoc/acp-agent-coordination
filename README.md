@@ -342,8 +342,8 @@ refused unless TLS **and** an identity method are configured:
   longer one is renewed at the first check or request. `coord-admin list` shows
   every cert; `--crl` (TLS-level CRL) is still accepted.
 - OIDC (Keycloak): `--oidc-introspect-url .../protocol/openid-connect/token/introspect
-  --oidc-client-id coord` (secret in `COORD_OIDC_SECRET`); clients set
-  `COORD_TOKEN`. Per-project roles come from token roles/groups named
+  --oidc-client-id coord` (secret in `COORD_OIDC_SECRET`); clients get
+  and refresh their own tokens (see Corporate deployment). Per-project roles come from token roles/groups named
   `coord:<project>:viewer|contributor|admin` (`coord:*:...` for all projects).
 
 In both modes the session is bound to the authenticated principal at
@@ -384,7 +384,30 @@ coord-server ... --cert-source command --renew-command '/usr/local/bin/adcs-rene
 ```
 
 Clients verify the server against the corporate CA (`COORD_CA`, or the
-system trust store when unset) and send `COORD_TOKEN`.
+system trust store when unset). They get and refresh their own Keycloak
+tokens (`coordination/oidc_client.py`), so nothing expires mid-session:
+
+```sh
+# ~/.config/coord/env on the agent's machine
+COORD_SERVER=https://coord.example.com:1338
+COORD_OIDC_ISSUER=https://sso.example.com/realms/corp   # endpoints are discovered
+COORD_OIDC_CLIENT_ID=coord-agent
+# service account (client credentials) - no human involved:
+COORD_OIDC_CLIENT_SECRET_FILE=~/.config/coord/agent.secret
+# or leave the secret out and have a person run `coord login` once (device
+# login: open the URL, sign in with SSO); `coord logout` forgets it
+```
+
+Access tokens are cached and refreshed before they expire. With device
+login, the refresh token is kept, and rotated if Keycloak rotates it, in a
+0600 file under `~/.config/coord/oidc/`. Parallel agents update it under a
+file lock. If the server refuses a token (revoked, clock skew), the client
+gets a new one and retries once. When the SSO session ends, commands say
+`run coord login`. Keycloak side: the client needs "OAuth 2.0 Device
+Authorization Grant" enabled for `coord login`, or "Service accounts" for
+client credentials. Add `COORD_OIDC_SCOPE="openid offline_access"` for
+agents that must outlive the SSO session. A fixed `COORD_TOKEN` still
+works and wins when set.
 
 **Servers as services.** `contrib/systemd/` has user units
 (`coord-server --pki pki`, `acp-server`); install with

@@ -8,6 +8,7 @@ import ssl
 import sys
 import tempfile
 import threading
+import time
 import urllib.request
 from pathlib import Path
 
@@ -550,6 +551,137 @@ def server_cert_auto_renewal_and_47_day_cap():
     finally:
         httpd.shutdown()
 
+class FakeKeycloak:
+    """Just enough of a Keycloak realm: discovery, token (client credentials, refresh with
+    rotation, device code), device authorization, introspection, revocation."""
+
+    def __init__(self):
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        import urllib.parse as up
+        self.active, self.refresh, self.requests, self.n = set(), set(), [], 0
+        self.pending = {}
+        kc = self
+
+        class H(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def reply(self, code, obj):
+                b = json.dumps(obj).encode()
+                self.send_response(code)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(b)))
+                self.end_headers()
+                self.wfile.write(b)
+
+            def do_GET(self):
+                base = kc.realm
+                self.reply(200, {"issuer": base, "token_endpoint": base + "/token",
+                                 "device_authorization_endpoint": base + "/device",
+                                 "introspection_endpoint": base + "/introspect"})
+
+            def do_POST(self):
+                f = dict(up.parse_qsl(self.rfile.read(int(self.headers["Content-Length"])).decode()))
+                path = self.path.rsplit("/", 1)[-1]
+                if path == "introspect":
+                    ok = f.get("token") in kc.active
+                    return self.reply(200, {"active": ok, "sub": "agent", "roles": ["coord:*:contributor"]}
+                                      if ok else {"active": False})
+                if path == "device":
+                    kc.pending["dc1"] = 1                      # one "authorization_pending" first
+                    return self.reply(200, {"device_code": "dc1", "user_code": "WDJB-MJHT", "interval": 0,
+                                            "expires_in": 60, "verification_uri": kc.realm + "/device-ui"})
+                g = f.get("grant_type")
+                kc.requests.append(g)
+                if g == "client_credentials" and f.get("client_secret") != "s3cret":
+                    return self.reply(401, {"error": "unauthorized_client", "error_description": "bad secret"})
+                if g == "refresh_token":
+                    if f.get("refresh_token") not in kc.refresh:
+                        return self.reply(400, {"error": "invalid_grant", "error_description": "Session not active"})
+                    kc.refresh.discard(f["refresh_token"])       # rotation: the old one is spent
+                if g.endswith("device_code"):
+                    if kc.pending.get(f.get("device_code"), 0) > 0:
+                        kc.pending[f["device_code"]] -= 1
+                        return self.reply(400, {"error": "authorization_pending"})
+                kc.n += 1
+                tok = {"access_token": f"at{kc.n}", "expires_in": 60, "token_type": "Bearer"}
+                kc.active.add(tok["access_token"])
+                if g != "client_credentials":
+                    tok["refresh_token"] = f"rt{kc.n}"
+                    kc.refresh.add(tok["refresh_token"])
+                self.reply(200, tok)
+
+        self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), H)
+        self.realm = f"http://127.0.0.1:{self.httpd.server_address[1]}/realms/corp"
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def introspector(self):
+        return OIDCIntrospector(self.realm + "/introspect", "coord", "srv", cache_seconds=0)
+
+
+@check
+def keycloak_tokens_refresh_themselves():
+    from coordination.oidc_client import TokenProvider
+    kc = FakeKeycloak()
+    httpd = build_server(fresh()[0], "127.0.0.1", 0, oidc=kc.introspector())
+    url = f"http://127.0.0.1:{_serve(httpd)}"
+    clock = [time.time()]
+    try:
+        # service account (client credentials): no human, token fetched, cached, refetched
+        tp = TokenProvider("agent-svc", issuer=kc.realm, client_secret="s3cret",
+                           state_dir=TMP / "oidc-a", clock=lambda: clock[0])
+        cl = RemoteCoord(url, token=tp)
+        sid = cl.whoami(family="svc")["session_id"]
+        cl.post(session=sid, body="hello from a service account")
+        assert kc.requests == ["client_credentials"]
+        assert oct(tp.state_file.stat().st_mode & 0o777) == "0o600"
+        again = TokenProvider("agent-svc", issuer=kc.realm, client_secret="s3cret",
+                              state_dir=TMP / "oidc-a", clock=lambda: clock[0])
+        RemoteCoord(url, token=again).presence()                     # next process: cached token
+        assert kc.requests == ["client_credentials"]
+        clock[0] += 61                                               # the old bug: token expired
+        cl.heartbeat(session=sid, status="still here")
+        assert kc.requests == ["client_credentials"] * 2
+        kc.active.clear()                                            # revoked server-side
+        cl.heartbeat(session=sid, status="after revocation")         # 401 -> new token -> retry
+        assert kc.requests == ["client_credentials"] * 3
+        bad = TokenProvider("agent-svc", issuer=kc.realm, client_secret="nope", state_dir=TMP / "oidc-x")
+        raises("unauthenticated", RemoteCoord(url, token=bad).presence)
+
+        # a person (device login): `coord login` once, then refresh tokens do the rest
+        tp2 = TokenProvider("agent-cli", issuer=kc.realm, state_dir=TMP / "oidc-b", clock=lambda: clock[0])
+        err = raises("unauthenticated", RemoteCoord(url, token=tp2).presence)
+        assert "coord login" in str(err)
+        shown = []
+        assert tp2.login(show=shown.append, sleep=lambda s: None)["logged_in"]
+        assert "WDJB-MJHT" in shown[0]
+        cl2 = RemoteCoord(url, token=tp2)
+        sid2 = cl2.whoami(family="human")["session_id"]
+        rt_before = json.loads(tp2.state_file.read_text())["refresh_token"]
+        clock[0] += 61
+        cl2.heartbeat(session=sid2, status="refreshed")               # refresh grant, rotated
+        assert kc.requests[-1] == "refresh_token"
+        assert json.loads(tp2.state_file.read_text())["refresh_token"] != rt_before
+        kc.refresh.clear()                                           # SSO session ended
+        clock[0] += 61
+        err = raises("unauthenticated", cl2.presence)
+        assert "coord login" in str(err)
+        assert tp2.logout() == {"logged_out": False}                 # state already cleared
+
+        # the real CLI, configured only through COORD_OIDC_* (e.g. in ~/.config/coord/env)
+        import subprocess
+        env = {k: v for k, v in os.environ.items() if not k.startswith("COORD_")}
+        env.update(COORD_CONFIG=str(TMP / "no-such-config"), XDG_CONFIG_HOME=str(TMP / "xdg-oidc"),
+                   COORD_SERVER=url, COORD_OIDC_ISSUER=kc.realm, COORD_OIDC_CLIENT_ID="agent-svc",
+                   COORD_OIDC_CLIENT_SECRET="s3cret", COORD_PROJECT="kc")
+        for args in (["whoami", "cli"], ["presence"]):
+            p = subprocess.run([sys.executable, str(Path(__file__).parent / "coord.py"), "--json", *args],
+                               env=env, capture_output=True, text=True, cwd=TMP)
+            assert p.returncode == 0, p.stdout + p.stderr
+    finally:
+        httpd.shutdown()
+        kc.httpd.shutdown()
+
 _EXTERNAL_SCRIPT = r"""
 import json, shutil, socket, ssl, sys, threading, time
 from pathlib import Path
@@ -655,7 +787,7 @@ from coordination.service import Coord
 # local mode: SQLite, no server, and not even the network client
 sys.modules.pop("coordination.client")
 assert coord.main(["whoami", "local"]) == 0
-assert "coordination.client" not in sys.modules
+assert "coordination.client" not in sys.modules and "coordination.oidc_client" not in sys.modules
 
 class Resp:
     def __init__(self, b): self.b = b

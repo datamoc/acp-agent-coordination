@@ -21,6 +21,8 @@ from .service import CoordError
 
 
 class RemoteCoord:
+    """`token`: a fixed bearer string, or an object with token()/invalidate() (oidc_client.TokenProvider)."""
+
     def __init__(self, url: str, ca=None, cert=None, key=None, token=None, insecure=False):
         self.url = url.rstrip("/") + "/call"
         self.token, self.cert, self.key = token, cert, key
@@ -61,17 +63,24 @@ class RemoteCoord:
         if op.startswith("_"):
             raise AttributeError(op)
 
-        def call(**args):
+        def send(args):
             headers = {"Content-Type": "application/json"}
             if self.token:
-                headers["Authorization"] = f"Bearer {self.token}"
+                bearer = self.token if isinstance(self.token, str) else self.token.token()
+                headers["Authorization"] = f"Bearer {bearer}"
             req = urllib.request.Request(self.url, data=json.dumps({"op": op, "args": args}).encode(),
                                          headers=headers)
             try:
                 with self.opener.open(req, timeout=30) as r:
-                    payload = json.loads(r.read())
+                    return r.status, json.loads(r.read())
             except urllib.error.HTTPError as e:
-                payload = json.loads(e.read() or b"{}")
+                return e.code, json.loads(e.read() or b"{}")
+
+        def call(**args):
+            status, payload = send(args)
+            if status == 401 and self.token and not isinstance(self.token, str):
+                self.token.invalidate()      # revoked or skewed: get a fresh one, retry once
+                status, payload = send(args)
             if payload.get("certificate"):
                 self._install_renewal(payload["certificate"])
             if not payload.get("ok"):

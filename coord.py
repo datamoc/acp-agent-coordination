@@ -98,12 +98,22 @@ def load_config() -> Path | None:
     return f
 
 
+def token_source():
+    """A fixed COORD_TOKEN wins; with COORD_OIDC_* settings, a self-refreshing Keycloak token."""
+    if os.environ.get("COORD_TOKEN"):
+        return os.environ["COORD_TOKEN"]
+    if os.environ.get("COORD_OIDC_ISSUER") or os.environ.get("COORD_OIDC_TOKEN_URL"):
+        from coordination.oidc_client import TokenProvider   # only OIDC mode loads it
+        return TokenProvider.from_env()
+    return None
+
+
 def backend():
     url = os.environ.get("COORD_SERVER")
     if url:
         from coordination.client import RemoteCoord   # local mode never loads the network client
         return RemoteCoord(url, ca=os.environ.get("COORD_CA"), cert=os.environ.get("COORD_CERT"),
-                           key=os.environ.get("COORD_KEY"), token=os.environ.get("COORD_TOKEN"),
+                           key=os.environ.get("COORD_KEY"), token=token_source(),
                            insecure=os.environ.get("COORD_INSECURE") == "1")
     return Coord(os.environ.get("COORD_DB") or repo_root() / "coord2.db")
 
@@ -190,6 +200,8 @@ def build_parser():
     s = a("whoami"); s.add_argument("family"); s.add_argument("--project")
     s = a("heartbeat"); s.add_argument("status", nargs="?", default="")
     a("end")
+    a("login", help="SSO device login (Keycloak): sign in once in a browser; tokens refresh by themselves")
+    a("logout", help="forget the stored SSO tokens")
     s = a("presence"); s.add_argument("--all", action="store_true"); s.add_argument("--project")
 
     s = a("post"); s.add_argument("body"); s.add_argument("--to"); s.add_argument("--kind", default="info", choices=MESSAGE_KINDS)
@@ -388,7 +400,14 @@ def main(argv=None) -> int:
     a = build_parser().parse_args(argv)
     load_config()
     try:
-        cmd, r, code = run(a, backend())
+        if a.cmd in ("login", "logout"):
+            tp = token_source()
+            if tp is None or isinstance(tp, str):
+                raise CoordError("oidc_config", "set COORD_OIDC_ISSUER and COORD_OIDC_CLIENT_ID "
+                                 "(and unset COORD_TOKEN) to use SSO login")
+            cmd, r, code = a.cmd, tp.login() if a.cmd == "login" else tp.logout(), 0
+        else:
+            cmd, r, code = run(a, backend())
     except CoordError as e:
         if a.json:
             print(json.dumps({"ok": False, "error": e.code, "message": str(e), "data": e.data}))
