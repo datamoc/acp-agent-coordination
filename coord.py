@@ -240,10 +240,23 @@ def run(a, c) -> tuple[str, object, int]:
     cmd = a.cmd
     if cmd == "whoami":
         r = c.whoami(a.family, project=a.project or detect_project(), client_id=str(uuid.uuid4()))
-        try:
-            session_file().write_text(r["session_id"] + "\n")
-        except OSError:
-            pass
+        # .coord-session is shared by every session in this checkout: never
+        # overwrite one that still belongs to a live session, or that session
+        # would silently start acting as this one.
+        old = None if os.environ.get("COORD_SESSION") else load_session()
+        if old:
+            try:
+                c.context(session=old)
+            except CoordError:
+                old = None
+        if old:
+            r["warning"] = (f"{session_file()} belongs to another live session; left as is - "
+                            f"prefix your commands with COORD_SESSION={r['session_id']}")
+        elif not os.environ.get("COORD_SESSION"):
+            try:
+                session_file().write_text(r["session_id"] + "\n")
+            except OSError:
+                pass
         return cmd, r, 0
     if cmd == "heartbeat": return cmd, c.heartbeat(session=S(), status=a.status), 0
     if cmd == "end": return cmd, c.end(session=S()), 0

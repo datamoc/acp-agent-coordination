@@ -21,3 +21,8 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools]
 py-modules = ["ACP_server", "ACP_client", "store", "coord"]
 packages = ["coordination"]
+
+[tool.uv]
+# Use the OS trust store: behind a TLS-intercepting corporate proxy, uv's
+# bundled roots reject PyPI and building this project (setuptools) fails.
+system-certs = true

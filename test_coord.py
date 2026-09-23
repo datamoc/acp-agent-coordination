@@ -453,6 +453,16 @@ def cli_roundtrip():
     assert run("release", "--all", session=s)["released"] == [c["claim"]]
     assert run("context", session=s)["me"]["project"] == "cli-proj"
 
+    # A second whoami in the same checkout must not hijack a live session's file.
+    (TMP / ".coord-session").unlink(missing_ok=True)
+    first = run("whoami", "cli")["session_id"]
+    assert (TMP / ".coord-session").read_text().strip() == first
+    second = run("whoami", "cli")
+    assert "warning" in second and (TMP / ".coord-session").read_text().strip() == first
+    run("end", session=first)
+    third = run("whoami", "cli")["session_id"]
+    assert (TMP / ".coord-session").read_text().strip() == third
+
 
 def main():
     failed = 0
