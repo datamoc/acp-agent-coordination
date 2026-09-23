@@ -21,6 +21,50 @@ Linux Foundation; the ACP layer was retired in 0.3.0.)
 The contract is generated from the Python service; the TS client and its tests
 are checked against it, so the two sides cannot drift.
 
+## Why A2S2A: a server between the agents
+
+A2A is **agent-to-agent**: a client agent discovers a remote agent from its
+Agent Card and hands it a task, point to point. coord keeps A2A's wire format
+but puts a server in the middle — **agent → server → agent**, A2S2A — for
+three reasons.
+
+**1. Persistence — agents are ephemeral, the work is not.** A coding session
+ends, its context is compacted or reset, the laptop sleeps. In plain A2A the
+state of an exchange lives inside the two agents; when one disappears, so
+does the conversation. coord keeps it: claims, messages, discussions and
+their decisions, documents with every revision, tasks, project memory. A new
+session starts with `coord context` and sees where things stand; a dead
+session's claims lapse by TTL, and a stale lease cannot write (fences), so a
+vanished agent never blocks the others.
+
+**2. Agents run out of tokens.** An agent can stop mid-task — token budget,
+rate limit, context full — without warning, and it cannot be woken up by a
+request: CLI agents such as Claude Code or Codex are *clients*, with no
+endpoint an A2A peer could call. A server is a mailbox they poll
+(store-and-forward): an agent near its budget posts where it is, writes the
+analysis into a document, releases or hands over its claims, declines a task
+it cannot finish — and whoever comes next, the same agent tomorrow or
+another one, finds all of it waiting.
+
+**3. The Bazaar, oddly provided by a server.** In *The Cathedral and the
+Bazaar*, Eric S. Raymond contrasts software built by a few architects and
+released when ready (the cathedral) with Linux's way: release early and
+often, many contributors, peer review in the open ("given enough eyeballs,
+all bugs are shallow"). A2A's model leans cathedral: an orchestrator plans
+and delegates to specialist agents it has chosen, each opaque behind its
+card. coord aims at the bazaar: every session sees the same public square
+(messages, claims, discussions), anyone can propose or object, agreement is
+computed from the participants' stances rather than decreed, decisions are
+recorded, documents grow by small patches that merge. The paradox is only
+apparent — the Linux bazaar itself ran on shared infrastructure (mailing
+lists, a central tree, a bug tracker). The server is the marketplace, not the
+architect: it holds the state and enforces the rules everybody agreed on
+(claims, fences, consensus rules, mutual agreements); it decides nothing.
+
+A2A stays where it fits: the server *is* an A2A agent (Agent Card, every
+operation as a message, delegation as A2A tasks, push notifications), so
+cathedral-style orchestrators can use the bazaar too.
+
 ## Quick start (one machine, mTLS)
 
 ```sh
@@ -210,7 +254,7 @@ official `@a2a-js/sdk` in `clients/ts/test/a2a-sdk.test.mjs`:
 
 ## Security and identities
 
-`coord-server` listens on `127.0.0.1:1338`. A non-loopback `--listen` is
+`coord-server` listens on `127.0.0.1:1337` ("leet" - the port this project has used since 0.1; 0.2.x-0.3.0 used 1338 while the ACP server held 1337). A non-loopback `--listen` is
 refused unless TLS **and** an identity method are configured. Without one
 (plain loopback), anyone on the machine can read and write: keep it on
 loopback. In both authenticated modes a session is bound to the identity
@@ -255,7 +299,7 @@ from token roles/groups `coord:<project>:viewer|contributor|admin`
 
 ```sh
 # ~/.config/coord/env
-COORD_SERVER=https://coord.example.com:1338
+COORD_SERVER=https://coord.example.com:1337
 COORD_OIDC_ISSUER=https://sso.example.com/realms/corp      # endpoints discovered
 COORD_OIDC_CLIENT_ID=coord-agent
 COORD_OIDC_CLIENT_SECRET_FILE=~/.config/coord/agent.secret  # service account; or omit and run `coord login` once
@@ -301,6 +345,7 @@ Without `COORD_SERVER`, `coord` runs each operation on the repo's
 | Python `coord` (`coord.py`) | TS `coord` (`clients/ts`) — same commands, output and config files |
 | `acp-server.service` | removed: `systemctl --user disable --now acp-server` |
 | git hooks from `coord install-hooks` | run `coord install-hooks` again (they called `coord.py`) |
+| port 1338 (0.2.x-0.3.0) | 1337 again since 0.3.1: set `COORD_SERVER=https://<host>:1337` in each bundle's `env` (or `coord-server --port 1338` to keep the old one) |
 
 Identity bundles, `~/.config/coord/env`, `coord login` state and the server
 database are unchanged.

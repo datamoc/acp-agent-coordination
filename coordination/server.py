@@ -230,7 +230,7 @@ class _Server(ThreadingHTTPServer):
         super().handle_error(request, client_address)
 
 
-def build_server(coord, host="127.0.0.1", port=1338, tls_cert=None, tls_key=None, client_ca=None,
+def build_server(coord, host="127.0.0.1", port=1337, tls_cert=None, tls_key=None, client_ca=None,
                  crl=None, oidc: OIDCIntrospector | None = None,
                  authority=None, cert_source=None, push_allow: list[str] | None = None,
                  public_url: str | None = None) -> ThreadingHTTPServer:
@@ -287,7 +287,7 @@ def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="coord-server", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--listen", default="127.0.0.1")
-    p.add_argument("--port", type=int, default=1338)
+    p.add_argument("--port", type=int, default=1337)   # 1337 = "leet": an old hacker nod, kept since 0.1
     p.add_argument("--db", default=os.environ.get("COORD_DB") or str(state_home() / "coord2.db"),
                    help="default $COORD_DB, else coord2.db in the checkout or ~/.local/share/coord")
     p.add_argument("--pki", type=Path, help="mTLS with management's CA dir: client CA, server cert "

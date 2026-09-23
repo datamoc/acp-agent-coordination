@@ -1,6 +1,6 @@
 [project]
 name = "acp-agent-coordination"
-version = "0.3.0"
+version = "0.3.1"
 description = "coord server and certificate management: claims, messages, tasks for concurrent agent sessions (clients: clients/ts)"
 readme = "README.md"
 requires-python = ">=3.11"

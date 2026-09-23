@@ -4,7 +4,7 @@
 # --pki: client certs are checked against management on every request (revocation is
 # immediate) and renewed automatically once 15 days old.
 [Unit]
-Description=coord v2 coordination server (mTLS, 127.0.0.1:1338)
+Description=coord coordination server (mTLS, 127.0.0.1:1337)
 
 [Service]
 WorkingDirectory=%h/dev/acp-agent-coordination

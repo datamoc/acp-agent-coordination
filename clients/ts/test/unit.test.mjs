@@ -20,7 +20,7 @@ test("config: env wins, only COORD_*, relative paths from the file's real dir, p
   const home = tmp();
   const dir = join(home, "coord", "alice");
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "env"), "# comment\nexport COORD_SERVER=https://localhost:1338\nCOORD_CA=ca.crt\nCOORD_KEY='~/k.key'\nCOORD_PROJECT=from-file\nOTHER=x\n");
+  writeFileSync(join(dir, "env"), "# comment\nexport COORD_SERVER=https://localhost:1337\nCOORD_CA=ca.crt\nCOORD_KEY='~/k.key'\nCOORD_PROJECT=from-file\nOTHER=x\n");
   const env = { XDG_CONFIG_HOME: home, COORD_PROJECT: "from-env" };
   try {
     symlinkSync(join("alice", "env"), join(home, "coord", "env"));                     // default = symlink
@@ -28,7 +28,7 @@ test("config: env wins, only COORD_*, relative paths from the file's real dir, p
     writeFileSync(join(home, "coord", "env"), "COORD_IDENTITY=alice\n");
   }
   assert.equal(loadConfig(env), realpathSync(join(dir, "env")));                      // Windows: 8.3 temp names
-  assert.equal(env.COORD_SERVER, "https://localhost:1338");
+  assert.equal(env.COORD_SERVER, "https://localhost:1337");
   assert.equal(env.COORD_CA, join(realpathSync(dir), "ca.crt"));                       // real dir, not the link's
   assert.equal(env.COORD_KEY, join(homedir(), "k.key"));
   assert.equal(env.COORD_PROJECT, "from-env");

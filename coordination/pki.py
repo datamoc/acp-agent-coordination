@@ -418,7 +418,7 @@ def main(argv=None) -> int:
     s = sub.add_parser("enroll", help="issue a CLIENT (agent) identity and write its bundle - not the server")
     s.add_argument("name", metavar="client-name", help="the agent identity, e.g. alice-laptop; it becomes "
                    "the principal (mtls:<client-name>) and ~/.config/coord/<client-name>/")
-    s.add_argument("--url", default=os.environ.get("COORD_SERVER") or "https://localhost:1338")
+    s.add_argument("--url", default=os.environ.get("COORD_SERVER") or "https://localhost:1337")
     s.add_argument("--out", type=Path, help="write the bundle here (to hand to another machine) "
                    "instead of ~/.config/coord/<name>")
     s.add_argument("--default", action="store_true", help="make it the identity used when "
