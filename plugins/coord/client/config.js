@@ -6,16 +6,28 @@ export const expandUser = (p) => (p === "~" || p.startsWith("~/") || p.startsWit
 export function configHome(env = process.env) {
     return join(env.XDG_CONFIG_HOME || join(homedir(), ".config"), "coord");
 }
+/** Agent CLIs recognized by a variable they set for the commands they run: [variable, identity]. */
+const HOSTS = [["MUSE_SESSION_ID", "muse"], ["OPENCODE", "opencode"]];
+/** The identity named after the agent CLI running us, when one is enrolled (~/.config/coord/<cli>/env). */
+export function hostIdentity(env = process.env) {
+    for (const [variable, identity] of HOSTS) {
+        if (env[variable] && probe(join(configHome(env), identity, "env")) !== "missing")
+            return identity;
+    }
+    return null;
+}
 export function configFile(env = process.env) {
     if (env.COORD_CONFIG)
         return expandUser(env.COORD_CONFIG);
-    if (env.COORD_IDENTITY)
-        return join(configHome(env), env.COORD_IDENTITY, "env");
+    const identity = env.COORD_IDENTITY || hostIdentity(env);
+    if (identity)
+        return join(configHome(env), identity, "env");
     return join(configHome(env), "env");
 }
 /**
  * Fill unset COORD_* variables from the identity's config file (written by `coord-admin enroll`):
- * $COORD_CONFIG, else ~/.config/coord/$COORD_IDENTITY/env, else ~/.config/coord/env - a symlink to
+ * $COORD_CONFIG, else ~/.config/coord/$COORD_IDENTITY/env, else the enrolled identity named after the
+ * agent CLI running us (hostIdentity: muse, opencode), else ~/.config/coord/env - a symlink to
  * an identity, or a `COORD_IDENTITY=<name>` pointer where symlinks are not allowed. KEY=value lines,
  * # comments; the environment always wins; relative paths resolve against the file's real directory.
  */

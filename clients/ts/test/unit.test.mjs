@@ -43,6 +43,24 @@ test("config: env wins, only COORD_*, relative paths from the file's real dir, p
   assert.throws(() => loadConfig({ XDG_CONFIG_HOME: home2, COORD_IDENTITY: "ghost" }), /coord-admin enroll/);
 });
 
+test("config: an enrolled identity named after the host CLI wins over the default", () => {
+  const home = tmp();
+  for (const name of ["bob", "muse"]) {
+    mkdirSync(join(home, "coord", name), { recursive: true });
+    writeFileSync(join(home, "coord", name, "env"), `COORD_SERVER=https://${name}\n`);
+  }
+  writeFileSync(join(home, "coord", "env"), "COORD_IDENTITY=bob\n");
+  const muse = { XDG_CONFIG_HOME: home, MUSE_SESSION_ID: "s1" };
+  loadConfig(muse);
+  assert.equal(muse.COORD_SERVER, "https://muse");
+  const opencode = { XDG_CONFIG_HOME: home, OPENCODE: "1" };                          // not enrolled: default
+  loadConfig(opencode);
+  assert.equal(opencode.COORD_SERVER, "https://bob");
+  const pinned = { XDG_CONFIG_HOME: home, MUSE_SESSION_ID: "s1", COORD_IDENTITY: "bob" };   // explicit wins
+  loadConfig(pinned);
+  assert.equal(pinned.COORD_SERVER, "https://bob");
+});
+
 test("no server and no coord-local: the error names the identity file it looked for", async () => {
   const cfg = join(tmp(), "nowhere", "env");
   const env = { COORD_CONFIG: cfg, COORD_LOCAL: "coord-local-that-does-not-exist", COORD_DB: join(tmp(), "x.db") };

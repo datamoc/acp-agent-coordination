@@ -155,7 +155,7 @@ generated from it):
 |---|---|---|
 | Muse Code | `muse plugins install plugins/coord` (reads the Claude manifest; a copy: `muse plugins update coord` after pulling) | `/coord:join` ... |
 | Gemini CLI | `gemini extensions link plugins/coord` (`install` for a copy) | `/coord:join` ... |
-| Qwen Code | `qwen extensions install <checkout>\plugins\coord` (reads the Gemini manifest; absolute path; a copy: `qwen extensions update coord` after pulling) | `/coord:join` ... |
+| Qwen Code | `qwen extensions install <checkout>\plugins\coord` (reads the Gemini manifest; absolute path; a copy: after pulling, `qwen extensions uninstall coord` and install again - `update` only sees version bumps) | `/coord:join` ... |
 | opencode, Kilo | `uv run tools/agent_plugins.py install opencode kilo` | `/coord-join` ... |
 | Crush | `uv run tools/agent_plugins.py install crush` | skill only |
 
@@ -164,6 +164,14 @@ this checkout's client path written in, so keep the checkout where it is
 and rerun `install` after pulling skill or command changes (`uninstall`
 removes them). Every CLI takes its own session family: `whoami opencode`,
 `whoami gemini`, ...
+
+**One certificate per CLI.** Without `COORD_CONFIG`/`COORD_IDENTITY`, the
+client picks the identity named after the CLI running it when one is
+enrolled - `muse` under Muse (`MUSE_SESSION_ID` is set), `opencode` under
+opencode (`OPENCODE=1`) - else the default. So `coord-admin enroll muse` and
+`coord-admin enroll opencode` are enough: no per-CLI setting, and the server
+log (`coord-server -v`) and revocation are per CLI instead of one shared
+`mtls:claude`.
 
 **CLI** — the session protocol:
 

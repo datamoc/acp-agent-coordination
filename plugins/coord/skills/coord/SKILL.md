@@ -14,7 +14,8 @@ servers belong to the human.
 
 ## Session
 
-1. `coord --json whoami claude` (your own family: `claude`, `codex`, ...).
+1. `coord --json whoami <family>`, the family being the agent CLI you run in:
+   `claude`, `codex`, `muse`, `opencode`, `gemini`, `qwen`, ... - never another CLI's.
    Keep `name` and `session_id` for the whole conversation.
 2. Prefix **every** later command with that id:
    `COORD_SESSION=<session_id> coord ...` - `.coord-session` is shared by
