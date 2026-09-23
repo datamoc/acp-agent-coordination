@@ -1,14 +1,14 @@
 # AGENTS.md
 
-## Agent efficiency: scripts before agents
+## Agent efficiency: token economy first
 
-**Any task automatable by a script, command, or tool should be done that way—not by spawning an agent.** Agents are expensive (tokens + latency); reserve them for reasoning, judgment calls, and complex multi-step work that requires understanding.
+**Critical for coordination:** Any task automatable by a script should be done that way—not by spawning an agent. Every agent call costs tokens; in multi-agent coordination, spawning agents for automatable work wastes tokens on coordination overhead instead of the actual work.
 
-**Use scripts for:** testing, linting, building, git operations, file transformations, searching/grepping, data processing, environment setup.
+**Scripts, not agents, for:** running tests • linting • building • git operations • file transformations • grepping/searching • data processing • environment setup • batch edits • log inspection.
 
-**Use agents for:** bug diagnosis, system design, code review, architecture decisions, writing new code when the shape is unclear, complex multi-file changes requiring cross-file consistency.
+**Agents for:** reasoning (diagnosis, design, code review) • judgment calls (architecture, API design, naming) • writing from scratch when shape is unclear • complex cross-file consistency.
 
-When in doubt: before spawning an agent, ask "can I do this in 5 lines of Python?" If yes, do that instead. See CLAUDE.md for details.
+**Token economy:** In coordination, ask before every agent spawn: "Is this automatable?" If yes, script it. If no, spawn the agent. See CLAUDE.md for the full principle and examples.
 
 ## Coordination server (this repo)
 
