@@ -1,32 +1,34 @@
-"""JSON-over-HTTP transport: POST /call {"op": ..., "args": {...}}.
+"""Server: JSON-over-HTTP transport, POST /call {"op": ..., "args": {...}}. CLI: `coord-server`.
 
 Loopback by default with no auth. Any non-loopback bind requires TLS plus
-an identity method: mTLS (client certs from pki.py, optional CRL) or OIDC
+an identity method: mTLS (client certs from management, pki.py) or OIDC
 bearer tokens validated by token introspection (Keycloak etc). When an
 identity is present, sessions are bound to it at whoami time.
+
+With `--pki DIR` the server asks management (pki.Authority) on every
+request whether the presented certificate is still valid - a revocation
+applies at once, no restart - and, once the certificate is
+RENEW_AFTER_DAYS old, for a renewed one, which it hands to the client in
+the response ("certificate"). The client never contacts management.
 """
 
-import ipaddress
+import argparse
+import errno
 import json
+import os
 import ssl
+import sys
 import threading
 import time
 import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
-from .service import READ_OPS, WRITE_OPS, CoordError
+from .net import is_loopback
+from .service import READ_OPS, WRITE_OPS, Coord, CoordError
 
 PROJECT_ROLES = {"viewer": 0, "contributor": 1, "admin": 2}
-
-
-def is_loopback(host: str) -> bool:
-    if host in ("localhost", ""):
-        return True
-    try:
-        return ipaddress.ip_address(host).is_loopback
-    except ValueError:
-        return False
 
 
 class OIDCIntrospector:
@@ -70,12 +72,14 @@ class OIDCIntrospector:
         return best
 
 
-def make_handler(coord, oidc: OIDCIntrospector | None, mtls: bool):
+def make_handler(coord, oidc: OIDCIntrospector | None, mtls: bool, authority=None):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args):
             pass
 
         def _send(self, code: int, payload: dict):
+            if getattr(self, "_renewal", None):
+                payload["certificate"] = self._renewal
             body = json.dumps(payload).encode()
             self.send_response(code)
             self.send_header("Content-Type", "application/json")
@@ -83,9 +87,22 @@ def make_handler(coord, oidc: OIDCIntrospector | None, mtls: bool):
             self.end_headers()
             self.wfile.write(body)
 
+        def _check_cert(self, cert: dict):
+            """Ask management whether the cert is still valid; fetch a renewal when it is due."""
+            if authority is None:
+                return
+            if authority.status(cert.get("serialNumber", "")) != "V":
+                raise CoordError("unauthenticated", "client certificate is revoked or unknown to the CA")
+            if authority.due(ssl.cert_time_to_seconds(cert["notBefore"])):
+                try:
+                    self._renewal = authority.renew(self.connection.getpeercert(binary_form=True))
+                except Exception as e:   # a failed renewal must not fail the request
+                    print(f"coord-server: renewal failed: {e!r}", file=sys.stderr, flush=True)
+
         def _identity(self):
             if mtls:
                 cert = self.connection.getpeercert()
+                self._check_cert(cert)
                 subject = dict(x[0] for x in cert.get("subject", ()))
                 return f"mtls:{subject.get('commonName')}", None
             if oidc:
@@ -102,6 +119,7 @@ def make_handler(coord, oidc: OIDCIntrospector | None, mtls: bool):
             self._send(404, {"ok": False, "error": "not_found"})
 
         def do_POST(self):
+            self._renewal = None
             if self.path != "/call":
                 return self._send(404, {"ok": False, "error": "not_found"})
             try:
@@ -135,7 +153,10 @@ def make_handler(coord, oidc: OIDCIntrospector | None, mtls: bool):
 
 
 def build_server(coord, host="127.0.0.1", port=1338, tls_cert=None, tls_key=None, client_ca=None,
-                 crl=None, oidc: OIDCIntrospector | None = None) -> ThreadingHTTPServer:
+                 crl=None, oidc: OIDCIntrospector | None = None,
+                 authority=None) -> ThreadingHTTPServer:
+    """`authority` is a pki.Authority (mTLS with management) or None: local and OIDC
+    modes never load the PKI code."""
     if not is_loopback(host):
         if not (tls_cert and tls_key):
             raise SystemExit(f"refusing to listen on {host}: non-loopback requires --tls-cert/--tls-key")
@@ -144,7 +165,7 @@ def build_server(coord, host="127.0.0.1", port=1338, tls_cert=None, tls_key=None
                              "or --oidc-introspect-url")
     if client_ca and not (tls_cert and tls_key):
         raise SystemExit("--client-ca needs --tls-cert/--tls-key")
-    httpd = ThreadingHTTPServer((host, port), make_handler(coord, oidc, mtls=bool(client_ca)))
+    httpd = ThreadingHTTPServer((host, port), make_handler(coord, oidc, mtls=bool(client_ca), authority=authority))
     if tls_cert:
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ctx.minimum_version = ssl.TLSVersion.TLSv1_2
@@ -159,38 +180,54 @@ def build_server(coord, host="127.0.0.1", port=1338, tls_cert=None, tls_key=None
     return httpd
 
 
-class RemoteCoord:
-    """Client proxy: attribute access becomes a /call round-trip."""
+def main(argv=None) -> int:
+    root = Path(__file__).resolve().parents[1]
+    p = argparse.ArgumentParser(prog="coord-server", description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--listen", default="127.0.0.1")
+    p.add_argument("--port", type=int, default=1338)
+    p.add_argument("--db", default=os.environ.get("COORD_DB") or str(root / "coord2.db"))
+    p.add_argument("--pki", type=Path, help="mTLS with management's CA dir: client CA, server cert "
+                   "(<dir>/localhost.crt/.key unless --tls-cert/--tls-key), live revocation and renewal")
+    p.add_argument("--renew-after-days", type=float, help="with --pki (default 15)")
+    p.add_argument("--tls-cert"); p.add_argument("--tls-key")
+    p.add_argument("--client-ca"); p.add_argument("--crl")
+    p.add_argument("--oidc-introspect-url"); p.add_argument("--oidc-client-id")
+    p.add_argument("--oidc-client-secret")
+    a = p.parse_args(argv)
+    authority = None
+    if a.renew_after_days is not None and not a.pki:
+        p.error("--renew-after-days needs --pki")
+    if a.pki:
+        from .pki import RENEW_AFTER_DAYS, Authority   # only mTLS with management needs the PKI code
+        a.renew_after_days = a.renew_after_days or RENEW_AFTER_DAYS
+        d = a.pki.resolve()
+        authority = Authority(d, a.renew_after_days)
+        a.client_ca = a.client_ca or str(d / "ca.crt")
+        a.tls_cert = a.tls_cert or str(d / "localhost.crt")
+        a.tls_key = a.tls_key or str(d / "localhost.key")
+    oidc = None
+    if a.oidc_introspect_url:
+        oidc = OIDCIntrospector(a.oidc_introspect_url, a.oidc_client_id or "",
+                                os.environ.get("COORD_OIDC_SECRET") or a.oidc_client_secret or "")
+    try:
+        httpd = build_server(Coord(a.db), a.listen, a.port, a.tls_cert, a.tls_key, a.client_ca, a.crl,
+                             oidc, authority)
+    except OSError as e:
+        if e.errno != errno.EADDRINUSE:
+            raise
+        print(f"error: {a.listen}:{a.port} is already in use - another `coord-server` is probably "
+              f"running (find it with `ss -ltnp | grep :{a.port}`), or pick another --port", file=sys.stderr)
+        return 1
+    scheme = "https" if a.tls_cert else "http"
+    print(f"coord-server on {scheme}://{a.listen}:{a.port}"
+          + (f" (mTLS, renewal after {a.renew_after_days:g} days)" if authority else ""), flush=True)
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    return 0
 
-    def __init__(self, url: str, ca=None, cert=None, key=None, token=None, insecure=False):
-        self.url = url.rstrip("/") + "/call"
-        self.token = token
-        host = urllib.parse.urlsplit(self.url).hostname or ""
-        handlers = [urllib.request.ProxyHandler({})] if is_loopback(host) else []
-        self.ctx = None
-        if self.url.startswith("https"):
-            self.ctx = ssl.create_default_context(cafile=ca)
-            if insecure:
-                self.ctx.check_hostname = False
-                self.ctx.verify_mode = ssl.CERT_NONE
-            if cert:
-                self.ctx.load_cert_chain(cert, key)
-        handlers.append(urllib.request.HTTPSHandler(context=self.ctx))
-        self.opener = urllib.request.build_opener(*handlers)
 
-    def __getattr__(self, op):
-        def call(**args):
-            headers = {"Content-Type": "application/json"}
-            if self.token:
-                headers["Authorization"] = f"Bearer {self.token}"
-            req = urllib.request.Request(self.url, data=json.dumps({"op": op, "args": args}).encode(),
-                                         headers=headers)
-            try:
-                with self.opener.open(req, timeout=30) as r:
-                    payload = json.loads(r.read())
-            except urllib.error.HTTPError as e:
-                payload = json.loads(e.read() or b"{}")
-            if not payload.get("ok"):
-                raise CoordError(payload.get("error", "error"), payload.get("message", ""), payload.get("data"))
-            return payload["result"]
-        return call
+if __name__ == "__main__":
+    sys.exit(main())

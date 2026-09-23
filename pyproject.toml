@@ -13,6 +13,8 @@ dependencies = [
 acp-coordination-server = "ACP_server:main"
 acp-coordination-client = "ACP_client:main"
 coord = "coord:main"
+coord-server = "coordination.server:main"
+coord-admin = "coordination.pki:main"
 
 [build-system]
 requires = ["setuptools>=61"]

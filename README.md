@@ -241,6 +241,10 @@ A second, self-contained coordination layer (`coordination/` + `coord.py`,
 stdlib only, its own `coord2.db`) built for real multi-agent work. It runs
 next to the ACP server; nothing above changes.
 
+`coord`, `coord-server` and `coord-admin` are on PATH once the project is
+synced (`uv sync`, then `ln -s "$PWD"/.venv/bin/coord* ~/.local/bin/`);
+agents use `coord`, never `coord.py`.
+
 **Identity.** `coord whoami claude` gives you `claude-NN`, a session UUID
 and a generation. Every command authenticates with the UUID
 (`COORD_SESSION` env, else `.coord-session` at the repo root). A recycled
@@ -299,21 +303,53 @@ view (overview, memory, my claims, tasks, discussions, unread count).
 --capability debugging` declares a (transient) profile; `coord suggest
 --prefer-category reasoning --capability debugging` ranks live agents - a hint, you choose.
 
-**Network (opt-in).** `coord serve` listens on `127.0.0.1:1338`; clients use
-`COORD_SERVER=http://127.0.0.1:1338`. A non-loopback `--listen` is refused
-unless TLS **and** an identity method are configured:
+**Network (opt-in): three roles, three files, three commands.**
 
-- mTLS: `coord pki init`, `coord pki issue localhost --server`,
-  `coord pki issue agent-a`, `coord pki revoke agent-a` (regenerates
-  `pki/crl.pem`); serve with `--tls-cert --tls-key --client-ca pki/ca.crt --crl pki/crl.pem`;
-  clients set `COORD_CA`, `COORD_CERT`, `COORD_KEY`.
+| Role | File | Command | Holds |
+|---|---|---|---|
+| Management | `coordination/pki.py` | `coord-admin` | the CA (`pki/`, CA key never leaves it) |
+| Server | `coordination/server.py` | `coord-server` | the service; asks management |
+| Client | `coordination/client.py` + `coord.py` | `coord` | only its identity bundle |
+
+Local mode (no `COORD_SERVER`, SQLite only), plain loopback HTTP and OIDC
+never load the PKI code: `pki.py` is imported only by `coord-server --pki`
+and `coord-admin`, and the client never imports it (it only swaps in a
+renewed cert file when a server sends one).
+
+`coord-server` listens on `127.0.0.1:1338`. A non-loopback `--listen` is
+refused unless TLS **and** an identity method are configured:
+
+- mTLS - the administrator, once: `coord-admin init`,
+  `coord-admin server-cert`, then per client `coord-admin enroll <name>`.
+  Enroll issues a 30-day client cert (or reuses a valid one) and writes a
+  self-contained bundle to `~/.config/coord/<name>/` (`ca.crt`,
+  `agent.crt`, `agent.key` 0600, `env`), or to `--out DIR` to hand to
+  another machine. The first identity (or `--default`) becomes
+  `~/.config/coord/env`; `COORD_IDENTITY=<name>` selects another,
+  `COORD_CONFIG=<file>` any file; shell variables still win. Serve with
+  `coord-server --pki pki`: on every request the server asks management
+  whether the presented cert is still valid, so `coord-admin revoke <name>`
+  (all of that client's certs) applies to the next request, no restart.
+  Once a client cert is 15 days old (`--renew-after-days`), the server
+  asks management for a renewal and returns it with the response; the
+  client checks it matches its key and replaces `agent.crt` in place. The
+  renewal re-certifies the key the client already holds: no private key
+  is ever sent, and the client needs no openssl. A client offline for
+  more than 30 days has to be enrolled again. `coord-admin list` shows
+  every cert; `--crl` (TLS-level CRL) is still accepted.
 - OIDC (Keycloak): `--oidc-introspect-url .../protocol/openid-connect/token/introspect
   --oidc-client-id coord` (secret in `COORD_OIDC_SECRET`); clients set
   `COORD_TOKEN`. Per-project roles come from token roles/groups named
   `coord:<project>:viewer|contributor|admin` (`coord:*:...` for all projects).
 
 In both modes the session is bound to the authenticated principal at
-`whoami`; another identity cannot drive it.
+`whoami`; another identity cannot drive it. Agents only ever run `coord`
+(any directory, no exports, survives reboots).
+
+**Servers as services.** `contrib/systemd/` has user units
+(`coord-server --pki pki`, `acp-server`); install with
+`cp contrib/systemd/*.service ~/.config/systemd/user/ && systemctl --user daemon-reload && systemctl --user enable --now coord-server acp-server`
+(WSL needs `systemd=true` under `[boot]` in `/etc/wsl.conf`).
 
 Tests: `uv run test_coord.py` (temp dirs, includes an 8-process claim race,
 an HTTP round-trip, OIDC role checks and a real mTLS handshake with a revoked cert).

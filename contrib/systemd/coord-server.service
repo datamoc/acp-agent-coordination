@@ -1,0 +1,16 @@
+# coord v2 server with mTLS (see README "Coordination v2" > Network).
+# Install: cp contrib/systemd/*.service ~/.config/systemd/user/
+#          systemctl --user daemon-reload && systemctl --user enable --now coord-server
+# --pki: client certs are checked against management on every request (revocation is
+# immediate) and renewed automatically once 15 days old.
+[Unit]
+Description=coord v2 coordination server (mTLS, 127.0.0.1:1338)
+
+[Service]
+WorkingDirectory=%h/dev/acp-agent-coordination
+ExecStart=%h/dev/acp-agent-coordination/.venv/bin/coord-server --pki pki
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

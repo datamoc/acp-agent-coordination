@@ -1,6 +1,7 @@
 """v2 coordination tests: uv run test_coord.py (temp dirs only)."""
 
 import json
+import os
 import multiprocessing as mp
 import shutil
 import ssl
@@ -11,10 +12,13 @@ import urllib.request
 from pathlib import Path
 
 from coordination import pki, scopes
-from coordination.http import OIDCIntrospector, RemoteCoord, build_server
+from coordination.client import RemoteCoord
+from coordination.server import OIDCIntrospector, build_server
 from coordination.service import SESSION_TTL, Coord, CoordError
 
 TMP = Path(tempfile.mkdtemp(prefix="coordtest-"))
+# Never let the developer's ~/.config/coord/env steer CLI subprocesses.
+os.environ["COORD_CONFIG"] = str(TMP / "no-such-config")
 _n = 0
 
 
@@ -429,9 +433,114 @@ def mtls_with_crl():
         p = subprocess.run([sys.executable, str(Path(__file__).parent / "coord.py"), "--json", "whoami", "cli"],
                            env=env, capture_output=True, text=True, cwd=TMP)
         assert p.returncode == 0 and json.loads(p.stdout)["name"].startswith("cli-"), p.stdout + p.stderr
+        # one-step enroll (management CLI): identity bundle + default link; the client then
+        # needs only COORD_IDENTITY
+        cfg_home = TMP / "xdg"
+        base = {k: v for k, v in os.environ.items() if not k.startswith("COORD_")}
+        base.update(XDG_CONFIG_HOME=str(cfg_home), COORD_PROJECT="enroll", PYTHONPATH=str(Path(__file__).parent))
+
+        def cli(*args, admin=False, **extra):
+            cmd = [sys.executable, "-m", "coordination.pki", "--dir", str(d)] if admin else \
+                [sys.executable, str(Path(__file__).parent / "coord.py"), "--json"]
+            p = subprocess.run(cmd + list(args), env=dict(base, **extra), capture_output=True, text=True, cwd=TMP)
+            assert p.returncode == 0, p.stdout + p.stderr
+            return json.loads(p.stdout)
+
+        r = cli("enroll", "agent-a", "--url", url, admin=True)
+        assert r["cert_reused"] and r["default"]                      # first identity -> default
+        assert oct((cfg_home / "coord" / "agent-a" / "agent.key").stat().st_mode & 0o777) == "0o600"
+        r = cli("enroll", "agent-b", "--url", url, admin=True)        # agent-b was revoked above
+        assert not r["cert_reused"] and not r["default"]
+        assert cli("whoami", "x", COORD_IDENTITY="agent-a")["name"].startswith("x-")
+        assert cli("enroll", "agent-b", "--url", url, "--default", admin=True)["default"]
     finally:
         httpd.shutdown()
 
+
+@check
+def mtls_renewal_and_live_revocation():
+    """The server asks management for a renewal once the cert is 15 days old and hands it to
+    the client, which installs it; revocation applies to the next request, no restart."""
+    if not shutil.which("openssl"):
+        print("  (skipped: no openssl)")
+        return
+    import time
+    d = pki.init(TMP / "pki-renew")
+    pki.issue(d, "localhost", server=True)
+    b = pki.enroll(d, "agent-r", "unused", out=TMP / "bundle-r")
+    bundle = Path(b["bundle"])
+    later = time.time() + 16 * 86400                                   # "16 days later"
+    authority = pki.Authority(d, clock=lambda: later)
+    httpd = build_server(fresh()[0], "127.0.0.1", 0, tls_cert=str(d / "localhost.crt"),
+                         tls_key=str(d / "localhost.key"), client_ca=str(d / "ca.crt"), authority=authority)
+    url = f"https://localhost:{_serve(httpd)}"
+    old = (bundle / "agent.crt").read_text()
+    (TMP / "old-r.crt").write_text(old)
+    try:
+        cl = RemoteCoord(url, ca=str(bundle / "ca.crt"), cert=str(bundle / "agent.crt"),
+                         key=str(bundle / "agent.key"))
+        s = cl.whoami(family="r")["session_id"]                        # renewal rides on this reply
+        new = (bundle / "agent.crt").read_text()
+        assert new != old, "client did not install the renewal"
+        serials = [c["serial"] for c in pki.listing(d) if c["cn"] == "agent-r"]
+        assert len(serials) == 2
+        cl.heartbeat(session=s, status="renewed")                      # same principal, same session
+        again = RemoteCoord(url, ca=str(bundle / "ca.crt"), cert=str(TMP / "old-r.crt"),
+                            key=str(bundle / "agent.key"))
+        again.presence()                                               # old cert: same renewal, not a 3rd
+        assert (bundle / "agent.crt").read_text() == new
+        assert len([c for c in pki.listing(d) if c["cn"] == "agent-r"]) == 2
+        pki.revoke(d, "agent-r")                                       # all of agent-r's certs
+        for who in (cl, again):
+            try:
+                who.presence()
+                raise AssertionError("revoked cert accepted without restart")
+            except CoordError as err:
+                assert err.code == "unauthenticated"
+    finally:
+        httpd.shutdown()
+
+
+_NO_PKI_SCRIPT = r"""
+import json, sys, threading
+sys.modules["coordination.pki"] = None          # any `import coordination.pki` now fails
+import coord
+from coordination.client import RemoteCoord
+from coordination.server import OIDCIntrospector, build_server
+from coordination.service import Coord
+
+# local mode: SQLite, no server, and not even the network client
+sys.modules.pop("coordination.client")
+assert coord.main(["whoami", "local"]) == 0
+assert "coordination.client" not in sys.modules
+
+class Resp:
+    def __init__(self, b): self.b = b
+    def read(self): return self.b
+    def __enter__(self): return self
+    def __exit__(self, *a): pass
+
+idp = lambda req, timeout: Resp(json.dumps({"active": True, "sub": "u", "roles": ["coord:*:contributor"]}).encode())
+for oidc in (None, OIDCIntrospector("http://idp", "c", "s", opener=idp)):   # plain HTTP, then Keycloak
+    httpd = build_server(Coord(sys.argv[1] + ("-oidc" if oidc else "")), "127.0.0.1", 0, oidc=oidc)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    c = RemoteCoord(f"http://127.0.0.1:{httpd.server_address[1]}", token="t" if oidc else None)
+    sid = c.whoami(family="x")["session_id"]
+    c.post(session=sid, body="no pki here")
+    httpd.shutdown()
+print("ok")
+"""
+
+
+@check
+def local_and_oidc_modes_never_load_pki():
+    import subprocess
+    env = {k: v for k, v in os.environ.items() if not k.startswith("COORD_")}
+    env.update(COORD_CONFIG=str(TMP / "no-such-config"), COORD_DB=str(TMP / "nopki-local.db"),
+               PYTHONPATH=str(Path(__file__).parent))
+    p = subprocess.run([sys.executable, "-c", _NO_PKI_SCRIPT, str(TMP / "nopki.db")], env=env,
+                       capture_output=True, text=True, cwd=TMP)
+    assert p.returncode == 0 and p.stdout.strip().endswith("ok"), p.stdout + p.stderr
 
 @check
 def cli_roundtrip():
@@ -471,6 +580,29 @@ def cli_roundtrip():
     run("end", session=first)
     third = run("whoami", "cli")["session_id"]
     assert (TMP / ".coord-session").read_text().strip() == third
+
+
+@check
+def config_file():
+    import coord
+    cfg = TMP / "cfgdir" / "env"
+    cfg.parent.mkdir()
+    cfg.write_text("# comment\nexport COORD_SERVER=https://localhost:1338\nCOORD_CA=pki/ca.crt\n"
+                   "COORD_KEY='~/k.key'\nCOORD_PROJECT=from-file\nOTHER=x\n")
+    saved = dict(os.environ)
+    try:
+        os.environ.update(COORD_CONFIG=str(cfg), COORD_PROJECT="from-env")
+        for k in ("COORD_SERVER", "COORD_CA", "COORD_KEY", "OTHER"):
+            os.environ.pop(k, None)
+        assert coord.load_config() == cfg
+        assert os.environ["COORD_SERVER"] == "https://localhost:1338"
+        assert os.environ["COORD_CA"] == str((cfg.parent / "pki/ca.crt").resolve())
+        assert os.environ["COORD_KEY"] == str(Path.home() / "k.key")
+        assert os.environ["COORD_PROJECT"] == "from-env"      # environment wins
+        assert "OTHER" not in os.environ                      # only COORD_* keys
+    finally:
+        os.environ.clear()
+        os.environ.update(saved)
 
 
 def main():

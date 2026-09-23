@@ -1,4 +1,7 @@
-"""coord - v2 coordination CLI (local SQLite by default, COORD_SERVER for remote).
+"""coord - v2 coordination client CLI (local SQLite by default, COORD_SERVER for remote).
+
+The agents' only command. The server is `coord-server` (coordination/server.py),
+certificate management `coord-admin` (coordination/pki.py).
 
 Session: `coord whoami claude` prints `export COORD_SESSION=<uuid>` and also
 saves it to .coord-session at the repo root (env wins). Every command takes
@@ -6,7 +9,6 @@ saves it to .coord-session at the repo root (env wins). Every command takes
 """
 
 import argparse
-import errno
 import json
 import os
 import subprocess
@@ -14,8 +16,6 @@ import sys
 import uuid
 from pathlib import Path
 
-from coordination import pki
-from coordination.http import OIDCIntrospector, RemoteCoord, build_server
 from coordination.scopes import canonical_project
 from coordination.service import MEMORY_KINDS, MESSAGE_KINDS, ROLES, STANCES, DOC_KINDS, Coord, CoordError
 
@@ -58,9 +58,50 @@ def rel(path: str) -> str:
     return path
 
 
+CONFIG_PATHS = ("COORD_CA", "COORD_CERT", "COORD_KEY", "COORD_DB")
+
+
+def config_home() -> Path:
+    return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "coord"
+
+
+def config_file() -> Path:
+    if os.environ.get("COORD_CONFIG"):
+        return Path(os.environ["COORD_CONFIG"]).expanduser()
+    if os.environ.get("COORD_IDENTITY"):
+        return config_home() / os.environ["COORD_IDENTITY"] / "env"
+    return config_home() / "env"
+
+
+def load_config() -> Path | None:
+    """Fill unset COORD_* variables from the identity's config file.
+
+    $COORD_CONFIG, else ~/.config/coord/$COORD_IDENTITY/env, else
+    ~/.config/coord/env (written by `coord-admin enroll`). KEY=value lines,
+    # comments; the environment always wins. Relative paths resolve against
+    the file's real directory, so it works from any cwd and after reboots."""
+    f = config_file()
+    if not f.is_file():
+        if os.environ.get("COORD_IDENTITY") and not os.environ.get("COORD_CONFIG"):
+            raise SystemExit(f"coord: no identity {os.environ['COORD_IDENTITY']!r} "
+                             f"({f} missing) - ask the administrator for `coord-admin enroll <name>`")
+        return None
+    f = f.resolve()
+    for line in f.read_text(encoding="utf-8").splitlines():
+        key, sep, value = line.strip().removeprefix("export ").partition("=")
+        key, value = key.strip(), value.strip().strip("'\"")
+        if not sep or not key.startswith("COORD_") or key in os.environ:
+            continue
+        if key in CONFIG_PATHS and value:
+            value = str((f.parent / Path(value).expanduser()).resolve())
+        os.environ[key] = value
+    return f
+
+
 def backend():
     url = os.environ.get("COORD_SERVER")
     if url:
+        from coordination.client import RemoteCoord   # local mode never loads the network client
         return RemoteCoord(url, ca=os.environ.get("COORD_CA"), cert=os.environ.get("COORD_CERT"),
                            key=os.environ.get("COORD_KEY"), token=os.environ.get("COORD_TOKEN"),
                            insecure=os.environ.get("COORD_INSECURE") == "1")
@@ -223,16 +264,6 @@ def build_parser():
     s = a("status"); s.add_argument("--project")
     s = a("events"); s.add_argument("--after", type=int, default=0)
 
-    s = a("serve"); s.add_argument("--listen", default="127.0.0.1"); s.add_argument("--port", type=int, default=1338)
-    s.add_argument("--tls-cert"); s.add_argument("--tls-key"); s.add_argument("--client-ca"); s.add_argument("--crl")
-    s.add_argument("--oidc-introspect-url"); s.add_argument("--oidc-client-id"); s.add_argument("--oidc-client-secret")
-    s = a("pki"); ps = s.add_subparsers(dest="pki_cmd", required=True)
-    for n in ("init", "issue", "revoke"):
-        x = ps.add_parser(n); x.add_argument("--dir", default="pki")
-        if n != "init":
-            x.add_argument("name")
-        if n == "issue":
-            x.add_argument("--server", action="store_true")
     return p
 
 
@@ -355,38 +386,7 @@ def run(a, c) -> tuple[str, object, int]:
 
 def main(argv=None) -> int:
     a = build_parser().parse_args(argv)
-    if a.cmd == "pki":
-        if a.pki_cmd == "init":
-            r = {"ca": str(pki.init(a.dir) / "ca.crt")}
-        elif a.pki_cmd == "issue":
-            crt, key = pki.issue(a.dir, a.name, server=a.server)
-            r = {"cert": str(crt), "key": str(key)}
-        else:
-            r = {"crl": str(pki.revoke(a.dir, a.name))}
-        print(json.dumps(r))
-        return 0
-    if a.cmd == "serve":
-        oidc = None
-        if a.oidc_introspect_url:
-            oidc = OIDCIntrospector(a.oidc_introspect_url, a.oidc_client_id or "",
-                                    os.environ.get("COORD_OIDC_SECRET") or a.oidc_client_secret or "")
-        try:
-            httpd = build_server(Coord(os.environ.get("COORD_DB") or repo_root() / "coord2.db"), a.listen, a.port,
-                                 a.tls_cert, a.tls_key, a.client_ca, a.crl, oidc)
-        except OSError as e:
-            if e.errno != errno.EADDRINUSE:
-                raise
-            print(f"error: {a.listen}:{a.port} is already in use - another `coord serve` is probably "
-                  f"running (find it with `ss -ltnp | grep :{a.port}`), or pick another --port",
-                  file=sys.stderr)
-            return 1
-        scheme = "https" if a.tls_cert else "http"
-        print(f"coord serving on {scheme}://{a.listen}:{a.port}", flush=True)
-        try:
-            httpd.serve_forever()
-        except KeyboardInterrupt:
-            pass
-        return 0
+    load_config()
     try:
         cmd, r, code = run(a, backend())
     except CoordError as e:

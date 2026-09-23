@@ -1,0 +1,13 @@
+# ACP mailbox/claims server used by the `acp` plugin (http://localhost:1337).
+# Install: see coord-server.service.
+[Unit]
+Description=ACP coordination server (127.0.0.1:1337)
+
+[Service]
+WorkingDirectory=%h/dev/acp-agent-coordination
+ExecStart=%h/dev/acp-agent-coordination/.venv/bin/python ACP_server.py
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target
