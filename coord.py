@@ -6,6 +6,7 @@ saves it to .coord-session at the repo root (env wins). Every command takes
 """
 
 import argparse
+import errno
 import json
 import os
 import subprocess
@@ -239,7 +240,7 @@ def run(a, c) -> tuple[str, object, int]:
     S = load_session
     cmd = a.cmd
     if cmd == "whoami":
-        r = c.whoami(a.family, project=a.project or detect_project(), client_id=str(uuid.uuid4()))
+        r = c.whoami(family=a.family, project=a.project or detect_project(), client_id=str(uuid.uuid4()))
         # .coord-session is shared by every session in this checkout: never
         # overwrite one that still belongs to a live session, or that session
         # would silently start acting as this one.
@@ -369,8 +370,16 @@ def main(argv=None) -> int:
         if a.oidc_introspect_url:
             oidc = OIDCIntrospector(a.oidc_introspect_url, a.oidc_client_id or "",
                                     os.environ.get("COORD_OIDC_SECRET") or a.oidc_client_secret or "")
-        httpd = build_server(Coord(os.environ.get("COORD_DB") or repo_root() / "coord2.db"), a.listen, a.port,
-                             a.tls_cert, a.tls_key, a.client_ca, a.crl, oidc)
+        try:
+            httpd = build_server(Coord(os.environ.get("COORD_DB") or repo_root() / "coord2.db"), a.listen, a.port,
+                                 a.tls_cert, a.tls_key, a.client_ca, a.crl, oidc)
+        except OSError as e:
+            if e.errno != errno.EADDRINUSE:
+                raise
+            print(f"error: {a.listen}:{a.port} is already in use - another `coord serve` is probably "
+                  f"running (find it with `ss -ltnp | grep :{a.port}`), or pick another --port",
+                  file=sys.stderr)
+            return 1
         scheme = "https" if a.tls_cert else "http"
         print(f"coord serving on {scheme}://{a.listen}:{a.port}", flush=True)
         try:

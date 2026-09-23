@@ -420,6 +420,15 @@ def mtls_with_crl():
             raise AssertionError
         except CoordError as err:
             assert err.code == "forbidden"
+        # the real CLI over mTLS (whoami used to pass a positional arg RemoteCoord can't send)
+        import os
+        import subprocess
+        env = dict(os.environ, COORD_SERVER=url, COORD_CA=str(d / "ca.crt"), COORD_CERT=str(acrt),
+                   COORD_KEY=str(akey), COORD_PROJECT="mtls-cli")
+        env.pop("COORD_SESSION", None)
+        p = subprocess.run([sys.executable, str(Path(__file__).parent / "coord.py"), "--json", "whoami", "cli"],
+                           env=env, capture_output=True, text=True, cwd=TMP)
+        assert p.returncode == 0 and json.loads(p.stdout)["name"].startswith("cli-"), p.stdout + p.stderr
     finally:
         httpd.shutdown()
 
