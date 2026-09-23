@@ -15,7 +15,7 @@ Linux Foundation; the ACP layer was retired in 0.3.0.)
 | Server certificate sources | `coordination/certsource.py` | Python | `coord-server --cert-source` |
 | Local mode bridge | `coordination/local.py` | Python | `coord-local` |
 | **Client** (CLI + library) | `clients/ts/` | **TypeScript**, Node >= 20, no runtime deps | `coord` |
-| **Agent plugin** (Claude Code / Codex) | `plugins/coord/` | JS (bundled client) | `/coord:join` ... |
+| **Agent plugin** (Claude Code, Codex, Muse, Gemini, Qwen; `tools/agent_plugins.py` for opencode, Kilo, Crush) | `plugins/coord/` | JS (bundled client) | `/coord:join` ... |
 | Wire contract | `schema/ops.json`, `schema/project-vectors.json` | generated | `uv run tools/gen_schema.py` |
 
 The contract is generated from the Python service; the TS client and its tests
@@ -146,6 +146,24 @@ only Node. Claude Code loads this directory marketplace in place: edits apply
 at the next session (or `/reload-plugins`). Codex installs a copy
 (`codex plugin marketplace add <checkout>`, `codex plugin add coord@coord`).
 Command bodies must not use `$ARGUMENTS` (Codex skips such commands).
+
+**Other agent CLIs** - the same skill and commands, one source
+(`plugins/coord/claude-commands/*.md`; the Gemini/Qwen TOML commands are
+generated from it):
+
+| CLI | Install | Commands |
+|---|---|---|
+| Muse Code | `muse plugins install plugins/coord` (reads the Claude manifest; a copy: `muse plugins update coord` after pulling) | `/coord:join` ... |
+| Gemini CLI | `gemini extensions link plugins/coord` (`install` for a copy) | `/coord:join` ... |
+| Qwen Code | `qwen extensions install <checkout>\plugins\coord` (reads the Gemini manifest; absolute path; a copy: `qwen extensions update coord` after pulling) | `/coord:join` ... |
+| opencode, Kilo | `uv run tools/agent_plugins.py install opencode kilo` | `/coord-join` ... |
+| Crush | `uv run tools/agent_plugins.py install crush` | skill only |
+
+`install` copies the skill (and commands) into the CLI's config dir with
+this checkout's client path written in, so keep the checkout where it is
+and rerun `install` after pulling skill or command changes (`uninstall`
+removes them). Every CLI takes its own session family: `whoami opencode`,
+`whoami gemini`, ...
 
 **CLI** — the session protocol:
 
@@ -436,6 +454,7 @@ from 0.3: keep them on a branch (`git branch acp-0.2-local`), then
 | `cannot read ...\env (permission denied)` | a sandbox account cannot read the identity | [Codex](#codex), step 1 |
 | `unreachable` | `coord-server` is not running | `systemctl --user start coord-server`; Windows: `Start-ScheduledTask coord-server`, or `.venv\Scripts\coord-server.exe --pki pki` |
 | Codex runs `ACP_client.py` | an old `acp-client` skill | see the last rows of [Migrating](#migrating-from-02x) |
+| requests fail, the server says nothing | requests are not logged by default | `coord-server -v` logs one line per request (client, op, status, identity, time); `-vv` adds auth decisions, op arguments and error details; `-q` keeps errors only |
 
 ## GitLab (internal)
 
@@ -450,6 +469,7 @@ from 0.3: keep them on a branch (`git branch acp-0.2-local`), then
 
 ```sh
 uv run tools/gen_schema.py            # after changing an op signature (CI checks with --check)
+uv run tools/agent_plugins.py gen     # after editing plugins/coord/claude-commands (CI checks with --check)
 uv run test_coord.py                  # server, PKI, renewal, OIDC, cert sources, A2A binding
 cd clients/ts && npm test             # TS client against the real Python server (+ @a2a-js/sdk interop)
 npm run bundle-plugin                 # refresh plugins/coord/client (CI fails if stale)

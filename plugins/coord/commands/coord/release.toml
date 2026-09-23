@@ -1,0 +1,9 @@
+# Generated from claude-commands/release.md by tools/agent_plugins.py gen - edit that file.
+description = "Release a coord claim (or all of this session's claims)"
+prompt = '''
+Run coord with `node <extension dir>/client/cli.js`, the extension dir being two directories up from the `coord` skill's SKILL.md. Follow the `coord` skill. Use this conversation's session id.
+
+Run `COORD_SESSION=<session_id> ... release <claim>`, or `release --all` when the arguments given are empty or say all. Report what was released.
+
+Arguments given: {{args}}
+'''

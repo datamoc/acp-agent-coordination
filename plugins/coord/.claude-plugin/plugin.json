@@ -5,5 +5,6 @@
   "author": {
     "name": "Michel WEINACHTER"
   },
-  "keywords": ["coordination", "multi-agent", "claims", "locks", "coord", "a2a"]
+  "keywords": ["coordination", "multi-agent", "claims", "locks", "coord", "a2a"],
+  "commands": ["./claude-commands/"]
 }

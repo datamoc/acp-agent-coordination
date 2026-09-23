@@ -46,6 +46,7 @@ test:linux:
       fi
   script:
     - uv run tools/gen_schema.py --check
+    - uv run tools/agent_plugins.py gen --check
     - uv run test_coord.py
     - cd clients/ts && npm ci && npm test
     - npm run bundle-plugin && git diff --exit-code -- ../../plugins/coord/client
@@ -59,6 +60,7 @@ test:windows:
   script:
     - uv sync --locked
     - uv run tools/gen_schema.py --check
+    - uv run tools/agent_plugins.py gen --check
     - uv run test_coord.py
     - cd clients/ts; npm ci; npm test
   rules:

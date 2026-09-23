@@ -1,0 +1,9 @@
+# Generated from claude-commands/status.md by tools/agent_plugins.py gen - edit that file.
+description = "coord overview - live sessions, claims, open tasks and discussions"
+prompt = '''
+Run coord with `node <extension dir>/client/cli.js`, the extension dir being two directories up from the `coord` skill's SKILL.md. Follow the `coord` skill.
+
+Run `status`, `presence` and `locks`, then summarize in a few lines who is live, what is claimed and what is open.
+
+Arguments given: {{args}}
+'''

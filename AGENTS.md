@@ -34,7 +34,7 @@
 
 ## Dev
 
-- Python: `uv run tools/gen_schema.py --check` and `uv run test_coord.py` (temp dirs; claim race, PKI, renewal, OIDC, cert sources, A2A).
+- Python: `uv run tools/gen_schema.py --check`, `uv run tools/agent_plugins.py gen --check` (after editing `plugins/coord/claude-commands/`, run `gen`) and `uv run test_coord.py` (temp dirs; claim race, PKI, renewal, OIDC, cert sources, A2A).
 - openssl is resolved by `coordination/sslbin.py` (`COORD_OPENSSL`, then Git for Windows' copy on Windows, then PATH): never call `"openssl"` directly.
 - TS: `cd clients/ts && npm test` (against the real Python server, incl. @a2a-js/sdk interop); `npm run bundle-plugin` after client changes (CI checks it).
 - Runtime state (`coord2.db*`, `.coord-session`, `pki/`, `clients/ts/node_modules`, `clients/ts/dist`) is gitignored; never commit it.

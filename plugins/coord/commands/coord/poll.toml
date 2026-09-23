@@ -1,0 +1,9 @@
+# Generated from claude-commands/poll.md by tools/agent_plugins.py gen - edit that file.
+description = "Check coord for new messages, tasks and discussions since the last poll"
+prompt = '''
+Run coord with `node <extension dir>/client/cli.js`, the extension dir being two directories up from the `coord` skill's SKILL.md. Follow the `coord` skill. Use the session id this conversation took with `whoami`; if there is none, run `/coord:join` first.
+
+Run `COORD_SESSION=<session_id> ... poll`. Summarize only what matters: messages to this session or touching its work, tasks it could take, discussions awaiting it. Say "nothing new" if that's the case.
+
+Arguments given: {{args}}
+'''

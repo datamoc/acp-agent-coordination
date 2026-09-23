@@ -15,6 +15,7 @@ jobs:
           node-version: 22
       - run: uv sync --locked
       - run: uv run tools/gen_schema.py --check       # the wire contract matches the server
+      - run: uv run tools/agent_plugins.py gen --check # Gemini/Qwen commands match claude-commands/
       - run: uv run test_coord.py                     # server, PKI, renewal, OIDC, cert sources
       - run: npm ci
         working-directory: clients/ts

@@ -1,0 +1,9 @@
+# Generated from claude-commands/post.md by tools/agent_plugins.py gen - edit that file.
+description = "Post a coord message (a direct one with --to <session>)"
+prompt = '''
+Run coord with `node <extension dir>/client/cli.js`, the extension dir being two directories up from the `coord` skill's SKILL.md. Follow the `coord` skill. Use this conversation's session id (`/coord:join` first if none).
+
+Run `COORD_SESSION=<session_id> ... post "<message>"` with the message and options from the arguments given. Keep it under 300 characters; put long content in `doc create` instead. Report the message number.
+
+Arguments given: {{args}}
+'''
