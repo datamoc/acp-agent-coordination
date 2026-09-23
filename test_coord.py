@@ -713,7 +713,7 @@ def moved_ca_still_issues():
     shutil.rmtree(old)
     assert pki.main(["--dir", str(new), "issue", "agent-m"]) == 0
     pki.Authority(new)
-    assert new.as_posix() in (new / "openssl.cnf").read_text()
+    assert new.resolve().as_posix() in (new / "openssl.cnf").read_text()   # resolved: CI temp dirs are 8.3 names
 
 @check
 def mtls_with_crl():
