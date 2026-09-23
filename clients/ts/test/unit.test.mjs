@@ -60,6 +60,8 @@ test("argument parsing: defaults, ints, choices, required, --json anywhere, alia
 });
 
 test("every CLI command sends a known op with only known params and all required ones", async () => {
+  const EMPTY = join(tmp(), "empty.diff");                              // not /dev/null: Windows has none
+  writeFileSync(EMPTY, "");
   const sent = [];
   const fake = new CoordClient({ async send(op, args) { sent.push([op, args]); return { ok: true, result: fakeResult(op) }; } });
   const fakeResult = (op) => ({ whoami: { session_id: "s", name: "x-01", generation: 1, project: "p" }, check: { ok: true, conflicts: [] } })[op] ?? {};
@@ -71,7 +73,7 @@ test("every CLI command sends a known op with only known params and all required
     ["ask", "why?", "--claim", "C1", "--to", "b-01"], ["check", "a.py"], ["post-commit", "--sha", "abc"], ["discuss", "topic", "--with", "b-01,c-01", "--rule", "majority", "--quorum", "3", "--deadline", "48h"],
     ["propose", "D1", "idea"], ["react", "P1", "support", "+1"], ["discussion", "D1"], ["discussions"], ["decide", "D1", "go", "--proposal", "P1", "--no-consensus", "deadline"],
     ["doc", "create", "T", "--content", "x"], ["doc", "show", "DOC1"], ["doc", "edit", "DOC1", "--base-revision", "1", "--content", "y"],
-    ["doc", "history", "DOC1"], ["doc", "patch", "DOC1", "--base-revision", "1", "--file", "/dev/null"], ["doc", "list"], ["tasks", "--status", "open"], ["task", "create", "T", "--assign", "b-01"],
+    ["doc", "history", "DOC1"], ["doc", "patch", "DOC1", "--base-revision", "1", "--file", EMPTY], ["doc", "list"], ["tasks", "--status", "open"], ["task", "create", "T", "--assign", "b-01"],
     ["task", "accept", "T1"], ["task", "done", "T1", "note"], ["task", "show", "T1"], ["task", "cancel", "T1"], ["task", "decline", "T1", "busy"],
     ["role", "accept", "C1", "delegate"], ["role", "decline", "C1", "coeditor", "not mine"], ["memory", "show"], ["memory", "search", "q"],
     ["memory", "add", "pitfall", "T", "--content", "c"], ["memory", "edit", "M1", "--base-revision", "1", "--content", "c", "--archive"],

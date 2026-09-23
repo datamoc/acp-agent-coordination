@@ -26,8 +26,10 @@ from . import state_home
 
 try:
     import fcntl
-except ImportError:  # Windows: in-process lock only
+    msvcrt = None
+except ImportError:  # Windows: byte-range lock on the lock file instead
     fcntl = None
+    import msvcrt
 
 MAX_DAYS = 47            # no leaf certificate (client or server) may live longer
 CLIENT_DAYS = 30
@@ -81,15 +83,27 @@ def _run(*args, text=False) -> str | bytes:
 
 @contextmanager
 def _locked(d: Path):
-    """Serialize CA database changes across threads and processes (server + CLI)."""
-    with _thread_lock, open(d / ".lock", "a") as f:
+    """Serialize CA database changes across threads and processes (coord-server renewing while
+    coord-admin enrolls): `openssl ca` itself does not lock index.txt/serial."""
+    with _thread_lock, open(d / ".lock", "a+") as f:
         if fcntl:
             fcntl.flock(f, fcntl.LOCK_EX)
+        else:                                 # msvcrt.LK_LOCK gives up after ~10 s: keep waiting
+            f.seek(0)
+            while True:
+                try:
+                    msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
+                    break
+                except OSError:
+                    continue
         try:
             yield
         finally:
             if fcntl:
                 fcntl.flock(f, fcntl.LOCK_UN)
+            else:
+                f.seek(0)
+                msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
 
 
 def _ts(openssl_date: str) -> float:
@@ -119,8 +133,9 @@ def init(d: str | Path, cn: str = "coord-ca") -> Path:
         _run("req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256", "-nodes",
              "-keyout", str(d / "ca.key"), "-out", str(d / "ca.crt"), "-days", "3650", "-subj", f"/CN={cn}",
              *_CA_EXT)
-    upgrade_ca(d)
-    gencrl(d)
+    with _locked(d):   # the CRL number is shared state too
+        upgrade_ca(d)
+        gencrl(d)
     return d
 
 
@@ -165,7 +180,7 @@ def revoke(d: str | Path, name: str) -> Path:
             raise SystemExit(f"coord-admin: no valid certificate for {name!r}")
         for s in serials:
             _run("ca", "-config", str(d / "openssl.cnf"), "-revoke", str(d / "newcerts" / f"{s}.pem"))
-    return gencrl(d)
+        return gencrl(d)
 
 
 def _pubkey(pem_file: Path) -> str:

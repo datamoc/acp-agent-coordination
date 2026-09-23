@@ -639,6 +639,27 @@ def oidc_roles():
         httpd.shutdown()
 
 
+def _ca_race(args):
+    d, name = args
+    from coordination import pki as p
+    return [p.issue(d, f"{name}-{i}")[0].name for i in range(3)]
+
+
+@check
+def ca_is_safe_across_processes():
+    """coord-server renewing while coord-admin enrolls: every serial unique, the CA database valid
+    (Windows has no fcntl - the lock must still hold across processes)."""
+    if not shutil.which("openssl"):
+        print("  (skipped: no openssl)")
+        return
+    d = pki.init(TMP / "pki-race")
+    ctx = mp.get_context("spawn")
+    with ctx.Pool(6) as pool:
+        pool.map(_ca_race, [(str(d), f"agent{i}") for i in range(6)])
+    serials = [c["serial"] for c in pki.listing(d)]
+    assert len(serials) == 18 and len(set(serials)) == 18, serials
+    pki.revoke(d, "agent0-0")                                           # openssl can still index the db
+
 @check
 def mtls_with_crl():
     if not shutil.which("openssl"):
