@@ -347,7 +347,18 @@ refused unless TLS **and** an identity method are configured:
   (never before, so a client that failed to save its renewal is not
   locked out); the server's old certificate is revoked right after the
   swap. `coord-admin tidy` (dry run, `--apply` to act) cleans up
-  certificates superseded before this existed. `coord-admin list` shows
+  certificates superseded before this existed.
+  **Python 3.13+ clients** verify strictly and refuse a CA certificate
+  without `keyUsage`, which CAs made before 0.2.1 lack. `coord-admin init`
+  upgrades one in place: same key and name, so every certificate it issued
+  stays valid; the old one is kept as `pki/ca.crt.pre-keyusage` and this
+  machine's bundles get the new `ca.crt`. Then `coord-admin server-cert`
+  (it revokes the server certificate it replaces) and
+  `systemctl --user restart coord-server`; bundles on other machines need
+  the new `ca.crt` copied in.
+  **Windows**: works without Developer Mode (the default identity is a
+  `COORD_IDENTITY=<name>` pointer file when symlinks aren't allowed);
+  `--renew-command` accepts `C:\...` paths; openssl from Git for Windows. `coord-admin list` shows
   every cert; `--crl` (TLS-level CRL) is still accepted.
 - OIDC (Keycloak): `--oidc-introspect-url .../protocol/openid-connect/token/introspect
   --oidc-client-id coord` (secret in `COORD_OIDC_SECRET`); clients get

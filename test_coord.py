@@ -453,7 +453,8 @@ def mtls_with_crl():
 
         r = cli("enroll", "agent-a", "--url", url, admin=True)
         assert r["cert_reused"] and r["default"]                      # first identity -> default
-        assert oct((cfg_home / "coord" / "agent-a" / "agent.key").stat().st_mode & 0o777) == "0o600"
+        if os.name != "nt":
+            assert oct((cfg_home / "coord" / "agent-a" / "agent.key").stat().st_mode & 0o777) == "0o600"
         r = cli("enroll", "agent-b", "--url", url, admin=True)        # agent-b was revoked above
         assert not r["cert_reused"] and not r["default"]
         assert cli("whoami", "x", COORD_IDENTITY="agent-a")["name"].startswith("x-")
@@ -561,6 +562,43 @@ def server_cert_auto_renewal_and_47_day_cap():
     finally:
         httpd.shutdown()
 
+@check
+def old_ca_is_upgraded_for_strict_clients():
+    """A CA made before keyUsage existed (refused by Python >= 3.13) is re-signed in place by
+    `init`: same key/subject, old certs still verify, local bundles refreshed."""
+    if not shutil.which("openssl"):
+        print("  (skipped: no openssl)")
+        return
+    import subprocess
+    d = TMP / "pki-old"
+    d.mkdir()
+    subprocess.run(["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256", "-nodes",
+                    "-keyout", str(d / "ca.key"), "-out", str(d / "ca.crt"), "-days", "3650", "-subj", "/CN=coord-ca",
+                    "-addext", "basicConstraints=critical,CA:TRUE"], check=True, capture_output=True)
+    old_ca = (d / "ca.crt").read_text()
+    text = lambda f: subprocess.run(["openssl", "x509", "-in", str(f), "-noout", "-text"], capture_output=True,
+                                    text=True, check=True).stdout
+    assert "Key Usage" not in text(d / "ca.crt")
+    saved = os.environ.get("XDG_CONFIG_HOME")
+    os.environ["XDG_CONFIG_HOME"] = str(TMP / "xdg-old")
+    try:
+        (TMP / "xdg-old" / "coord" / "someone").mkdir(parents=True)
+        (TMP / "xdg-old" / "coord" / "someone" / "ca.crt").write_text(old_ca)     # a local bundle
+        pki.init(d)                                                               # upgrades
+        assert "Key Usage" in text(d / "ca.crt") and (d / "ca.crt.pre-keyusage").read_text() == old_ca
+        assert pki._run("x509", "-in", str(d / "ca.crt"), "-noout", "-pubkey", text=True) == \
+            pki._run("x509", "-in", str(d / "ca.crt.pre-keyusage"), "-noout", "-pubkey", text=True)
+        assert (TMP / "xdg-old" / "coord" / "someone" / "ca.crt").read_text() == (d / "ca.crt").read_text()
+        assert pki.upgrade_ca(d) is False                                          # idempotent
+        leaf, _ = pki.issue(d, "srv", server=True)
+        subprocess.run(["openssl", "verify", "-x509_strict", "-CAfile", str(d / "ca.crt"), str(leaf)],
+                       check=True, capture_output=True)                           # strict chain OK
+    finally:
+        if saved is None:
+            os.environ.pop("XDG_CONFIG_HOME", None)
+        else:
+            os.environ["XDG_CONFIG_HOME"] = saved
+
 class FakeKeycloak:
     """Just enough of a Keycloak realm: discovery, token (client credentials, refresh with
     rotation, device code), device authorization, introspection, revocation."""
@@ -644,7 +682,8 @@ def keycloak_tokens_refresh_themselves():
         sid = cl.whoami(family="svc")["session_id"]
         cl.post(session=sid, body="hello from a service account")
         assert kc.requests == ["client_credentials"]
-        assert oct(tp.state_file.stat().st_mode & 0o777) == "0o600"
+        if os.name != "nt":                                          # no POSIX modes on Windows
+            assert oct(tp.state_file.stat().st_mode & 0o777) == "0o600"
         again = TokenProvider("agent-svc", issuer=kc.realm, client_secret="s3cret",
                               state_dir=TMP / "oidc-a", clock=lambda: clock[0])
         RemoteCoord(url, token=again).presence()                     # next process: cached token
@@ -879,7 +918,7 @@ def config_file():
         os.environ.update(COORD_CONFIG=str(cfg), COORD_PROJECT="from-env")
         for k in ("COORD_SERVER", "COORD_CA", "COORD_KEY", "OTHER"):
             os.environ.pop(k, None)
-        assert coord.load_config() == cfg
+        assert coord.load_config() == cfg.resolve()                 # Windows: 8.3 temp names
         assert os.environ["COORD_SERVER"] == "https://localhost:1338"
         assert os.environ["COORD_CA"] == str((cfg.parent / "pki/ca.crt").resolve())
         assert os.environ["COORD_KEY"] == str(Path.home() / "k.key")

@@ -87,7 +87,12 @@ def load_config() -> Path | None:
                              f"({f} missing) - ask the administrator for `coord-admin enroll <client-name>`")
         return None
     f = f.resolve()
-    for line in f.read_text(encoding="utf-8").splitlines():
+    lines = f.read_text(encoding="utf-8").splitlines()
+    pointer = [ln.partition("=")[2].strip() for ln in lines if ln.startswith("COORD_IDENTITY=")]
+    if pointer and not os.environ.get("COORD_IDENTITY") and not os.environ.get("COORD_CONFIG"):
+        os.environ["COORD_IDENTITY"] = pointer[0]   # a default-identity pointer (no symlinks)
+        return load_config()
+    for line in lines:
         key, sep, value = line.strip().removeprefix("export ").partition("=")
         key, value = key.strip(), value.strip().strip("'\"")
         if not sep or not key.startswith("COORD_") or key in os.environ:

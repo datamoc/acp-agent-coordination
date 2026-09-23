@@ -42,8 +42,11 @@ class OIDCIntrospector:
     `coord:*:<role>` entries in realm_access.roles / roles / groups."""
 
     def __init__(self, url: str, client_id: str, client_secret: str, cache_seconds: int = 60,
-                 opener=urllib.request.urlopen):
+                 opener=None):
         self.url, self.client_id, self.client_secret = url, client_id, client_secret
+        if opener is None:   # a loopback IdP never goes through a proxy (Windows reads the system one)
+            handlers = [urllib.request.ProxyHandler({})] if is_loopback(urllib.parse.urlsplit(url).hostname or "") else []
+            opener = urllib.request.build_opener(*handlers).open
         self.cache_seconds, self.opener = cache_seconds, opener
         self._cache: dict[str, tuple[float, dict]] = {}
         self._lock = threading.Lock()

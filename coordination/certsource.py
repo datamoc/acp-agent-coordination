@@ -16,6 +16,7 @@ Only `local` imports the PKI code.
 """
 
 import hashlib
+import os
 import shlex
 import ssl
 import subprocess
@@ -83,7 +84,11 @@ class CommandSource:
                  clock=time.time, timeout: float = 300):
         self.cert, self.key, self.clock, self.timeout = Path(cert), Path(key), clock, timeout
         self.renew_after_days = renew_after_days
-        self.argv = [part.format(cert=self.cert, key=self.key) for part in shlex.split(command)]
+        # Windows paths (C:\...) keep their backslashes: POSIX shlex would eat them
+        parts = shlex.split(command, posix=os.name != "nt")
+        if os.name == "nt":
+            parts = [p[1:-1] if len(p) > 1 and p[0] == p[-1] and p[0] in "\"'" else p for p in parts]
+        self.argv = [part.format(cert=self.cert, key=self.key) for part in parts]
 
     def refresh(self) -> bool:
         if not renewal_due(*cert_dates(self.cert), self.clock(), self.renew_after_days):
