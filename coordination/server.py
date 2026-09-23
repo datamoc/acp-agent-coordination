@@ -30,6 +30,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from . import state_home
 from .net import is_loopback
 from .service import READ_OPS, WRITE_OPS, Coord, CoordError
 
@@ -220,12 +221,12 @@ def build_server(coord, host="127.0.0.1", port=1338, tls_cert=None, tls_key=None
 
 
 def main(argv=None) -> int:
-    root = Path(__file__).resolve().parents[1]
     p = argparse.ArgumentParser(prog="coord-server", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--listen", default="127.0.0.1")
     p.add_argument("--port", type=int, default=1338)
-    p.add_argument("--db", default=os.environ.get("COORD_DB") or str(root / "coord2.db"))
+    p.add_argument("--db", default=os.environ.get("COORD_DB") or str(state_home() / "coord2.db"),
+                   help="default $COORD_DB, else coord2.db in the checkout or ~/.local/share/coord")
     p.add_argument("--pki", type=Path, help="mTLS with management's CA dir: client CA, server cert "
                    "(<dir>/localhost.crt/.key unless --tls-cert/--tls-key), live revocation and renewal")
     p.add_argument("--tls-cert"); p.add_argument("--tls-key")

@@ -231,6 +231,9 @@ def main(argv: list[str] | None = None) -> None:
     if not args:
         print(__doc__)
         raise SystemExit(1)
+    if args[0] in ("-h", "--help"):
+        print(__doc__)
+        return
     try:
         if args[0] == "poll":
             poll(args[1] if len(args) > 1 else "")

@@ -22,6 +22,8 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
+from . import state_home
+
 try:
     import fcntl
 except ImportError:  # Windows: in-process lock only
@@ -32,7 +34,7 @@ CLIENT_DAYS = 30
 SERVER_DAYS = 47
 RENEW_AFTER_DAYS = 15    # renew once this old - or at once if it outlives MAX_DAYS
 assert max(CLIENT_DAYS, SERVER_DAYS) <= MAX_DAYS
-DEFAULT_DIR = Path(__file__).resolve().parents[1] / "pki"
+DEFAULT_DIR = state_home() / "pki"
 
 _CNF = """[ca]
 default_ca = coord
@@ -343,7 +345,7 @@ def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="coord-admin", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--dir", type=Path, default=Path(os.environ.get("COORD_PKI") or DEFAULT_DIR),
-                   help="CA directory (default $COORD_PKI or this checkout's pki/)")
+                   help=f"CA directory (default $COORD_PKI or {DEFAULT_DIR})")
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("init", help="create the CA (idempotent; also refreshes the CRL)")
     s = sub.add_parser("server-cert", help="issue the server's own certificate (once; it renews itself)")
