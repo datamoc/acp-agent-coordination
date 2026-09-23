@@ -702,6 +702,20 @@ def ca_is_safe_across_processes():
     pki.revoke(d, "agent0-0")                                           # openssl can still index the db
 
 @check
+def moved_ca_still_issues():
+    """A CA dir moved with its checkout (renamed repo): openssl.cnf is rewritten, not left pointing at the old path."""
+    if not have_openssl():
+        print("  (skipped: no openssl)")
+        return
+    old = pki.init(TMP / "pki-old")
+    new = TMP / "pki-moved"
+    shutil.copytree(old, new)
+    shutil.rmtree(old)
+    assert pki.main(["--dir", str(new), "issue", "agent-m"]) == 0
+    pki.Authority(new)
+    assert new.as_posix() in (new / "openssl.cnf").read_text()
+
+@check
 def mtls_with_crl():
     if not have_openssl():
         print("  (skipped: no openssl)")

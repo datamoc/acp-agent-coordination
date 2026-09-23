@@ -121,6 +121,15 @@ _CA_EXT = ("-addext", "basicConstraints=critical,CA:TRUE", "-addext", "keyUsage=
            "-addext", "subjectKeyIdentifier=hash")   # Python >= 3.13 (VERIFY_X509_STRICT) needs keyUsage
 
 
+def write_cnf(d: Path) -> None:
+    """(Re)write openssl.cnf: it holds the CA dir's absolute path, so after a moved or renamed
+    checkout openssl would otherwise look for the CA key in the old place."""
+    # forward slashes: openssl.cnf treats "\" as an escape (C:\Users\...\tmp -> "C:Users...<TAB>mp")
+    text, f = _CNF.format(d=d.as_posix()), d / "openssl.cnf"
+    if not f.exists() or f.read_text() != text:
+        f.write_text(text)
+
+
 def init(d: str | Path, cn: str = "coord-ca") -> Path:
     d = Path(d).resolve()
     (d / "newcerts").mkdir(parents=True, exist_ok=True)
@@ -128,8 +137,7 @@ def init(d: str | Path, cn: str = "coord-ca") -> Path:
     for f in ("serial", "crlnumber"):
         if not (d / f).exists():
             (d / f).write_text("1000\n")
-    # forward slashes: openssl.cnf treats "\" as an escape (C:\Users\...\tmp -> "C:Users...<TAB>mp")
-    (d / "openssl.cnf").write_text(_CNF.format(d=d.as_posix()))
+    write_cnf(d)
     if not (d / "ca.crt").exists():
         _run("req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256", "-nodes",
              "-keyout", str(d / "ca.key"), "-out", str(d / "ca.crt"), "-days", "3650", "-subj", f"/CN={cn}",
@@ -250,6 +258,8 @@ class Authority:
 
     def __init__(self, d: str | Path, renew_after_days: float = RENEW_AFTER_DAYS, clock=time.time):
         self.d, self.clock = Path(d).resolve(), clock
+        if (self.d / "ca.crt").exists():
+            write_cnf(self.d)
         self.renew_after = dt.timedelta(days=renew_after_days)
         self._status: tuple[float, dict[str, str]] = (-1.0, {})
         self._confirmed: set[str] = set()
@@ -435,6 +445,8 @@ def main(argv=None) -> int:
     s.add_argument("--apply", action="store_true")
     a = p.parse_args(argv)
     try:
+        if a.cmd != "init" and (a.dir / "ca.crt").exists():
+            write_cnf(a.dir.resolve())
         if a.cmd == "init":
             upgraded = (a.dir / "ca.crt").exists() and "Key Usage" not in _run(
                 "x509", "-in", str(a.dir / "ca.crt"), "-noout", "-text", text=True)
