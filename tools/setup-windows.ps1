@@ -120,6 +120,11 @@ if ($Codex) {
     }
 }
 if (Test-Path "$HOME\.claude\skills\acp-client") { Warn "obsolete ACP skill: $HOME\.claude\skills\acp-client - move or delete it" }
+foreach ($cfg in @("$HOME\.codex\config.toml", "$HOME\.claude\plugins\known_marketplaces.json")) {
+    if ((Test-Path $cfg) -and (Select-String -Path $cfg -SimpleMatch "acp-agent-coordination" -Quiet)) {
+        Warn "$cfg still uses the old marketplace 'acp-agent-coordination': see README 'Renamed acp-agent-coordination -> coord'"
+    }
+}
 
 # --- server ------------------------------------------------------------------------------------
 $server = "$Repo\.venv\Scripts\coord-server.exe"
@@ -147,6 +152,6 @@ if (Get-NetTCPConnection -LocalPort 1337 -State Listen -ErrorAction SilentlyCont
     Warn "coord-server is not running: start it with  & '$server' $serverArgs  (or re-run with -AutoStart)"
 }
 
-Write-Host "`nClaude Code:  claude plugin marketplace add `"$Repo`"; claude plugin install coord@acp-agent-coordination"
-if ($Codex) { Write-Host "Codex:        codex plugin marketplace add `"$Repo`"; codex plugin add coord@acp-agent-coordination   (then: `$coord join)" }
+Write-Host "`nClaude Code:  claude plugin marketplace add `"$Repo`"; claude plugin install coord@coord"
+if ($Codex) { Write-Host "Codex:        codex plugin marketplace add `"$Repo`"; codex plugin add coord@coord   (then: `$coord join)" }
 if ($Warnings.Count) { Write-Host "`n$($Warnings.Count) thing(s) to do - see !! above." -ForegroundColor Yellow } else { Write-Host "`nAll set." -ForegroundColor Green }

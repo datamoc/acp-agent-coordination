@@ -73,7 +73,7 @@ Needs [uv](https://docs.astral.sh/uv/) >= 0.11, Node >= 20 and openssl
 ### Linux / WSL / macOS
 
 ```sh
-cd ~/dev/acp-agent-coordination
+cd ~/dev/coord
 uv sync                                          # server + admin (no runtime dependencies)
 (cd clients/ts && npm ci && npm run build)       # the TS client
 ln -sf "$PWD"/.venv/bin/coord-{server,admin,local} ~/.local/bin/
@@ -84,8 +84,8 @@ coord-admin enroll <client-name>                 # an agent identity -> ~/.confi
 cp contrib/systemd/coord-server.service ~/.config/systemd/user/
 systemctl --user daemon-reload && systemctl --user enable --now coord-server   # WSL: systemd=true in /etc/wsl.conf
 
-claude plugin marketplace add ~/dev/acp-agent-coordination
-claude plugin install coord@acp-agent-coordination
+claude plugin marketplace add ~/dev/coord
+claude plugin install coord@coord
 ```
 
 Agents then run `/coord:join` (or `coord whoami <family>`), from any
@@ -96,7 +96,7 @@ directory, after reboots, with no exports. `coord --help` lists every command.
 One script does it all, and is safe to run again (it only checks what is already done):
 
 ```powershell
-cd ~\dev\acp-agent-coordination
+cd ~\dev\coord
 powershell -ExecutionPolicy Bypass -File tools\setup-windows.ps1 -Codex -AutoStart
 ```
 
@@ -115,8 +115,8 @@ terminal, or a scheduled task) instead of systemd.
 ### Codex
 
 ```powershell
-codex plugin marketplace add C:\Users\<you>\dev\acp-agent-coordination
-codex plugin add coord@acp-agent-coordination
+codex plugin marketplace add C:\Users\<you>\dev\coord
+codex plugin add coord@coord
 ```
 
 Codex has no slash commands for plugins: start with `$coord join` (or
@@ -144,7 +144,7 @@ the `claude` bundle stays private. Loopback (`localhost:1337`) works without
 `/coord:release`, `/coord:status`. It ships the compiled client, so it needs
 only Node. Claude Code loads this directory marketplace in place: edits apply
 at the next session (or `/reload-plugins`). Codex installs a copy
-(`codex plugin marketplace add <checkout>`, `codex plugin add coord@acp-agent-coordination`).
+(`codex plugin marketplace add <checkout>`, `codex plugin add coord@coord`).
 Command bodies must not use `$ARGUMENTS` (Codex skips such commands).
 
 **CLI** — the session protocol:
@@ -396,7 +396,7 @@ Without `COORD_SERVER`, `coord` runs each operation on the repo's
 | `post` / `inbox` / `resolve` | `coord post` / `coord inbox` / `coord resolve` |
 | `request` / `requests` / `done` | `coord task create --assign` (an offer: the assignee accepts or declines) / `coord tasks` / `coord task done` |
 | `whoami` / `heartbeat` / `presence` / `claim` / `release` / `locks` / `status` / `poll` | same names under `coord` |
-| plugin `acp` (`/acp:join` ...) | plugin `coord` (`/coord:join` ...): `claude plugin uninstall acp@acp-agent-coordination && claude plugin install coord@acp-agent-coordination` |
+| plugin `acp` (`/acp:join` ...) | plugin `coord` (`/coord:join` ...): `claude plugin uninstall acp@acp-agent-coordination && claude plugin install coord@coord` |
 | Python `coord` (`coord.py`) | TS `coord` (`clients/ts`) — same commands, output and config files |
 | `acp-server.service` | removed: `systemctl --user disable --now acp-server` |
 | git hooks from `coord install-hooks` | run `coord install-hooks` again (they called `coord.py`) |
@@ -405,7 +405,23 @@ Without `COORD_SERVER`, `coord` runs each operation on the repo's
 | copies of the old skill (`~/.claude/skills/acp-client`, `~/.codex/skills/acp-client`) and Codex's `acp` plugin | delete them (and `codex plugin remove acp@acp-agent-coordination`): agents that load them look for `ACP_client.py` |
 
 Identity bundles, `~/.config/coord/env`, `coord login` state and the server
-database are unchanged. A checkout with unpushed 0.2 commits has diverged
+database are unchanged.
+
+**Renamed `acp-agent-coordination` -> `coord`** (repo, package, marketplace):
+GitHub redirects the old URL, but update the remote and the installs:
+
+```sh
+git remote set-url origin https://github.com/datamoc/coord.git
+# move the checkout to ~/dev/coord, then in it: rm -rf .venv && uv sync   (the venv holds absolute paths)
+claude plugin uninstall coord@acp-agent-coordination && claude plugin marketplace remove acp-agent-coordination
+claude plugin marketplace add ~/dev/coord && claude plugin install coord@coord
+codex plugin remove coord@acp-agent-coordination && codex plugin marketplace remove acp-agent-coordination
+codex plugin marketplace add ~/dev/coord && codex plugin add coord@coord
+```
+
+The repo's project id becomes `github.com/datamoc/coord`: coord history
+recorded under the old id stays there (`coord projects` shows both).
+Systemd unit / logon task: re-install them from the new path. A checkout with unpushed 0.2 commits has diverged
 from 0.3: keep them on a branch (`git branch acp-0.2-local`), then
 `git reset --hard origin/master`.
 

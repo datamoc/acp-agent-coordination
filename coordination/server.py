@@ -216,7 +216,7 @@ def make_handler(coord, oidc: OIDCIntrospector | None, mtls: bool, authority=Non
 def _version() -> str:
     try:
         from importlib.metadata import version
-        return version("acp-agent-coordination")
+        return version("coord")
     except Exception:
         return "0"
 

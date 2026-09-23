@@ -1,5 +1,5 @@
 {
-  "name": "acp-agent-coordination",
+  "name": "coord",
   "description": "coord: coordination for concurrent agent sessions (claims, messages, tasks)",
   "owner": {
     "name": "Michel WEINACHTER"

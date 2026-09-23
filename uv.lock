@@ -8,20 +8,6 @@ resolution-markers = [
 ]
 
 [[package]]
-name = "acp-agent-coordination"
-version = "0.3.1"
-source = { editable = "." }
-
-[package.optional-dependencies]
-gitlab = [
-    { name = "python-gitlab" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "python-gitlab", marker = "extra == 'gitlab'", specifier = ">=8.5.0" }]
-provides-extras = ["gitlab"]
-
-[[package]]
 name = "certifi"
 version = "2026.7.22"
 source = { registry = "https://pypi.org/simple" }
@@ -176,6 +162,20 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/f0/a7/920baf467bfd9bf689f3b318340f37aee4572a71f162bd8db51da55ba4fa/charset_normalizer-3.5.1-cp37-abi3-win_arm64.whl", hash = "sha256:87e4f41d375c0b9be2fb5251aee4b8a689169e134535aed81bf085c3b647451e", size = 287318, upload-time = "2026-08-15T08:20:15.551Z" },
     { url = "https://files.pythonhosted.org/packages/cc/61/d01fc49b8dea277640b55a9e15960dbca9fdc8c9fde18e572d39c59f4019/charset_normalizer-3.5.1-py3-none-any.whl", hash = "sha256:6df0ec430f9a831772c23ca5a224cba36517a58a84bb32c32bb59a9fa67c47f6", size = 68658, upload-time = "2026-08-15T08:20:43.306Z" },
 ]
+
+[[package]]
+name = "coord"
+version = "0.3.1"
+source = { editable = "." }
+
+[package.optional-dependencies]
+gitlab = [
+    { name = "python-gitlab" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "python-gitlab", marker = "extra == 'gitlab'", specifier = ">=8.5.0" }]
+provides-extras = ["gitlab"]
 
 [[package]]
 name = "idna"

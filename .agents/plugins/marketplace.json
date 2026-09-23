@@ -1,5 +1,5 @@
 {
-  "name": "acp-agent-coordination",
+  "name": "coord",
   "interface": {
     "displayName": "coord agent coordination"
   },

@@ -252,7 +252,7 @@ export class LocalTransport implements Transport {
       throw new CoordError("local_unavailable", `no coord server configured (no COORD_SERVER, no identity at ${configFile()}), `
         + `so coord tried local mode, which runs \`${this.command}\` (the coord server package): ${p.error.message}. `
         + "The human enrolls an identity (`coord-admin enroll <client-name>`) for a running coord-server, "
-        + "or installs the package for local mode (`uv tool install acp-agent-coordination`)");
+        + "or installs the package for local mode (`uv tool install <path to the coord checkout>`)");
     }
     try {
       return JSON.parse(p.stdout);

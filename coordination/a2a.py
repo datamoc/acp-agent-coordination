@@ -68,7 +68,7 @@ def agent_card(base_url: str, mtls: bool, oidc_url: str | None, version: str) ->
                        "tasks, discussions, documents, shared memory.",
         "supportedInterfaces": [{"url": base_url.rstrip("/") + "/a2a", "protocolBinding": "JSONRPC",
                                  "protocolVersion": A2A_VERSION}],
-        "provider": {"organization": "acp-agent-coordination", "url": base_url},
+        "provider": {"organization": "coord", "url": base_url},
         "version": version,
         "capabilities": {"streaming": False, "pushNotifications": True, "extendedAgentCard": False},
         "securitySchemes": schemes,

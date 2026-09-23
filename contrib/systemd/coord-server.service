@@ -7,8 +7,8 @@
 Description=coord coordination server (mTLS, 127.0.0.1:1337)
 
 [Service]
-WorkingDirectory=%h/dev/acp-agent-coordination
-ExecStart=%h/dev/acp-agent-coordination/.venv/bin/coord-server --pki pki
+WorkingDirectory=%h/dev/coord
+ExecStart=%h/dev/coord/.venv/bin/coord-server --pki pki
 Restart=on-failure
 RestartSec=2
 
