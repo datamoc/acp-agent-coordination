@@ -22,3 +22,10 @@ server*.log
 *.pem
 *.key
 tls/
+
+# Coordination v2 runtime state and local CA (see README "Coordination v2")
+coord2.db*
+.coord-session
+pki/
+*.crt
+*.csr

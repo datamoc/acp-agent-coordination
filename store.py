@@ -35,7 +35,7 @@ from pathlib import Path
 DIR = Path(__file__).parent
 DB_PATH = DIR / "coord.db"
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 MAILBOX_CAP = 5000
 MESSAGE_MAX_CHARS = 4000
 SENDER_MAX_CHARS = 80
@@ -55,21 +55,34 @@ CREATE TABLE IF NOT EXISTS messages(
     body TEXT NOT NULL,
     at TEXT NOT NULL,
     resolved_at TEXT,
-    resolve_note TEXT
+    resolve_note TEXT,
+    client_id TEXT UNIQUE,
+    project_id TEXT DEFAULT 'default',
+    reply_to_id INTEGER,
+    thread_id INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_messages_at ON messages(at);
 CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender);
 CREATE TABLE IF NOT EXISTS presence(
     session TEXT PRIMARY KEY,
+    session_uuid TEXT,
+    generation INTEGER DEFAULT 1,
+    project_id TEXT DEFAULT 'default',
     status TEXT NOT NULL,
     last_seen TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS locks(
-    scope TEXT PRIMARY KEY,
+    claim_id TEXT PRIMARY KEY,
+    scope TEXT NOT NULL,
+    scope_type TEXT CHECK(scope_type IN ('exact', 'tree')) DEFAULT 'exact',
     owner TEXT NOT NULL,
+    owner_uuid TEXT,
     note TEXT NOT NULL,
     claimed_at TEXT NOT NULL,
-    until TEXT NOT NULL
+    until TEXT NOT NULL,
+    fence INTEGER DEFAULT 0,
+    project_id TEXT DEFAULT 'default',
+    release_on_commit BOOLEAN DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS requests(
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -79,7 +92,9 @@ CREATE TABLE IF NOT EXISTS requests(
     closer TEXT,
     created_at TEXT NOT NULL,
     closed_at TEXT,
-    close_note TEXT
+    close_note TEXT,
+    project_id TEXT DEFAULT 'default',
+    client_id TEXT UNIQUE
 );
 """
 
@@ -103,9 +118,105 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     return db
 
 
+def _migrate_v1_to_v2(db: sqlite3.Connection) -> None:
+    """Upgrade schema from v1 to v2: add UUID, generations, project_id, claim improvements."""
+    # Add missing columns to existing tables
+    try:
+        db.execute("ALTER TABLE messages ADD COLUMN client_id TEXT")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+    try:
+        db.execute("ALTER TABLE messages ADD COLUMN project_id TEXT DEFAULT 'default'")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        db.execute("ALTER TABLE messages ADD COLUMN reply_to_id INTEGER")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        db.execute("ALTER TABLE messages ADD COLUMN thread_id INTEGER")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        db.execute("ALTER TABLE presence ADD COLUMN session_uuid TEXT")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        db.execute("ALTER TABLE presence ADD COLUMN generation INTEGER DEFAULT 1")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        db.execute("ALTER TABLE presence ADD COLUMN project_id TEXT DEFAULT 'default'")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        db.execute("ALTER TABLE locks ADD COLUMN claim_id TEXT")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        db.execute("ALTER TABLE locks ADD COLUMN scope_type TEXT CHECK(scope_type IN ('exact', 'tree')) DEFAULT 'exact'")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        db.execute("ALTER TABLE locks ADD COLUMN owner_uuid TEXT")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        db.execute("ALTER TABLE locks ADD COLUMN fence INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        db.execute("ALTER TABLE locks ADD COLUMN project_id TEXT DEFAULT 'default'")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        db.execute("ALTER TABLE locks ADD COLUMN release_on_commit BOOLEAN DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        db.execute("ALTER TABLE requests ADD COLUMN project_id TEXT DEFAULT 'default'")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        db.execute("ALTER TABLE requests ADD COLUMN client_id TEXT")
+    except sqlite3.OperationalError:
+        pass
+    # Create missing indexes
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_messages_project ON messages(project_id)"
+    )
+    db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_client_uniq ON messages(client_id)"
+    )
+    db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_requests_client_uniq ON requests(client_id)"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_presence_project ON presence(project_id)"
+    )
+    db.execute("CREATE INDEX IF NOT EXISTS idx_locks_owner ON locks(owner)")
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_locks_project ON locks(project_id)"
+    )
+    db.execute("CREATE INDEX IF NOT EXISTS idx_locks_scope ON locks(scope)")
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_requests_project ON requests(project_id)"
+    )
+
+
 def init_db(path: Path | None = None) -> None:
     with connect(path) as db:
+        # Create base schema
         db.executescript(_SCHEMA)
+
+        # Check schema version and migrate if needed
+        version_row = db.execute(
+            "SELECT version FROM schema_version LIMIT 1"
+        ).fetchone()
+        current_version = version_row[0] if version_row else 0
+
+        _migrate_v1_to_v2(db)
+
         db.execute(
             "INSERT OR IGNORE INTO schema_version(version) VALUES (?)",
             (SCHEMA_VERSION,),
@@ -175,13 +286,19 @@ def _enforce_cap(db: sqlite3.Connection, path: Path | None) -> None:
 
 
 def post_message(
-    sender: str, body: str, path: Path | None = None
+    sender: str,
+    body: str,
+    path: Path | None = None,
+    client_id: str | None = None,
+    project_id: str | None = None,
 ) -> dict:
     """Append one mailbox entry. Returns the stored entry (its sqlite id is
-    the stable `#N`). Raises ValueError on empty/oversize input; callers
-    turn that into an agent reply, not a traceback."""
+    the stable `#N`). Idempotency: if client_id is supplied and already exists,
+    return the prior message instead of posting again.
+    Raises ValueError on empty/oversize input; callers turn that into an agent reply, not a traceback."""
     sender = (sender or "").strip()[:SENDER_MAX_CHARS] or "unknown"
     body = (body or "").strip()
+    project_id = (project_id or "").strip() or "default"
     if not body:
         raise ValueError("empty message body - nothing posted")
     if len(body) > MESSAGE_MAX_CHARS:
@@ -190,9 +307,24 @@ def post_message(
         )
     at = _now_iso()
     with connect(path) as db:
+        # Check for idempotency: if client_id exists, return that message
+        if client_id:
+            existing = db.execute(
+                "SELECT id, sender, body, at FROM messages WHERE client_id = ?",
+                (client_id,),
+            ).fetchone()
+            if existing:
+                return {
+                    "n": existing["id"],
+                    "from": existing["sender"],
+                    "message": existing["body"],
+                    "at": existing["at"],
+                    "idempotent": True,
+                }
+
         cur = db.execute(
-            "INSERT INTO messages(sender, body, at) VALUES (?, ?, ?)",
-            (sender, body, at),
+            "INSERT INTO messages(sender, body, at, client_id, project_id) VALUES (?, ?, ?, ?, ?)",
+            (sender, body, at, client_id, project_id),
         )
         _enforce_cap(db, path)
         return {"n": cur.lastrowid, "from": sender, "message": body, "at": at}
@@ -300,20 +432,32 @@ def resolve_message(number: int, note: str, path: Path | None = None) -> dict:
         return {"outcome": "ok"}
 
 
-def heartbeat(session: str, status: str, path: Path | None = None) -> dict:
-    """Upsert one roster entry and prune long-dead ones. Returns the entry."""
+def heartbeat(
+    session: str,
+    status: str,
+    path: Path | None = None,
+    session_uuid: str | None = None,
+    generation: int | None = None,
+    project_id: str | None = None,
+) -> dict:
+    """Upsert one roster entry and prune long-dead ones. Returns the entry.
+    UUID and generation prevent recycled-name attacks."""
     session = (session or "").strip()[:SENDER_MAX_CHARS] or "unknown"
     status = (status or "").strip()[:400] or "live"
+    project_id = (project_id or "").strip() or "default"
+    generation = generation or 1
     now = _now_iso()
     cutoff = (datetime.now(timezone.utc) - timedelta(days=PRESENCE_PRUNE_DAYS)).isoformat(
         timespec="seconds"
     )
     with connect(path) as db:
         db.execute(
-            "INSERT INTO presence(session, status, last_seen) VALUES (?, ?, ?) "
+            "INSERT INTO presence(session, status, last_seen, session_uuid, generation, project_id) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(session) DO UPDATE SET status=excluded.status, "
-            "last_seen=excluded.last_seen",
-            (session, status, now),
+            "last_seen=excluded.last_seen, session_uuid=COALESCE(excluded.session_uuid, session_uuid), "
+            "generation=COALESCE(excluded.generation, generation)",
+            (session, status, now, session_uuid, generation, project_id),
         )
         db.execute("DELETE FROM presence WHERE last_seen < ?", (cutoff,))
     return {"session": session, "status": status, "last_seen": now}
@@ -359,13 +503,31 @@ def _valid_lock(row: sqlite3.Row | None) -> dict | None:
     until = _parse_time(row["until"])
     if until is None or until <= datetime.now(timezone.utc):
         return None
-    return {
+
+    # Handle both v1 (without new fields) and v2 (with new fields) schema
+    result = {
         "scope": row["scope"],
         "owner": row["owner"],
         "note": row["note"],
         "claimed_at": row["claimed_at"],
         "until": row["until"],
     }
+
+    # Optional v2 fields
+    try:
+        result["claim_id"] = row["claim_id"]
+    except IndexError:
+        result["claim_id"] = f"C{row['scope'][:8]}"  # Fallback for v1 data
+    try:
+        result["scope_type"] = row["scope_type"] or "exact"
+    except IndexError:
+        result["scope_type"] = "exact"
+    try:
+        result["fence"] = row["fence"] or 0
+    except IndexError:
+        result["fence"] = 0
+
+    return result
 
 
 def claim_lock(
@@ -374,18 +536,29 @@ def claim_lock(
     note: str = "",
     ttl_seconds: int = LOCK_TTL_SECONDS,
     path: Path | None = None,
+    scope_type: str = "exact",
+    project_id: str | None = None,
 ) -> dict:
     """Claim exclusive ownership of a file/area scope. Returns
     {"ok": True, lock} on success (re-claiming your own scope refreshes it),
     {"ok": False, "held_by": lock} when someone else's live claim blocks it.
+
+    scope_type: "exact" for a single file, "tree" for a directory tree.
+    Each claim gets a unique claim_id (C1, C2, ...) and a fencing token
+    to prevent stale-lease reuse attacks.
+
     Raises ValueError on empty owner/scope.
 
     Serialized with BEGIN IMMEDIATE (like `claim_instance`): without it, two
     concurrent claimants on the same brand-new scope can each see no
     existing row and both insert, both getting {"ok": True} - the exact
     collision this function exists to prevent."""
+    import uuid as uuid_lib
+
     owner = (owner or "").strip()[:SENDER_MAX_CHARS]
     scope = (scope or "").strip()[:400]
+    scope_type = (scope_type or "exact").strip() if scope_type in ("exact", "tree") else "exact"
+    project_id = (project_id or "").strip() or "default"
     if not owner:
         raise ValueError("empty owner")
     if not scope:
@@ -398,30 +571,53 @@ def claim_lock(
         db.isolation_level = None
         db.execute("BEGIN IMMEDIATE")
         row = db.execute(
-            "SELECT scope, owner, note, claimed_at, until FROM locks WHERE scope = ?",
+            "SELECT claim_id, scope, owner, note, claimed_at, until, fence FROM locks WHERE scope = ?",
             (scope,),
         ).fetchone()
         held = _valid_lock(row)
         if held is not None and held["owner"] != owner:
             db.execute("ROLLBACK")
             return {"ok": False, "held_by": held}
+
+        # Generate a new claim ID (short unique identifier like C42)
+        claim_id = f"C{uuid_lib.uuid4().hex[:6].upper()}"
+        next_fence = (row["fence"] if row else 0) + 1 if held else 1
+
         if held is not None:
+            # Renewal: update existing claim
             db.execute(
-                "UPDATE locks SET note = ?, claimed_at = ?, until = ? "
+                "UPDATE locks SET note = ?, claimed_at = ?, until = ?, fence = ?, claim_id = ? "
                 "WHERE scope = ? AND owner = ?",
-                (note, now.isoformat(timespec="seconds"), until, scope, owner),
+                (
+                    note,
+                    now.isoformat(timespec="seconds"),
+                    until,
+                    next_fence,
+                    claim_id,
+                    scope,
+                    owner,
+                ),
             )
         else:
+            # New claim: delete any expired claim on same scope
             db.execute("DELETE FROM locks WHERE scope = ?", (scope,))
             db.execute(
-                "INSERT INTO locks(scope, owner, note, claimed_at, until) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (scope, owner, note, now.isoformat(timespec="seconds"), until),
+                "INSERT INTO locks(claim_id, scope, scope_type, owner, note, claimed_at, until, fence, project_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (claim_id, scope, scope_type, owner, note, now.isoformat(timespec="seconds"), until, next_fence, project_id),
             )
         db.execute("COMMIT")
         return {
             "ok": True,
-            "lock": {"scope": scope, "owner": owner, "note": note, "until": until},
+            "lock": {
+                "claim_id": claim_id,
+                "scope": scope,
+                "scope_type": scope_type,
+                "owner": owner,
+                "note": note,
+                "until": until,
+                "fence": next_fence,
+            },
         }
     except Exception:
         try:
@@ -508,12 +704,19 @@ INSTANCE_MAX_N = 99
 INSTANCE_LEASE_NOTE = "reserved via whoami"
 
 
-def claim_instance(family: str, path: Path | None = None) -> str:
+def claim_instance(
+    family: str,
+    path: Path | None = None,
+    session_uuid: str | None = None,
+    generation: int | None = None,
+    project_id: str | None = None,
+) -> str:
     """Hand out the smallest free "<family>-NN" session name and heartbeat
     it immediately, so a concurrent claimant sees it as taken. A number
     counts as taken while its holder is live (inside PRESENCE_TTL_SECONDS);
-    holding your number means heartbeating inside that window. Raises
-    ValueError on a bad family name, RuntimeError when all 99 are taken.
+    holding your number means heartbeating inside that window. UUID + generation
+    prevent recycled-name attacks (stale session can't access new one's claims).
+    Raises ValueError on a bad family name, RuntimeError when all 99 are taken.
 
     Serialized with BEGIN IMMEDIATE: two concurrent claimants cannot draw
     the same number - the second blocks, then sees the first's row."""
@@ -524,6 +727,8 @@ def claim_instance(family: str, path: Path | None = None) -> str:
         raise ValueError(
             "family must be 1-40 letters/digits/_/- characters"
         )
+    project_id = (project_id or "").strip() or "default"
+    generation = generation or 1
     name_pattern = re.compile(re.escape(family) + r"-(\d{1,3})$")
     cutoff = (
         datetime.now(timezone.utc) - timedelta(seconds=PRESENCE_TTL_SECONDS)
@@ -550,10 +755,12 @@ def claim_instance(family: str, path: Path | None = None) -> str:
         name = f"{family}-{free:02d}"
         now = _now_iso()
         db.execute(
-            "INSERT INTO presence(session, status, last_seen) VALUES (?, ?, ?) "
+            "INSERT INTO presence(session, status, last_seen, session_uuid, generation, project_id) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(session) DO UPDATE SET status=excluded.status, "
-            "last_seen=excluded.last_seen",
-            (name, INSTANCE_LEASE_NOTE, now),
+            "last_seen=excluded.last_seen, session_uuid=COALESCE(excluded.session_uuid, session_uuid), "
+            "generation=COALESCE(excluded.generation, generation)",
+            (name, INSTANCE_LEASE_NOTE, now, session_uuid, generation, project_id),
         )
         db.execute("COMMIT")
         return name

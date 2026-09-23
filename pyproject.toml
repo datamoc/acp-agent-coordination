@@ -12,10 +12,12 @@ dependencies = [
 [project.scripts]
 acp-coordination-server = "ACP_server:main"
 acp-coordination-client = "ACP_client:main"
+coord = "coord:main"
 
 [build-system]
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["ACP_server", "ACP_client", "store"]
+py-modules = ["ACP_server", "ACP_client", "store", "coord"]
+packages = ["coordination"]

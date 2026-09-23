@@ -235,6 +235,89 @@ openssl s_client -connect localhost:1337 -tls1_3 2>&1 | grep -i "Negotiated TLS1
 On OpenSSL older than 3.5, `X25519MLKEM768` doesn't exist yet — TLS
 still works, just without the post-quantum hybrid group.
 
+## Coordination v2 (`coord`)
+
+A second, self-contained coordination layer (`coordination/` + `coord.py`,
+stdlib only, its own `coord2.db`) built for real multi-agent work. It runs
+next to the ACP server; nothing above changes.
+
+**Identity.** `coord whoami claude` gives you `claude-NN`, a session UUID
+and a generation. Every command authenticates with the UUID
+(`COORD_SESSION` env, else `.coord-session` at the repo root). A recycled
+name gets a new UUID and a higher generation, so it can never touch the
+old session's claims. A dead or ended session cannot mutate anything, and
+its claims lapse with it.
+
+**Correctness.** Every mutation runs under `BEGIN IMMEDIATE`. Mutations
+accept a `client_id` idempotency key (the CLI sends one automatically), so
+a retried post/claim is replayed, not duplicated. `poll` and
+`inbox --after N` use message ids as cursors, never timestamps. Everything
+carries a `project_id` (auto-detected from `git remote origin`, e.g.
+`github.com/org/repo`, override with `COORD_PROJECT`); claims, messages
+and tasks are isolated per project; `coord projects` gives the cross-project view.
+
+**Claims.** Paths are repo-relative and normalized (`\` -> `/`, `..` and
+absolute paths rejected, case-folded on Windows). `coord claim src/auth/`
+(or `--tree`) claims a directory tree; a file claims `exact`. Parent/child
+scopes conflict; siblings don't. Claims get ids (`C12`) and a monotonic
+**fence**: pass it to `coord fence-check C12 <fence>` before a write to
+refuse stale leases. `renew C12`, `release C12`, `release --all`.
+
+**Asking for help without losing ownership.**
+`coord ask --claim C12 --to codex-01 "second opinion?"` sends a direct
+question tied to the claim and grants `advisor` (or `--role reviewer|coeditor|delegate`);
+the claim stays yours. Advisors/reviewers get no write access
+(`check` still flags them); only an explicit `delegate` may claim inside your scope.
+
+**Messages.** Kinds `info question advice proposal decision review warning done`;
+`--to <session>` for direct messages (visible only to both ends);
+`reply N`, `thread N`, `resolve N` (records who resolved). Soft limit 300
+chars (warning), hard limit 10000 - put long analyses in a document.
+`inbox` shows the last 20 by default; every command takes `--json`.
+
+**Consensus.** `discuss "topic"` -> `D3`; `propose D3 "..."` -> `P7`;
+`react P7 support|object|abstain|need-more-info [comment]`; `discussion D3`
+shows tallies; the opener closes it with `decide D3 "..." --proposal P7
+[--no-consensus]`, which records who/when/consensus and writes a final
+`decision` document linked from the discussion thread.
+
+**Documents.** `doc create --kind note|diagnosis|plan|proposal|decision|review|adr`,
+`doc show DOC4 [--revision N]`, `doc edit DOC4 --base-revision N --file x.md`
+(optimistic concurrency: a stale base is refused with the current content so
+you merge and retry), `doc history DOC4`.
+
+**Git.** `coord install-hooks` adds a pre-commit hook (`coord check` - fails
+if a staged file is claimed by another session) and a post-commit hook
+(`coord post-commit` - publishes `commit.created @sha` and releases your exact
+claims made with `--release-on-commit`). Hooks do nothing without a session.
+
+**Shared context and routing.** `memory add overview|convention|architecture|decision|pitfall|glossary "title" --content ...`
+(versioned, attributed, `--source`), `memory show`, `memory search`,
+`memory edit M2 --base-revision N`. `coord context` is the compact start-of-session
+view (overview, memory, my claims, tasks, discussions, unread count).
+`task create/accept/done`, `tasks --status open`. `coord profile --category reasoning
+--capability debugging` declares a (transient) profile; `coord suggest
+--prefer-category reasoning --capability debugging` ranks live agents - a hint, you choose.
+
+**Network (opt-in).** `coord serve` listens on `127.0.0.1:1338`; clients use
+`COORD_SERVER=http://127.0.0.1:1338`. A non-loopback `--listen` is refused
+unless TLS **and** an identity method are configured:
+
+- mTLS: `coord pki init`, `coord pki issue localhost --server`,
+  `coord pki issue agent-a`, `coord pki revoke agent-a` (regenerates
+  `pki/crl.pem`); serve with `--tls-cert --tls-key --client-ca pki/ca.crt --crl pki/crl.pem`;
+  clients set `COORD_CA`, `COORD_CERT`, `COORD_KEY`.
+- OIDC (Keycloak): `--oidc-introspect-url .../protocol/openid-connect/token/introspect
+  --oidc-client-id coord` (secret in `COORD_OIDC_SECRET`); clients set
+  `COORD_TOKEN`. Per-project roles come from token roles/groups named
+  `coord:<project>:viewer|contributor|admin` (`coord:*:...` for all projects).
+
+In both modes the session is bound to the authenticated principal at
+`whoami`; another identity cannot drive it.
+
+Tests: `uv run test_coord.py` (temp dirs, includes an 8-process claim race,
+an HTTP round-trip, OIDC role checks and a real mTLS handshake with a revoked cert).
+
 ## Security
 
 **No authentication, no access control — HTTPS above adds transport
