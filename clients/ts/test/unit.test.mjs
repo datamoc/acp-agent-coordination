@@ -43,6 +43,21 @@ test("config: env wins, only COORD_*, relative paths from the file's real dir, p
   assert.throws(() => loadConfig({ XDG_CONFIG_HOME: home2, COORD_IDENTITY: "ghost" }), /coord-admin enroll/);
 });
 
+test("no server and no coord-local: the error names the identity file it looked for", async () => {
+  const cfg = join(tmp(), "nowhere", "env");
+  const env = { COORD_CONFIG: cfg, COORD_LOCAL: "coord-local-that-does-not-exist", COORD_DB: join(tmp(), "x.db") };
+  const saved = { ...process.env };
+  Object.assign(process.env, env);
+  delete process.env.COORD_SERVER;
+  try {
+    await assert.rejects(CoordClient.fromEnv(env).call("locks", {}),
+      (e) => e.code === "local_unavailable" && e.message.includes(cfg) && e.message.includes("coord-admin enroll"));
+  } finally {
+    for (const k of Object.keys(env)) if (!(k in saved)) delete process.env[k];
+    Object.assign(process.env, saved);
+  }
+});
+
 test("argument parsing: defaults, ints, choices, required, --json anywhere, aliases", () => {
   const p = parse(["claim", "src/", "--tree", "--note=why", "--json"]);
   assert.deepEqual(p.path, ["claim"]);

@@ -6,6 +6,7 @@ import https from "node:https";
 import net from "node:net";
 import { basename, dirname, join } from "node:path";
 import tls from "node:tls";
+import { configFile } from "./config.js";
 import { CoordError } from "./errors.js";
 export function isLoopback(host) {
     const h = host.replace(/^\[|\]$/g, "");
@@ -221,8 +222,10 @@ export class LocalTransport {
         const [cmd, ...rest] = this.command.split(/\s+/).filter(Boolean);
         const p = spawnSync(cmd, rest, { input: JSON.stringify({ db: this.db, op, args }), encoding: "utf8", maxBuffer: 64 << 20 });
         if (p.error) {
-            throw new CoordError("local_unavailable", `local mode runs \`${this.command}\` (the coord server package): ${p.error.message}. `
-                + "Install it (uv tool install acp-agent-coordination) or set COORD_SERVER");
+            throw new CoordError("local_unavailable", `no coord server configured (no COORD_SERVER, no identity at ${configFile()}), `
+                + `so coord tried local mode, which runs \`${this.command}\` (the coord server package): ${p.error.message}. `
+                + "The human enrolls an identity (`coord-admin enroll <client-name>`) for a running coord-server, "
+                + "or installs the package for local mode (`uv tool install acp-agent-coordination`)");
         }
         try {
             return JSON.parse(p.stdout);

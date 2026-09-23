@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 const CONFIG_PATHS = new Set(["COORD_CA", "COORD_CERT", "COORD_KEY", "COORD_DB"]);
@@ -21,13 +21,23 @@ export function configFile(env = process.env) {
  */
 export function loadConfig(env = process.env) {
     let f = configFile(env);
-    if (!existsSync(f)) {
+    const state = probe(f);
+    if (state === "denied") {
+        throw new ConfigError(`cannot read ${f} (permission denied). An agent sandbox that runs commands as another `
+            + "account (Codex on Windows) needs read access to the identity folder - see the README, `Codex`");
+    }
+    if (state === "missing") {
         if (env.COORD_IDENTITY && !env.COORD_CONFIG) {
             throw new ConfigError(`no identity '${env.COORD_IDENTITY}' (${f} missing) - ask the administrator for \`coord-admin enroll <client-name>\``);
         }
         return null;
     }
-    f = realpathSync(f);
+    try {
+        f = realpathSync(f);
+    }
+    catch {
+        f = resolve(f); // a sandbox may read the file but not stat its parents: keep the path as given
+    }
     const lines = readFileSync(f, "utf8").split(/\r?\n/);
     const pointer = lines.filter((l) => l.startsWith("COORD_IDENTITY=")).map((l) => l.slice("COORD_IDENTITY=".length).trim());
     if (pointer.length && !env.COORD_IDENTITY && !env.COORD_CONFIG) {
@@ -48,6 +58,16 @@ export function loadConfig(env = process.env) {
         env[key] = value;
     }
     return f;
+}
+function probe(f) {
+    try {
+        statSync(f);
+        return "ok";
+    }
+    catch (e) {
+        const code = e.code;
+        return code === "EPERM" || code === "EACCES" ? "denied" : "missing";
+    }
 }
 export class ConfigError extends Error {
 }

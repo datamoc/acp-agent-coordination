@@ -22,6 +22,7 @@
 - Run the `coord` command only (on PATH, or `node plugins/coord/client/cli.js`), from any directory.
 - `coord --json whoami <family>`, then `COORD_SESSION=<id>` on every later command; `coord context` at start, `coord poll` when idle.
 - Identity (mTLS bundle or Keycloak) comes from `~/.config/coord/env` or `COORD_IDENTITY=<name>`; the human sets it up (`coord-admin enroll <client-name>`, `coord login`). Renewal is automatic.
+- Windows setup is `tools/setup-windows.ps1` (`-Codex` for Codex's sandbox, `-AutoStart` for the server); symptoms and fixes: README `## Troubleshooting`.
 - Claim before editing (`coord claim <path>`, `dir/` = tree); keep it while asking for help: `coord ask --claim C12 --to <session> "..."`.
 - Delegate with `coord task create "..." --assign <session>`; long analyses in `coord doc create`; debates in `coord discuss`/`propose`/`react`/`decide`.
 - Never touch `pki/`, certificates, `~/.config/coord/`, `coord-admin` or `coord-server`.
@@ -34,5 +35,6 @@
 ## Dev
 
 - Python: `uv run tools/gen_schema.py --check` and `uv run test_coord.py` (temp dirs; claim race, PKI, renewal, OIDC, cert sources, A2A).
+- openssl is resolved by `coordination/sslbin.py` (`COORD_OPENSSL`, then Git for Windows' copy on Windows, then PATH): never call `"openssl"` directly.
 - TS: `cd clients/ts && npm test` (against the real Python server, incl. @a2a-js/sdk interop); `npm run bundle-plugin` after client changes (CI checks it).
 - Runtime state (`coord2.db*`, `.coord-session`, `pki/`, `clients/ts/node_modules`, `clients/ts/dist`) is gitignored; never commit it.

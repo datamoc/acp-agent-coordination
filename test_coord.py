@@ -17,6 +17,14 @@ from coordination import pki, scopes
 from coordination.client import RemoteCoord
 from coordination.server import OIDCIntrospector, build_server
 from coordination.service import SESSION_TTL, Coord, CoordError
+from coordination.sslbin import OpensslMissing, openssl
+
+
+def have_openssl() -> bool:
+    try:
+        return bool(openssl())
+    except OpensslMissing:
+        return False
 
 TMP = Path(tempfile.mkdtemp(prefix="coordtest-"))
 # Never let the developer's ~/.config/coord/env steer CLI subprocesses.
@@ -646,10 +654,43 @@ def _ca_race(args):
 
 
 @check
+def openssl_is_chosen_and_failures_are_explained():
+    """COORD_OPENSSL wins; a crashing or misconfigured openssl gets a message that names it."""
+    import contextlib, io, subprocess
+    from coordination import sslbin
+    saved = os.environ.get("COORD_OPENSSL")
+    fake = TMP / ("fake-openssl.cmd" if sys.platform == "win32" else "fake-openssl")
+    try:
+        os.environ["COORD_OPENSSL"] = str(fake)
+        sslbin.openssl.cache_clear()
+        assert sslbin.openssl() == str(fake)
+        assert sslbin.crashed(3221225477) and sslbin.crashed(-11) and not sslbin.crashed(1)
+        crash = subprocess.CalledProcessError(3221225477, [str(fake)], stderr=b"")
+        cnf = subprocess.CalledProcessError(1, [str(fake)], stderr=b'Can\'t open "C:\\Craft\\etc\\ssl\\/openssl.cnf" for reading')
+        for err, expect in ((crash, "crashed (exit 0xc0000005)"), (cnf, "config file that does not exist")):
+            def boom(*a, _e=err, **k):
+                raise _e
+            real, pki._run = pki._run, boom
+            out = io.StringIO()
+            try:
+                with contextlib.redirect_stderr(out):
+                    rc = pki.main(["--dir", str(TMP / "pki-fake"), "init"])
+            finally:
+                pki._run = real
+            assert rc == 1 and expect in out.getvalue() and str(fake) in out.getvalue(), out.getvalue()
+    finally:
+        if saved is None:
+            os.environ.pop("COORD_OPENSSL", None)
+        else:
+            os.environ["COORD_OPENSSL"] = saved
+        sslbin.openssl.cache_clear()
+
+
+@check
 def ca_is_safe_across_processes():
     """coord-server renewing while coord-admin enrolls: every serial unique, the CA database valid
     (Windows has no fcntl - the lock must still hold across processes)."""
-    if not shutil.which("openssl"):
+    if not have_openssl():
         print("  (skipped: no openssl)")
         return
     d = pki.init(TMP / "pki-race")
@@ -662,7 +703,7 @@ def ca_is_safe_across_processes():
 
 @check
 def mtls_with_crl():
-    if not shutil.which("openssl"):
+    if not have_openssl():
         print("  (skipped: no openssl)")
         return
     d = pki.init(TMP / "pki")
@@ -730,7 +771,7 @@ def mtls_with_crl():
 def mtls_renewal_and_live_revocation():
     """The server asks management for a renewal once the cert is 15 days old and hands it to
     the client, which installs it; revocation applies to the next request, no restart."""
-    if not shutil.which("openssl"):
+    if not have_openssl():
         print("  (skipped: no openssl)")
         return
     import time
@@ -774,7 +815,7 @@ def mtls_renewal_and_live_revocation():
 def server_cert_auto_renewal_and_47_day_cap():
     """The server renews its own certificate through management and loads it live; no leaf
     certificate outlives MAX_DAYS - older, longer ones are renewed at the first check/use."""
-    if not shutil.which("openssl"):
+    if not have_openssl():
         print("  (skipped: no openssl)")
         return
     import socket
@@ -783,7 +824,7 @@ def server_cert_auto_renewal_and_47_day_cap():
 
     def lifetime_days(pem_or_path):
         src = ["-in", str(pem_or_path)] if isinstance(pem_or_path, Path) else []
-        out = subprocess.run(["openssl", "x509", *src, "-noout", "-startdate", "-enddate"],
+        out = subprocess.run([openssl(), "x509", *src, "-noout", "-startdate", "-enddate"],
                              input=None if src else pem_or_path, capture_output=True, text=True, check=True).stdout
         nb, na = (pki._ts(line.partition("=")[2]) for line in out.strip().splitlines())
         return round((na - nb) / 86400)
@@ -829,17 +870,17 @@ def server_cert_auto_renewal_and_47_day_cap():
 def old_ca_is_upgraded_for_strict_clients():
     """A CA made before keyUsage existed (refused by Python >= 3.13) is re-signed in place by
     `init`: same key/subject, old certs still verify, local bundles refreshed."""
-    if not shutil.which("openssl"):
+    if not have_openssl():
         print("  (skipped: no openssl)")
         return
     import subprocess
     d = TMP / "pki-old"
     d.mkdir()
-    subprocess.run(["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256", "-nodes",
+    subprocess.run([openssl(), "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256", "-nodes",
                     "-keyout", str(d / "ca.key"), "-out", str(d / "ca.crt"), "-days", "3650", "-subj", "/CN=coord-ca",
                     "-addext", "basicConstraints=critical,CA:TRUE"], check=True, capture_output=True)
     old_ca = (d / "ca.crt").read_text()
-    text = lambda f: subprocess.run(["openssl", "x509", "-in", str(f), "-noout", "-text"], capture_output=True,
+    text = lambda f: subprocess.run([openssl(), "x509", "-in", str(f), "-noout", "-text"], capture_output=True,
                                     text=True, check=True).stdout
     assert "Key Usage" not in text(d / "ca.crt")
     saved = os.environ.get("XDG_CONFIG_HOME")
@@ -854,7 +895,7 @@ def old_ca_is_upgraded_for_strict_clients():
         assert (TMP / "xdg-old" / "coord" / "someone" / "ca.crt").read_text() == (d / "ca.crt").read_text()
         assert pki.upgrade_ca(d) is False                                          # idempotent
         leaf, _ = pki.issue(d, "srv", server=True)
-        subprocess.run(["openssl", "verify", "-x509_strict", "-CAfile", str(d / "ca.crt"), str(leaf)],
+        subprocess.run([openssl(), "verify", "-x509_strict", "-CAfile", str(d / "ca.crt"), str(leaf)],
                        check=True, capture_output=True)                           # strict chain OK
     finally:
         if saved is None:
@@ -992,7 +1033,7 @@ print("ok")
 def corporate_oidc_with_external_cert_sources():
     """Keycloak agents + server cert renewed by cert-manager-style files or a step-ca-style
     command, with the local PKI code unimportable."""
-    if not shutil.which("openssl"):
+    if not have_openssl():
         print("  (skipped: no openssl)")
         return
     import subprocess

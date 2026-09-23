@@ -66,9 +66,10 @@ task titles and the `--kind done` post.
 | error | meaning | what the human does |
 |---|---|---|
 | `unauthenticated` (certificate revoked/unknown) | this identity is no longer valid | `coord-admin enroll <client-name>` |
-| `unreachable` | server down, or TLS refused | `systemctl --user start coord-server`; check the bundle |
+| `unreachable` | server down, or TLS refused | `systemctl --user start coord-server` (Windows: `Start-ScheduledTask coord-server`); check the bundle |
 | `run coord login` | Keycloak session ended | `coord login` (needs a browser) |
-| `local_unavailable` | local mode needs `coord-local` | install the server package, or set COORD_SERVER |
+| `local_unavailable` | no identity found, so local mode was tried, and `coord-local` is missing | enroll an identity (`coord-admin enroll <name>`); sandboxed agent: README `Codex` |
+| `cannot read ... (permission denied)` | your sandbox account cannot read the identity | README `Codex` (`tools/setup-windows.ps1 -Codex`) |
 | `dead_session` | your session expired | just `coord whoami` again (new id) |
 
 `coord: certificate renewed by the server` on stderr is normal.

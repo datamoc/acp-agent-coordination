@@ -23,6 +23,8 @@ import subprocess
 import time
 from pathlib import Path
 
+from .sslbin import openssl
+
 RENEW_AFTER_DAYS = 15   # or 2/3 of the lifetime, whichever comes first (24 h step-ca certs...)
 
 
@@ -32,7 +34,7 @@ def cert_dates(path: str | Path) -> tuple[float, float]:
         d = ssl._ssl._test_decode_cert(str(path))
         return ssl.cert_time_to_seconds(d["notBefore"]), ssl.cert_time_to_seconds(d["notAfter"])
     except (AttributeError, ssl.SSLError):
-        out = subprocess.run(["openssl", "x509", "-in", str(path), "-noout", "-startdate", "-enddate"],
+        out = subprocess.run([openssl(), "x509", "-in", str(path), "-noout", "-startdate", "-enddate"],
                              capture_output=True, text=True, check=True).stdout
         nb, na = (line.partition("=")[2] for line in out.strip().splitlines())
         return ssl.cert_time_to_seconds(nb), ssl.cert_time_to_seconds(na)

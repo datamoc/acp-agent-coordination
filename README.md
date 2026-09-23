@@ -67,6 +67,11 @@ cathedral-style orchestrators can use the bazaar too.
 
 ## Quick start (one machine, mTLS)
 
+Needs [uv](https://docs.astral.sh/uv/) >= 0.11, Node >= 20 and openssl
+(on Windows, the one from Git for Windows). Windows: see [below](#windows).
+
+### Linux / WSL / macOS
+
 ```sh
 cd ~/dev/acp-agent-coordination
 uv sync                                          # server + admin (no runtime dependencies)
@@ -85,6 +90,52 @@ claude plugin install coord@acp-agent-coordination
 
 Agents then run `/coord:join` (or `coord whoami <family>`), from any
 directory, after reboots, with no exports. `coord --help` lists every command.
+
+### Windows
+
+One script does it all, and is safe to run again (it only checks what is already done):
+
+```powershell
+cd ~\dev\acp-agent-coordination
+powershell -ExecutionPolicy Bypass -File tools\setup-windows.ps1 -Codex -AutoStart
+```
+
+It checks uv, Node and port 1337, runs `uv sync`, finds a working openssl,
+creates the CA and the server certificate, enrolls `claude` (`-Identity a,b`
+for others) and, with `-Codex`, `codex`; writes `~\.local\bin\coord.cmd`
+(the plugin's bundled client - no npm build needed) and puts that folder on
+your user PATH; with `-AutoStart`, registers a `coord-server` logon task
+(log: `server.log`) and starts it. It prints what is left to do by hand:
+the plugin install commands below, and Codex's `config.toml` line.
+
+Without the script: the Linux steps above, with `coord.cmd` instead of the
+`ln -sf` lines and `.venv\Scripts\coord-server.exe --pki pki` (in a
+terminal, or a scheduled task) instead of systemd.
+
+### Codex
+
+```powershell
+codex plugin marketplace add C:\Users\<you>\dev\acp-agent-coordination
+codex plugin add coord@acp-agent-coordination
+```
+
+Codex has no slash commands for plugins: start with `$coord join` (or
+"join coord"). On Windows, Codex's elevated sandbox runs commands as
+separate accounts (`CodexSandboxOffline`, `CodexSandboxOnline`) with their
+own home folder, so the client finds no identity. Two settings fix it -
+`setup-windows.ps1 -Codex` does the first and tells you the second:
+
+1. Let those accounts read the `codex` identity, and only it:
+   `icacls "$HOME\.config\coord\codex" /grant "CodexSandboxOffline:(OI)(CI)RX" "CodexSandboxOnline:(OI)(CI)RX"`
+2. Point the client at it in `~\.codex\config.toml`, then restart Codex:
+   ```toml
+   [shell_environment_policy.set]
+   COORD_CONFIG = 'C:\Users\<you>\.config\coord\codex\env'
+   ```
+
+Anything Codex runs can then use the `codex` identity - that is the point;
+the `claude` bundle stays private. Loopback (`localhost:1337`) works without
+`network_access`.
 
 ## For agents
 
@@ -287,7 +338,11 @@ that opened it; another identity cannot drive it.
   name, old kept as `pki/ca.crt.pre-keyusage`, local bundles refreshed), then
   `coord-admin server-cert` and restart; copy the new `ca.crt` to other
   machines' bundles.
-- **Windows**: works without Developer Mode; openssl from Git for Windows.
+- **Which openssl**: `COORD_OPENSSL` if set; on Windows, Git for Windows'
+  copy (found next to `git`, or under Program Files) before the one on PATH -
+  apps such as KDiff3 ship an `openssl.exe` that looks for a config file from
+  its build machine and can crash; elsewhere the one on PATH. Windows works
+  without Developer Mode.
 
 ### Keycloak (OIDC)
 
@@ -346,9 +401,25 @@ Without `COORD_SERVER`, `coord` runs each operation on the repo's
 | `acp-server.service` | removed: `systemctl --user disable --now acp-server` |
 | git hooks from `coord install-hooks` | run `coord install-hooks` again (they called `coord.py`) |
 | port 1338 (0.2.x-0.3.0) | 1337 again since 0.3.1: set `COORD_SERVER=https://<host>:1337` in each bundle's `env` (or `coord-server --port 1338` to keep the old one) |
+| a running `ACP_server.py` | stop it: it holds port 1337 |
+| copies of the old skill (`~/.claude/skills/acp-client`, `~/.codex/skills/acp-client`) and Codex's `acp` plugin | delete them (and `codex plugin remove acp@acp-agent-coordination`): agents that load them look for `ACP_client.py` |
 
 Identity bundles, `~/.config/coord/env`, `coord login` state and the server
-database are unchanged.
+database are unchanged. A checkout with unpushed 0.2 commits has diverged
+from 0.3: keep them on a branch (`git branch acp-0.2-local`), then
+`git reset --hard origin/master`.
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| uv: `Failed to parse pyproject.toml ... system-certs = true` | uv < 0.11 | `uv self update`; "only available for ... standalone installation" = an older uv (pip, Chocolatey) is first on PATH: remove it |
+| `coord-admin: openssl failed: Can't open "C:\Craft\...\openssl.cnf"`, or exit `0xc0000005` | an app's openssl (KDiff3 ...) | `coord-admin` now prefers Git's openssl on Windows; otherwise set `COORD_OPENSSL=<path to openssl.exe>` |
+| `Cannot find module ...\clients\ts\dist\cli.js` | the TS client was not built | point `coord` at `plugins/coord/client/cli.js` (always built), or `npm ci && npm run build` in `clients/ts` |
+| `local_unavailable` | no identity found (no `COORD_SERVER`) and no `coord-local` | enroll an identity (`coord-admin enroll <name>`); in a sandboxed agent, see [Codex](#codex) |
+| `cannot read ...\env (permission denied)` | a sandbox account cannot read the identity | [Codex](#codex), step 1 |
+| `unreachable` | `coord-server` is not running | `systemctl --user start coord-server`; Windows: `Start-ScheduledTask coord-server`, or `.venv\Scripts\coord-server.exe --pki pki` |
+| Codex runs `ACP_client.py` | an old `acp-client` skill | see the last rows of [Migrating](#migrating-from-02x) |
 
 ## GitLab (internal)
 

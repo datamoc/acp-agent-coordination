@@ -23,6 +23,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from . import state_home
+from .sslbin import OpensslMissing, crashed, openssl
 
 try:
     import fcntl
@@ -78,7 +79,7 @@ _thread_lock = threading.Lock()
 
 
 def _run(*args, text=False) -> str | bytes:
-    return subprocess.run(["openssl", *args], check=True, capture_output=True, text=text).stdout
+    return subprocess.run([openssl(), *args], check=True, capture_output=True, text=text).stdout
 
 
 @contextmanager
@@ -240,7 +241,7 @@ def is_valid(d: str | Path, name: str) -> bool:
         return False
     serial = _run("x509", "-in", str(crt), "-noout", "-serial", text=True).strip().partition("=")[2]
     with _locked(d):
-        subprocess.run(["openssl", "ca", "-config", str(d / "openssl.cnf"), "-updatedb"], capture_output=True)
+        subprocess.run([openssl(), "ca", "-config", str(d / "openssl.cnf"), "-updatedb"], capture_output=True)
     return Authority(d).status(serial) == "V"
 
 
@@ -447,7 +448,7 @@ def main(argv=None) -> int:
             with _locked(d):   # the server loads the new files at its next start: retire the old ones
                 _revoke_serials(d, before)
             r = {"cert": str(crt), "key": str(key), "revoked_previous": before,
-                 "next": "restart coord-server (systemctl --user restart coord-server)" if before else None}
+                 "next": "restart coord-server" if before else None}
         elif a.cmd == "issue":
             crt, key = issue(a.dir, a.name, server=a.server)
             r = {"cert": str(crt), "key": str(key)}
@@ -459,8 +460,16 @@ def main(argv=None) -> int:
             r = tidy(a.dir, a.apply)
         else:
             r = listing(a.dir)
+    except OpensslMissing as e:
+        print(f"coord-admin: {e}", file=sys.stderr)
+        return 1
     except subprocess.CalledProcessError as e:
-        print(f"coord-admin: openssl failed: {(e.stderr or b'').decode(errors='replace').strip()}", file=sys.stderr)
+        err = e.stderr.decode(errors="replace") if isinstance(e.stderr, bytes) else (e.stderr or "")
+        if crashed(e.returncode):
+            err = f"{openssl()} crashed (exit {e.returncode:#x}); point COORD_OPENSSL at a working openssl"
+        elif "openssl.cnf" in err and "for reading" in err:
+            err += f"\n{openssl()} looks for a config file that does not exist; point COORD_OPENSSL at another openssl"
+        print(f"coord-admin: openssl failed: {err.strip()}", file=sys.stderr)
         return 1
     print(json.dumps(r, indent=1 if a.cmd in ("list", "tidy") else None))
     return 0
