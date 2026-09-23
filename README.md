@@ -170,8 +170,10 @@ codex plugin marketplace add <path-to-this-checkout>
 codex plugin add acp@acp-agent-coordination
 ```
 
-Installs are cached copies: after editing `plugins/acp`, reinstall
-(uninstall + install) or bump the version in both `plugin.json` files.
+Claude Code loads this directory marketplace in place: edits to
+`plugins/acp` apply at the next session start (or `/reload-plugins` in an
+open session), no reinstall. Codex installs a cached copy: reinstall there,
+or bump the version in both `plugin.json` files.
 Command bodies must not use `$ARGUMENTS`, because Codex skips such commands when it
 converts them to skills (Claude Code still appends the arguments).
 
@@ -320,7 +322,7 @@ renewed cert file when a server sends one).
 refused unless TLS **and** an identity method are configured:
 
 - mTLS - the administrator, once: `coord-admin init`,
-  `coord-admin server-cert`, then per client `coord-admin enroll <name>`.
+  `coord-admin server-cert`, then per client `coord-admin enroll <client-name>`.
   Enroll issues a 30-day client cert (or reuses a valid one) and writes a
   self-contained bundle to `~/.config/coord/<name>/` (`ca.crt`,
   `agent.crt`, `agent.key` 0600, `env`), or to `--out DIR` to hand to
@@ -339,7 +341,13 @@ refused unless TLS **and** an identity method are configured:
   certificate the same way: at start and every hour (`--check-hours`) it
   asks management when due and loads the new one live, no restart. No
   certificate lives longer than 47 days (server 47, clients 30); an older,
-  longer one is renewed at the first check or request. `coord-admin list` shows
+  longer one is renewed at the first check or request.
+  A renewed certificate retires the one it replaces: once the server sees
+  the new one in use, management revokes the older ones for that key
+  (never before, so a client that failed to save its renewal is not
+  locked out); the server's old certificate is revoked right after the
+  swap. `coord-admin tidy` (dry run, `--apply` to act) cleans up
+  certificates superseded before this existed. `coord-admin list` shows
   every cert; `--crl` (TLS-level CRL) is still accepted.
 - OIDC (Keycloak): `--oidc-introspect-url .../protocol/openid-connect/token/introspect
   --oidc-client-id coord` (secret in `COORD_OIDC_SECRET`); clients get
@@ -416,6 +424,27 @@ works and wins when set.
 
 Tests: `uv run test_coord.py` (temp dirs, includes an 8-process claim race,
 an HTTP round-trip, OIDC role checks and a real mTLS handshake with a revoked cert).
+
+## GitLab (internal)
+
+- **CI**: `.gitlab-ci.yml` runs the same suites as the GitHub workflow on a
+  Linux runner (`uv` image, `openssl` installed so the mTLS/TLS tests run).
+  CI variables for an internal instance: `UV_IMAGE` (mirror of the uv
+  image), `CORPORATE_CA_PEM` (File variable, TLS-inspecting proxy),
+  `UV_INDEX_URL` (PyPI mirror), `WINDOWS_RUNNER_TAG` (enables the Windows
+  job). One pipeline per change: MR pipelines, else branch pipelines.
+- **glab**: the GitLab CLI for agents (issues, MRs, CI). Install without
+  sudo from the official release (verify `checksums.txt`) into
+  `~/.local/bin`, or `sudo apt install glab`; then, once per person,
+  `glab auth login --hostname <gitlab host>`. It acts with that person's
+  account.
+- **python-gitlab**: optional extra for code calling the GitLab API -
+  `uv sync --extra gitlab`; the agents' `coord` does not need it.
+- **Project ids**: `coord` keys everything by the canonical remote
+  (`gitlab.example.com/group/sub/repo`); SSH (including `ssh://...:2222/`)
+  and HTTPS clones give the same id. Moving a repo from GitHub to GitLab
+  changes its id: claims and messages under the old one stay there
+  (`coord projects`), or pin it with `COORD_PROJECT`.
 
 ## Security
 

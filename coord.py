@@ -84,7 +84,7 @@ def load_config() -> Path | None:
     if not f.is_file():
         if os.environ.get("COORD_IDENTITY") and not os.environ.get("COORD_CONFIG"):
             raise SystemExit(f"coord: no identity {os.environ['COORD_IDENTITY']!r} "
-                             f"({f} missing) - ask the administrator for `coord-admin enroll <name>`")
+                             f"({f} missing) - ask the administrator for `coord-admin enroll <client-name>`")
         return None
     f = f.resolve()
     for line in f.read_text(encoding="utf-8").splitlines():

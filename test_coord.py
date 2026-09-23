@@ -69,6 +69,10 @@ def paths():
             pass
     assert scopes.canonical_project("git@github.com:Org/Repo.git") == "github.com/org/repo"
     assert scopes.canonical_project("https://user@github.com/org/repo") == "github.com/org/repo"
+    gl = "gitlab.dci.local/team/sub/repo"                          # self-hosted GitLab, subgroups
+    for url in ("https://gitlab.dci.local/team/sub/repo.git", "git@gitlab.dci.local:team/sub/repo.git",
+                "ssh://git@gitlab.dci.local:2222/team/sub/repo.git", "https://oauth2:tok@gitlab.dci.local:443/team/sub/repo"):
+        assert scopes.canonical_project(url) == gl, (url, scopes.canonical_project(url))
 
 
 @check
@@ -477,27 +481,27 @@ def mtls_renewal_and_live_revocation():
     url = f"https://localhost:{_serve(httpd)}"
     old = (bundle / "agent.crt").read_text()
     (TMP / "old-r.crt").write_text(old)
+    (TMP / "old-r-kept.crt").write_text(old)             # a stale copy nobody updates
     try:
         cl = RemoteCoord(url, ca=str(bundle / "ca.crt"), cert=str(bundle / "agent.crt"),
                          key=str(bundle / "agent.key"))
         s = cl.whoami(family="r")["session_id"]                        # renewal rides on this reply
         new = (bundle / "agent.crt").read_text()
         assert new != old, "client did not install the renewal"
-        serials = [c["serial"] for c in pki.listing(d) if c["cn"] == "agent-r"]
-        assert len(serials) == 2
-        cl.heartbeat(session=s, status="renewed")                      # same principal, same session
+        status = lambda: {c["serial"]: c["status"] for c in pki.listing(d) if c["cn"] == "agent-r"}
+        assert list(status().values()) == ["valid", "valid"]
         again = RemoteCoord(url, ca=str(bundle / "ca.crt"), cert=str(TMP / "old-r.crt"),
                             key=str(bundle / "agent.key"))
-        again.presence()                                               # old cert: same renewal, not a 3rd
-        assert (bundle / "agent.crt").read_text() == new
-        assert len([c for c in pki.listing(d) if c["cn"] == "agent-r"]) == 2
+        again.presence()                                   # new not used yet: old still works and
+        assert (bundle / "agent.crt").read_text() == new   # gets the same renewal, not a 3rd
+        assert len(status()) == 2
+        cl.heartbeat(session=s, status="renewed")          # new cert in use -> old one retired
+        assert list(status().values()) == ["revoked", "valid"]
+        stale = RemoteCoord(url, ca=str(bundle / "ca.crt"), cert=str(TMP / "old-r-kept.crt"),
+                            key=str(bundle / "agent.key"))
+        raises("unauthenticated", stale.presence)          # the superseded cert no longer works
         pki.revoke(d, "agent-r")                                       # all of agent-r's certs
-        for who in (cl, again):
-            try:
-                who.presence()
-                raise AssertionError("revoked cert accepted without restart")
-            except CoordError as err:
-                assert err.code == "unauthenticated"
+        raises("unauthenticated", cl.presence)                         # no restart needed
     finally:
         httpd.shutdown()
 
@@ -543,8 +547,14 @@ def server_cert_auto_renewal_and_47_day_cap():
         assert not httpd.refresh_server_cert()                          # fresh: nothing to do
         cl = RemoteCoord(f"https://localhost:{port}", ca=str(b / "ca.crt"), cert=str(b / "agent.crt"),
                          key=str(b / "agent.key"))
+        st = lambda cn: [c["status"] for c in pki.listing(d) if c["cn"] == cn]
+        assert st("localhost") == ["revoked", "valid"]                # old server cert retired at swap
         cl.presence()                                                 # client 365 d -> 30 d on first use
         assert lifetime_days(b / "agent.crt") == pki.CLIENT_DAYS
+        assert [x["cn"] for x in pki.tidy(d)] == ["old-client"]       # dry run: renewal not used yet
+        assert st("old-client") == ["valid", "valid"]
+        cl.presence()                                                 # used -> the 365 d one retired
+        assert st("old-client") == ["revoked", "valid"] and pki.tidy(d) == []
         clock[0] += 16 * 86400
         assert httpd.refresh_server_cert()                              # 15-day rule for the server too
         cl.presence()                                                 # still trusted after the swap

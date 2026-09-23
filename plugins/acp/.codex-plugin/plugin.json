@@ -1,11 +1,11 @@
 {
   "name": "acp",
-  "description": "Coordinate concurrent agent sessions through the local ACP server: shared mailbox, file claims, task requests, presence. Wraps acp-agent-coordination's ACP_client.py.",
-  "version": "0.3.0",
+  "description": "Coordinate concurrent agent sessions through the local ACP server: shared mailbox, file claims, task requests, presence. Wraps acp-agent-coordination's ACP_client.py. Also the coord v2 skill (`coord` command: claims, questions, tasks over mTLS or Keycloak).",
+  "version": "0.4.0",
   "author": {
     "name": "Michel WEINACHTER"
   },
-  "keywords": ["coordination", "multi-agent", "acp", "mailbox", "locks"],
+  "keywords": ["coordination", "multi-agent", "acp", "mailbox", "locks", "coord"],
   "skills": "./skills/",
   "interface": {
     "displayName": "ACP Coordination",

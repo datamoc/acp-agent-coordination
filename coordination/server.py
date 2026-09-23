@@ -98,6 +98,10 @@ def make_handler(coord, oidc: OIDCIntrospector | None, mtls: bool, authority=Non
                 return
             if authority.status(cert.get("serialNumber", "")) != "V":
                 raise CoordError("unauthenticated", "client certificate is revoked or unknown to the CA")
+            try:
+                authority.confirm(cert["serialNumber"])   # in use: retire what it superseded
+            except Exception as e:
+                print(f"coord-server: could not retire superseded certs: {e!r}", file=sys.stderr, flush=True)
             if authority.due(ssl.cert_time_to_seconds(cert["notBefore"]), ssl.cert_time_to_seconds(cert["notAfter"])):
                 try:
                     self._renewal = authority.renew(self.connection.getpeercert(binary_form=True))

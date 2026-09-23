@@ -16,6 +16,11 @@ coord = "coord:main"
 coord-server = "coordination.server:main"
 coord-admin = "coordination.pki:main"
 
+[project.optional-dependencies]
+gitlab = [
+    "python-gitlab>=8.5.0",
+]
+
 [build-system]
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"

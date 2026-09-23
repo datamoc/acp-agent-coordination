@@ -1,0 +1,66 @@
+# GitLab CI: the same suites as .github/workflows/ci.yml.
+#
+# Project/group CI variables you may need on an internal instance:
+#   UV_IMAGE           an image with uv + Python (default below; mirror it if runners
+#                      cannot reach ghcr.io)
+#   CORPORATE_CA_PEM   "File" variable with the corporate root CA, when PyPI is reached
+#                      through a TLS-inspecting proxy (pyproject sets uv system-certs)
+#   UV_INDEX_URL       an internal PyPI mirror (e.g. a GitLab/Nexus proxy), if any
+#   WINDOWS_RUNNER_TAG tag of a Windows runner with uv installed; the Windows job only
+#                      exists when this is set
+
+variables:
+  UV_IMAGE: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+  UV_CACHE_DIR: .uv-cache
+  UV_LINK_MODE: copy
+
+workflow:
+  rules:                      # one pipeline per change: MR pipelines, else branch pipelines
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    - if: $CI_COMMIT_BRANCH
+
+stages: [test]
+
+.uv-cache:
+  cache:
+    key:
+      files: [uv.lock]
+    paths: [.uv-cache]
+
+test:linux:
+  stage: test
+  image: $UV_IMAGE
+  extends: .uv-cache
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends openssl git ca-certificates >/dev/null
+    - |
+      if [ -n "$CORPORATE_CA_PEM" ]; then
+        cp "$CORPORATE_CA_PEM" /usr/local/share/ca-certificates/corporate-ca.crt && update-ca-certificates >/dev/null
+      fi
+    - uv sync --locked
+  script:
+    - uv run smoke_test.py
+    - uv run test_store.py
+    - uv run test_client.py
+    - uv run test_logging.py
+    - uv run test_coord.py
+    - uv run test_tls.py
+  after_script:
+    - uv cache prune --ci
+
+test:windows:
+  stage: test
+  tags: [$WINDOWS_RUNNER_TAG]
+  extends: .uv-cache
+  script:
+    - uv sync --locked
+    - uv run smoke_test.py
+    - uv run test_store.py
+    - uv run test_coord.py
+    - uv run test_tls.py
+  rules:
+    - if: $WINDOWS_RUNNER_TAG == null || $WINDOWS_RUNNER_TAG == ""
+      when: never
+    - when: on_success

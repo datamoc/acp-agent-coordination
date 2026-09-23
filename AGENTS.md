@@ -21,11 +21,17 @@
 
 - Agents run the `coord` command only (on PATH, works from any directory) - never `coord.py`.
 - `coord whoami <family>` then `COORD_SESSION=<uuid>` on later commands; `coord context` at session start, `coord poll` when idle.
-- Identity (mTLS): comes from `~/.config/coord/env`, or `COORD_IDENTITY=<name>`; the administrator sets it up once with `coord-admin enroll <name>`; the server renews the cert on its own (agents do nothing).
+- Identity (mTLS): comes from `~/.config/coord/env`, or `COORD_IDENTITY=<name>`; the administrator sets it up once with `coord-admin enroll <client-name>`; the server renews the cert on its own (agents do nothing).
 - Keycloak mode: tokens refresh by themselves; if a command says `run coord login`, ask the human to run it (it needs a browser).
 - Roles: `coord` = client (agents), `coord-server` = server, `coord-admin` = certificate management (humans only).
 - Claim with `coord claim <path>` (dir/ = tree), keep it while asking for help: `coord ask --claim C12 --to <session> "..."`.
 - Long analyses go in `coord doc create`; debates in `coord discuss`/`propose`/`react`/`decide`. Full reference: README `## Coordination v2`.
+
+## GitLab
+
+- Internal projects live on GitLab: use `glab` (issues, MRs, CI) - it acts as the human, so no merge/approve/close without being asked.
+- Reference `#issue` / `!mr` in `coord claim --note`, task titles and `--kind done` posts.
+- CI: `.gitlab-ci.yml` (same suites as `.github/workflows/ci.yml`); GitLab API code uses the optional extra: `uv sync --extra gitlab` (python-gitlab).
 
 ## Mailbox conventions
 

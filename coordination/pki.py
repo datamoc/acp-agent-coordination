@@ -133,6 +133,49 @@ def revoke(d: str | Path, name: str) -> Path:
     return gencrl(d)
 
 
+def _pubkey(pem_file: Path) -> str:
+    return _run("x509", "-in", str(pem_file), "-noout", "-pubkey", text=True)
+
+
+def _same_key_valid(d: Path, cn: str, pub: str) -> list[str]:
+    """Valid serials of <cn> whose certificate carries public key <pub>."""
+    out = []
+    for f in _index(d):
+        pem = d / "newcerts" / f"{f[3]}.pem"
+        if f[0] == "V" and f[-1] == f"/CN={cn}" and pem.exists() and _pubkey(pem) == pub:
+            out.append(f[3])
+    return out
+
+
+def _revoke_serials(d: Path, serials: list[str]) -> None:
+    """Caller holds the lock. Revokes each serial still valid, then refreshes the CRL."""
+    valid = {f[3] for f in _index(d) if f[0] == "V"}
+    for s in serials:
+        if s in valid:
+            _run("ca", "-config", str(d / "openssl.cnf"), "-revoke", str(d / "newcerts" / f"{s}.pem"),
+                 "-crl_reason", "superseded")
+    gencrl(d)
+
+
+def tidy(d: str | Path, apply: bool = False) -> list[dict]:
+    """Superseded certificates: for each (CN, key), every valid cert but the newest.
+    Dry run unless `apply`; the newest of each key stays valid, so no client is locked out
+    as long as it holds that newest cert (check with `list` first)."""
+    d = Path(d).resolve()
+    with _locked(d):
+        groups: dict[tuple[str, str], list[str]] = {}
+        for f in _index(d):
+            pem = d / "newcerts" / f"{f[3]}.pem"
+            if f[0] == "V" and pem.exists():
+                groups.setdefault((f[-1], _pubkey(pem)), []).append(f[3])
+        old = [(cn, s) for (cn, _), serials in groups.items()
+               for s in sorted(serials, key=lambda x: int(x, 16))[:-1]]
+        if apply and old:
+            _revoke_serials(d, [s for _, s in old])
+    return [{"serial": s, "cn": cn.removeprefix("/CN="), "revoked" if apply else "would_revoke": True}
+            for cn, s in old]
+
+
 def gencrl(d: str | Path) -> Path:
     d = Path(d).resolve()
     _run("ca", "-config", str(d / "openssl.cnf"), "-gencrl", "-out", str(d / "crl.pem"))
@@ -158,6 +201,7 @@ class Authority:
         self.d, self.clock = Path(d).resolve(), clock
         self.renew_after = dt.timedelta(days=renew_after_days)
         self._status: tuple[float, dict[str, str]] = (-1.0, {})
+        self._confirmed: set[str] = set()
 
     def status(self, serial: str) -> str | None:
         """'V' valid, 'R' revoked, 'E' expired, None unknown. Re-read when index.txt changes."""
@@ -171,6 +215,20 @@ class Authority:
         too_long = not_after is not None and not_after - not_before > MAX_DAYS * 86400 + 60
         return too_long or self.clock() - not_before >= self.renew_after.total_seconds()
 
+    def confirm(self, serial: str) -> None:
+        """The holder of <serial> is using it: revoke the certificates it superseded."""
+        if serial in self._confirmed:
+            return
+        book_f = self.d / "renewals.json"
+        if book_f.exists():
+            with _locked(self.d):
+                book = json.loads(book_f.read_text())
+                for entry in book.values():
+                    if entry["serial"].upper().lstrip("0") == serial.upper().lstrip("0") and entry.get("supersedes"):
+                        _revoke_serials(self.d, entry.pop("supersedes"))
+                        book_f.write_text(json.dumps(book, indent=1))
+        self._confirmed.add(serial)
+
     def renew_server(self, cert: str | Path) -> str | None:
         """The server's own certificate: re-certify it when due, replace the file atomically
         and return the new PEM; None when it is not due yet."""
@@ -183,6 +241,7 @@ class Authority:
         tmp = cert.with_suffix(".renew")
         tmp.write_text(pem)
         os.replace(tmp, cert)
+        self.confirm(_run("x509", "-in", str(cert), "-noout", "-serial", text=True).strip().partition("=")[2])
         return pem
 
     def renew(self, der: bytes, server: bool = False) -> str:
@@ -229,8 +288,10 @@ class Authority:
                     idx.write(f"V\t{end_ts}\t\t{new_serial}\tunknown\t/CN={cn}\n")
                 nxt = f"{int(new_serial, 16) + 1:X}"
                 (self.d / "serial").write_text(nxt.zfill(len(nxt) + len(nxt) % 2) + "\n")
-                book[key_id] = {"serial": new_serial, "cn": cn,
-                                "issued": self.clock()}
+                book[key_id] = {"serial": new_serial, "cn": cn, "issued": self.clock(),
+                                # revoked once the new cert is seen in use (confirm): never before,
+                                # so a client that failed to save it is not locked out
+                                "supersedes": [x for x in _same_key_valid(self.d, cn, pub) if x != new_serial]}
                 book_f.write_text(json.dumps(book, indent=1))
                 return out.read_text()
 
@@ -285,21 +346,26 @@ def main(argv=None) -> int:
                    help="CA directory (default $COORD_PKI or this checkout's pki/)")
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("init", help="create the CA (idempotent; also refreshes the CRL)")
-    s = sub.add_parser("server-cert", help="issue the server certificate")
-    s.add_argument("name", nargs="?", default="localhost")
-    s = sub.add_parser("enroll", help="issue a client cert and write its identity bundle")
-    s.add_argument("name")
+    s = sub.add_parser("server-cert", help="issue the server's own certificate (once; it renews itself)")
+    s.add_argument("name", nargs="?", default="localhost", metavar="server-name",
+                   help="the host clients connect to (default localhost)")
+    s = sub.add_parser("enroll", help="issue a CLIENT (agent) identity and write its bundle - not the server")
+    s.add_argument("name", metavar="client-name", help="the agent identity, e.g. alice-laptop; it becomes "
+                   "the principal (mtls:<client-name>) and ~/.config/coord/<client-name>/")
     s.add_argument("--url", default=os.environ.get("COORD_SERVER") or "https://localhost:1338")
     s.add_argument("--out", type=Path, help="write the bundle here (to hand to another machine) "
                    "instead of ~/.config/coord/<name>")
     s.add_argument("--default", action="store_true", help="make it the identity used when "
                    "COORD_IDENTITY is unset (automatic for the first one)")
     s = sub.add_parser("revoke", help="revoke a client and all its renewals (effective immediately)")
-    s.add_argument("name")
+    s.add_argument("name", metavar="client-name")
     s = sub.add_parser("issue", help="low level: issue <name>.crt/.key in the CA dir")
     s.add_argument("name")
     s.add_argument("--server", action="store_true")
     sub.add_parser("list", help="certificates known to the CA")
+    s = sub.add_parser("tidy", help="revoke superseded certs (older ones with the same key); dry run "
+                       "without --apply")
+    s.add_argument("--apply", action="store_true")
     a = p.parse_args(argv)
     try:
         if a.cmd == "init":
@@ -314,12 +380,14 @@ def main(argv=None) -> int:
             r = enroll(a.dir, a.name, a.url, a.out, a.default)
         elif a.cmd == "revoke":
             r = {"revoked": a.name, "crl": str(revoke(a.dir, a.name))}
+        elif a.cmd == "tidy":
+            r = tidy(a.dir, a.apply)
         else:
             r = listing(a.dir)
     except subprocess.CalledProcessError as e:
         print(f"coord-admin: openssl failed: {(e.stderr or b'').decode(errors='replace').strip()}", file=sys.stderr)
         return 1
-    print(json.dumps(r, indent=None if a.cmd != "list" else 1))
+    print(json.dumps(r, indent=1 if a.cmd in ("list", "tidy") else None))
     return 0
 
 

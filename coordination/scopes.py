@@ -67,5 +67,6 @@ def canonical_project(remote_url: str) -> str:
     u = re.sub(r"^[a-z+]+://", "", u)
     u = re.sub(r"^[^@/]+@", "", u)
     u = re.sub(r"^([^/:]+):(?!\d)", r"\1/", u)
+    u = re.sub(r"^([^/:]+):\d+/", r"\1/", u)       # ssh://host:2222/... == https://host/...
     u = re.sub(r"\.git/?$", "", u).rstrip("/")
     return u.lower()
