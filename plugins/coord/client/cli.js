@@ -16,7 +16,7 @@ import { CoordError } from "./errors.js";
 import { unifiedDiff } from "./diff.js";
 import { human } from "./format.js";
 import { detectProject, git, rel, repoRoot } from "./git.js";
-import { ENUMS } from "./ops.generated.js";
+import { CLIENT_VERSION, ENUMS } from "./ops.generated.js";
 import { TokenProvider } from "./oidc.js";
 class UsageError extends Error {
 }
@@ -111,6 +111,7 @@ const COMMANDS = {
             resume: { pos: [{ name: "routine" }] },
             retire: { pos: [{ name: "routine" }] },
         } },
+    server: { help: "the server's version, features, what is new, ops and limits - and this client's version" },
     context: { help: "start-of-session view: strategy, overview, memory, due routines, my claims, tasks, discussions, unread" },
     profile: { opts: [s("--provider"), s("--model"), s("--family"), s("--category"), s("--reasoning"), { flag: "--capability", kind: "append" }] },
     suggest: { help: "suggest agents for a task (hint only; you choose)",
@@ -230,6 +231,19 @@ function readContent(a) {
     return readFileSync(0, "utf8"); // stdin
 }
 const uuid = () => randomUUID();
+const vkey = (v) => v.split(".").map((x) => parseInt(x, 10) || 0);
+/** A server newer than this client has features with no command here; an older one lacks newer commands. */
+export function versionSkew(server, client = CLIENT_VERSION) {
+    if (!server || server === "0" || server === client)
+        return null;
+    const [s, c] = [vkey(server), vkey(client)];
+    const cmp = s.map((x, i) => x - (c[i] ?? 0)).find((d) => d !== 0) ?? 0;
+    if (cmp > 0)
+        return `coord server ${server} is newer than this client ${client}: update the coord plugin (coord server lists what is new)`;
+    if (cmp < 0)
+        return `coord server ${server} is older than this client ${client}: commands added since answer bad_op - tell the human`;
+    return null;
+}
 const gitLines = (...args) => git(...args).split("\n").filter(Boolean);
 export async function run(path, a, c) {
     const S = loadSession;
@@ -246,9 +260,10 @@ export async function run(path, a, c) {
                     await call("context", { session: old });
                 }
                 catch (e) {
-                    if (e instanceof CoordError)
+                    //only a gone session frees the file: `forbidden` is a live session under another identity (another CLI)
+                    if (e instanceof CoordError && ["dead_session", "unknown_session", "no_session"].includes(e.code))
                         old = null;
-                    else
+                    else if (!(e instanceof CoordError))
                         throw e;
                 }
             }
@@ -260,6 +275,9 @@ export async function run(path, a, c) {
                 }
                 catch { /* read-only */ }
             }
+            const skew = versionSkew(r.server?.version);
+            if (skew)
+                r.server_warning = skew;
             return [cmd, r, 0];
         }
         case "heartbeat": return [cmd, await call("heartbeat", { session: S(), status: a.status }), 0];
@@ -387,6 +405,7 @@ export async function run(path, a, c) {
                 }
             }
         }
+        case "server": return [cmd, { ...(await call("server_info", {})), client_version: CLIENT_VERSION }, 0];
         case "context": return [cmd, await call("context", { session: S() }), 0];
         case "profile": return [cmd, await call("profile_set", { session: S(), provider: a.provider, model_id: a.model, model_family: a.family,
                 category: a.category, reasoning_level: a.reasoning, capabilities: a.capability }), 0];

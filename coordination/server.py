@@ -37,7 +37,7 @@ from pathlib import Path
 from . import state_home
 from . import a2a
 from .net import is_loopback
-from .service import READ_OPS, WRITE_OPS, Coord, CoordError
+from .service import READ_OPS, WRITE_OPS, Coord, CoordError, server_version
 
 PROJECT_ROLES = {"viewer": 0, "contributor": 1, "admin": 2}
 VERBOSE = 15   # -v: one line per request, between INFO (default) and DEBUG (-vv)
@@ -248,11 +248,7 @@ def make_handler(coord, oidc: OIDCIntrospector | None, mtls: bool, authority=Non
 
 
 def _version() -> str:
-    try:
-        from importlib.metadata import version
-        return version("coord")
-    except Exception:
-        return "0"
+    return server_version()
 
 
 class _Server(ThreadingHTTPServer):
@@ -373,8 +369,12 @@ def main(argv=None) -> int:
         oidc = OIDCIntrospector(a.oidc_introspect_url, a.oidc_client_id or "",
                                 os.environ.get("COORD_OIDC_SECRET") or a.oidc_client_secret or "",
                                 cache_seconds=a.oidc_cache_seconds)
+    coord = Coord(a.db)
+    told = coord.announce_version()
+    if told:
+        log.info("version %s announced to %d project(s)", server_version(), len(told))
     try:
-        httpd = build_server(Coord(a.db), a.listen, a.port, a.tls_cert, a.tls_key, a.client_ca, a.crl,
+        httpd = build_server(coord, a.listen, a.port, a.tls_cert, a.tls_key, a.client_ca, a.crl,
                              oidc, authority, cert_source,
                              push_allow=[h for h in a.push_allow.split(",") if h.strip()], public_url=a.public_url)
     except OSError as e:

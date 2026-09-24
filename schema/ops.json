@@ -1332,6 +1332,10 @@
     }
    ]
   },
+  "server_info": {
+   "kind": "read",
+   "params": []
+  },
   "status": {
    "kind": "read",
    "params": [

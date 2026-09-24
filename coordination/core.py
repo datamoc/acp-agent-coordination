@@ -34,6 +34,18 @@ ROLES_BY_CONSENT = ("coeditor", "delegate")   # carry write duties: the grantee 
 ROUTINE_STATUSES = ("active", "paused", "retired")
 ROUTINE_OUTCOMES = ("ok", "issues", "failed")   # issues/failed also post a warning
 
+# What this server can do - published in whoami, `coord server` (server_info) and the Agent Card.
+FEATURES = ("sessions", "messages", "claims", "fences", "roles", "discussions", "consensus", "documents",
+            "document-patches", "tasks", "a2a", "push-notifications", "memory", "strategy", "routines",
+            "server-info")
+# What each release brought agents: announced to every project when the server starts on a newer version.
+NEWS = {
+    "0.4.0": "one certificate per agent CLI; plugins for Muse, Gemini, Qwen, opencode, Kilo and Crush",
+    "0.5.0": "strategy (memory kind, first in context) and routines (recurring work: coord routines)",
+    "0.6.0": "the server publishes its version and features (whoami, coord server) and announces upgrades",
+}
+SERVER_NAME = "coord-server"   # sender of the server's own messages (upgrade notices)
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS repos(
@@ -152,6 +164,22 @@ def iso(ts: float | None) -> str | None:
     if ts is None:
         return None
     return datetime.fromtimestamp(ts, timezone.utc).isoformat(timespec="seconds")
+
+
+def server_version() -> str:
+    try:
+        from importlib.metadata import version
+        return version("coord")
+    except Exception:
+        return "0"
+
+
+def version_key(v: str) -> tuple[int, ...]:
+    """"0.10.1" -> (0, 10, 1); anything unparsable sorts first."""
+    try:
+        return tuple(int(x) for x in v.split("."))
+    except ValueError:
+        return ()
 
 
 def parse_when(value: str, now: float) -> float:

@@ -104,3 +104,13 @@ test("strategy and routines through the CLI", () => {
   run(["routine", "pause", r], s);
   assert.equal(run(["routine", "show", r]).status, "paused");
 });
+
+test("coord server: version, features and this client's version", () => {
+  const dir = tmp();
+  const env = localEnv(join(dir, "v.db"));
+  const r = coord(["--json", "server"], { env, cwd: dir }).json;
+  assert.ok(r.features.includes("routines") && r.ops.read.includes("server_info"));
+  assert.equal(r.client_version, JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version);
+  const who = coord(["--json", "whoami", "cli"], { env, cwd: dir }).json;
+  assert.equal(who.server.version, r.version);
+});

@@ -2,6 +2,8 @@
 
 export const ENUMS = {"message_kinds":["info","question","advice","proposal","decision","review","warning","done"],"roles":["advisor","reviewer","coeditor","delegate"],"stances":["support","object","abstain","need-more-info"],"doc_kinds":["note","diagnosis","plan","proposal","decision","review","adr"],"memory_kinds":["strategy","overview","convention","architecture","decision","pitfall","glossary"],"consensus_rules":["unanimous","majority","no-objection"],"routine_statuses":["active","paused","retired"],"routine_outcomes":["ok","issues","failed"]} as const;
 
+export const CLIENT_VERSION = "0.6.0";   // package.json: compared with the server's in whoami
+
 export interface OpArgs {
   ask: { session: string; claim: string; to: string; body: string; role?: string; kind?: string; client_id?: string | null; };
   check: { session: string; files: string[]; };
@@ -49,6 +51,7 @@ export interface OpArgs {
   routine_start: { session: string; routine: string; };
   routine_update: { session: string; routine: string; status?: string | null; every?: string | null; instructions?: string | null; on_commit?: boolean | null; paths?: string[] | null; title?: string | null; };
   routines: { project?: string | null; due?: boolean; include_retired?: boolean; };
+  server_info: {  };
   status: { project?: string | null; };
   suggest: { project?: string | null; category?: string | null; capability?: string[] | null; reasoning_level?: string | null; exclude_session?: string | null; };
   task_accept: { session: string; task: string; };
@@ -467,6 +470,10 @@ export const OPS: Record<OpName, { kind: "read" | "write"; params: readonly stri
    "due",
    "include_retired"
   ]
+ },
+ "server_info": {
+  "kind": "read",
+  "params": []
  },
  "status": {
   "kind": "read",

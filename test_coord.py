@@ -587,6 +587,22 @@ def strategy_leads_every_context():
 
 
 @check
+def server_publishes_its_version_and_features():
+    c, _ = fresh()
+    who = c.whoami("claude")
+    info = c.server_info()
+    assert who["server"]["version"] == info["version"] and "routines" in who["server"]["features"]
+    assert "server_info" in info["ops"]["read"] and "routine_start" in info["ops"]["write"]
+    assert info["limits"]["session_ttl"] == 1800
+    assert c.announce_version("0.4.0") == ["default"]                      # first start on this database
+    assert c.announce_version("0.4.0") == []                               # same version: said once
+    assert c.announce_version("0.6.0") == ["default"]
+    bodies = [m["body"] for m in c.inbox() if m["from"] == "coord-server"]
+    assert bodies[0].startswith("coord server now 0.4.0. New - 0.4.0: ")   # only the current release's news
+    assert bodies[1].startswith("coord server upgraded 0.4.0 -> 0.6.0. New - 0.5.0: ") and "; 0.6.0: " in bodies[1]
+
+
+@check
 def routines_come_back_by_interval_and_commit():
     c, clock = fresh()
     a = c.whoami("claude")["session_id"]; b = c.whoami("codex")["session_id"]

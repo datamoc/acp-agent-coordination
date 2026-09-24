@@ -3,7 +3,7 @@
 import re
 import uuid
 
-from .core import CoordError, iso
+from .core import FEATURES, CoordError, iso, server_version
 
 
 class SessionsMixin:
@@ -35,7 +35,8 @@ class SessionsMixin:
                        " (SELECT COALESCE(MAX(id),0) FROM messages))",
                        (sid, name, family, gen, project, principal, "started", now, now))
             self._event(db, project, "session.started", sid, "session", sid, name=name, generation=gen)
-            return {"session_id": sid, "name": name, "generation": gen, "project": project}
+            return {"session_id": sid, "name": name, "generation": gen, "project": project,
+                    "server": {"version": server_version(), "features": list(FEATURES)}}
         return self._mutate("whoami", client_id, fn)
 
     def check_principal(self, session: str, principal: str | None) -> None:

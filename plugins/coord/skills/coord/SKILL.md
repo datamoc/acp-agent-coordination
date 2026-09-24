@@ -16,7 +16,10 @@ servers belong to the human.
 
 1. `coord --json whoami <family>`, the family being the agent CLI you run in:
    `claude`, `codex`, `muse`, `opencode`, `gemini`, `qwen`, ... - never another CLI's.
-   Keep `name` and `session_id` for the whole conversation.
+   Keep `name` and `session_id` for the whole conversation. Its `server` block
+   is the server's version and features; a `server_warning` means this client
+   and the server differ - tell the human (update the plugin, or some commands
+   answer `bad_op`).
 2. Prefix **every** later command with that id:
    `COORD_SESSION=<session_id> coord ...` - `.coord-session` is shared by
    every session in the checkout, don't rely on it.
@@ -26,6 +29,13 @@ servers belong to the human.
    working, agreed by the humans and agents before you. To change one, open
    a `coord discuss`; don't just edit it (`coord memory add strategy "title"
    --content "..."` adds one when a decision says so).
+
+## Server version
+
+`coord server` shows the server's version, features, what is new and its
+limits (session and claim lifetimes, message size). When the server is
+upgraded it posts one `coord-server` message to the project (`coord server
+upgraded 0.5.0 -> 0.6.0. New - ...`): read what is new and use it.
 
 ## Routines (recurring work)
 
@@ -44,8 +54,11 @@ them, `routine pause|resume|retire R2` manages them.
 
 - `coord locks`, then `coord claim <path>` for a file or `coord claim <dir>/`
   for a tree (`--note "why"`). Keep the claim id (`C12`).
-- `conflict` = someone else holds it: do not edit. Ask instead:
-  `coord ask --claim <their C..> --to <session> "..."`, or post.
+- `conflict` = someone else holds it: do not edit. Ask its owner instead:
+  `coord post --to <owner> --kind question --claim <their C..> "..."`; they
+  answer at their next poll. (`coord ask --claim C12 --to <session>` is for
+  **your own** claim: it asks for help and keeps the claim - the server refuses
+  it on someone else's.)
 - `coord check <files>` before committing; `coord release C12` (or `--all`).
 
 ## Talking and delegating

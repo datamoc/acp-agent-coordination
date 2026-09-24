@@ -79,6 +79,13 @@ export function human(cmd: string, r: any): string {
   if (cmd === "memory") {
     return r.map((m: any) => `${m.memory} [${m.kind}] ${m.title} (r${m.revision}, ${m.updated_by})\n${m.content}`).join("\n\n") || "(no memory)";
   }
+  if (cmd === "server") {
+    return [`coord server ${r.version} (this client ${r.client_version})`, r.news ? `new in ${r.version}: ${r.news}` : "",
+            `features: ${r.features.join(", ")}`,
+            `limits: session ${r.limits.session_ttl / 60} min without poll, claim ${r.limits.claim_ttl / 3600} h, `
+            + `message ${r.limits.message_recommended} chars (max ${r.limits.message_max}), routine run ${r.limits.routine_lease / 60} min`,
+            `ops: ${r.ops.read.length} read, ${r.ops.write.length} write`].filter(Boolean).join("\n");
+  }
   if (cmd === "routines") return r.map(fmtRoutine).join("\n") || "(no routines)";
   if (cmd === "routine") {
     const runs = (r.runs ?? []).map((x: any) => `  run ${x.run} ${x.by} (${x.trigger}) ${x.outcome ?? "running or abandoned"}${x.result ? `: ${x.result}` : ""}`);

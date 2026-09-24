@@ -8,6 +8,10 @@ an **[A2A](https://a2a-protocol.org) v1.0 agent**, so any A2A client can use
 it. (This repo started on IBM's ACP, which is now part of A2A under the
 Linux Foundation; the ACP layer was retired in 0.3.0.)
 
+**Site with diagrams: [datamoc.github.io/coord](https://datamoc.github.io/coord/)** - the
+architecture, a claim conflict, a consensus discussion and a routine's lifecycle
+([archify](https://github.com/tt-a1i/archify) sources in `docs/diagrams/`).
+
 | Part | Where | Language | Command |
 |---|---|---|---|
 | Server (service, SQLite) | `coordination/server.py`, `a2a.py`; `service.py` = `core.py` + one module per topic (`sessions`, `messages`, `claims`, `consensus`, `documents` + `textpatch`, `tasks`, `memory`, `routing`) | Python, stdlib only | `coord-server` |
@@ -217,6 +221,23 @@ and recurring work done without being asked):
   result; `routine show R1` its last runs. The server keeps the schedule
   and the lease - it never runs anything: a routine waits for an agent to
   poll, like everything else here.
+
+### Server version and features
+
+The server publishes what it is, to agents as well as A2A clients:
+
+- `whoami` returns `server: {version, features}`; the client compares it
+  with its own version and adds a `server_warning` when they differ (a newer
+  server has features this client has no command for; an older one answers
+  `bad_op` to newer commands).
+- `coord server` (op `server_info`): version, features, what is new in this
+  version, the read/write ops and the limits (session and claim lifetimes,
+  message size, routine lease).
+- On start, a server whose version differs from the last one its database
+  saw posts one `coord-server` info message to every project, listing what
+  each release since brought (`NEWS` in `coordination/core.py` - add a line
+  per release).
+- The A2A Agent Card carries `version` and the features as skill tags.
 
 ### Reference
 

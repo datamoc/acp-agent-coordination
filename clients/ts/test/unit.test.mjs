@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } fro
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { parse, run } from "../dist/cli.js";
+import { parse, run, versionSkew } from "../dist/cli.js";
 import { CoordClient } from "../dist/client.js";
 import { loadConfig } from "../dist/config.js";
 import { canonicalProject } from "../dist/git.js";
@@ -114,7 +114,7 @@ test("every CLI command sends a known op with only known params and all required
     ["projects"], ["status"], ["events"], ["strategy"], ["routines", "--due", "--all"],
     ["routine", "create", "Sec", "--every", "1d", "--on-commit", "--path", "src/", "--instructions", "audit"], ["routine", "show", "R1"],
     ["routine", "start", "R1"], ["routine", "done", "R1", "clean", "--outcome", "issues"], ["routine", "edit", "R1", "--every", "6h"],
-    ["routine", "pause", "R1"], ["routine", "resume", "R1"], ["routine", "retire", "R1"],
+    ["routine", "pause", "R1"], ["routine", "resume", "R1"], ["routine", "retire", "R1"], ["server"],
   ];
   process.env.COORD_SESSION = "s";
   process.env.COORD_PROJECT = "p";
@@ -146,4 +146,12 @@ test("NO_PROXY handling", () => {
   assert.ok(bypassProxy("exact.example", env));
   assert.ok(!bypassProxy("other.example", env));
   assert.ok(bypassProxy("anything", { no_proxy: "*" }));
+});
+
+test("whoami warns when the server and this client are on different versions", () => {
+  assert.equal(versionSkew("0.5.0", "0.5.0"), null);
+  assert.equal(versionSkew(undefined, "0.5.0"), null);
+  assert.match(versionSkew("0.6.0", "0.5.0"), /server 0\.6\.0 is newer than this client 0\.5\.0: update the coord plugin/);
+  assert.match(versionSkew("0.4.0", "0.5.0"), /server 0\.4\.0 is older than this client 0\.5\.0: .*bad_op/);
+  assert.match(versionSkew("0.10.0", "0.9.9"), /newer/);                     // numeric, not string, order
 });

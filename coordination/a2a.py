@@ -28,7 +28,7 @@ import urllib.request
 import uuid
 
 from .net import is_loopback
-from .service import CoordError
+from .service import FEATURES, CoordError
 
 A2A_VERSION = "1.0"
 CONTENT_TYPE = "application/a2a+json"
@@ -78,7 +78,7 @@ def agent_card(base_url: str, mtls: bool, oidc_url: str | None, version: str) ->
         "skills": [
             skill("coord-ops", "coord operations",
                   'Any coord operation: send a data part {"op": "<name>", "args": {...}} (see schema/ops.json).',
-                  ["coordination", "claims", "locks", "messages", "documents"],
+                  ["coordination", *FEATURES],
                   ['{"op": "whoami", "args": {"family": "my-agent", "project": "github.com/org/repo"}}',
                    '{"op": "claim", "args": {"session": "<id>", "scope": "src/auth/", "tree": true}}']),
             skill("delegate", "delegate a task",
