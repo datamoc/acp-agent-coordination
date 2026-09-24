@@ -8,6 +8,12 @@ export function fmtMsg(m) {
     return `#${m.id} [${m.at}] ${m.from}${to} ${m.kind}${re}${cl}: ${m.body}${done}`;
 }
 const every = (s) => (s % 86400 === 0 ? `${s / 86400}d` : s % 3600 === 0 ? `${s / 3600}h` : `${Math.round(s / 60)}m`);
+/** When to look again: "wake: now - R2 due: ..." or "wake: in 12 min (10:42Z) - renew or release C12". */
+export function fmtWake(w) {
+    const s = w.in_seconds;
+    const when = s <= 0 ? "now" : s < 90 ? `in ${s} s` : s < 5400 ? `in ${Math.round(s / 60)} min` : `in ${(s / 3600).toFixed(1)} h`;
+    return `wake: ${when}${s > 0 ? ` (${w.next_at})` : ""} - ${w.reason}`;
+}
 export function fmtRoutine(x) {
     const when = [x.every ? `every ${every(x.every)}` : "",
         x.on_commit ? `on commit${x.paths.length ? ` (${x.paths.join(", ")})` : ""}` : ""].filter(Boolean).join(" + ");
@@ -48,6 +54,8 @@ export function human(cmd, r) {
         out.push("discussions: " + (r.discussions.map((d) => `${d.discussion} ${d.topic}`).join(", ") || "-"));
         if (r.routines?.length)
             out.push("routines due: " + r.routines.map((x) => `${x.routine} ${x.title} (${x.why})`).join(", "));
+        if (r.wake)
+            out.push(fmtWake(r.wake));
         return out.join("\n");
     }
     if (cmd === "doc-show")
@@ -61,7 +69,9 @@ export function human(cmd, r) {
             `  rule: ${r.rule ?? "unanimous"}, quorum ${r.quorum ?? 2}, participants: ${who}`];
         for (const p of r.proposals) {
             const t = Object.entries(p.tally).filter(([, v]) => v).map(([k, v]) => `${k}=${v}`).join(" ");
-            lines.push(`  ${p.proposal} [${p.status}] ${p.author}: ${p.body}  ${t}`);
+            lines.push(`  ${p.proposal} [${p.status}] ${p.author}${p.supersedes ? ` (replaces ${p.supersedes})` : ""}: ${p.body}  ${t}`);
+            for (const x of p.consensus?.reservations ?? [])
+                lines.push(`    reservation from ${x.name}: ${x.comment || "-"}`);
             if (p.consensus && r.status === "open")
                 lines.push(`    ${consensusLine(p.consensus)}`);
         }
@@ -108,6 +118,8 @@ export function human(cmd, r) {
         lines.push(...(r.strategy ?? []).map((m) => `strategy: ${m.title}: ${m.content}`));
         lines.push(...r.overview.map((m) => `overview: ${m.title}: ${m.content}`));
         lines.push(...(r.routines ?? []).map((x) => `routine due: ${x.routine} ${x.title} (${x.why}) - coord routine start ${x.routine}`));
+        if (r.wake)
+            lines.push(fmtWake(r.wake));
         lines.push(...r.memory.map((m) => `memory: ${m.memory} [${m.kind}] ${m.title}`));
         lines.push(...r.my_claims.map((c) => `claim: ${c.claim} ${c.scope}`));
         lines.push(...[...r.my_tasks, ...r.open_tasks].map((t) => `task: ${t.task} [${t.status}] ${t.title}`));

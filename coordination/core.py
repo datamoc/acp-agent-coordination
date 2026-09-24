@@ -18,13 +18,16 @@ from pathlib import Path
 
 SESSION_TTL = 1800
 CLAIM_TTL = 7200
+WAKE_KEEPALIVE = 1500        # poll again within 25 min: the session dies after 30
+CLAIM_RENEW_MARGIN = 600     # wake 10 min before a claim expires
 MSG_RECOMMENDED = 300
 MSG_MAX = 10000
 INBOX_DEFAULT = 20
 
 MESSAGE_KINDS = ("info", "question", "advice", "proposal", "decision", "review", "warning", "done")
 ROLES = ("advisor", "reviewer", "coeditor", "delegate")
-STANCES = ("support", "object", "abstain", "need-more-info")
+STANCES = ("support", "support-with-reservation", "object", "abstain", "need-more-info")
+SUPPORTING = ("support", "support-with-reservation")   # both count for consensus; reservations are listed
 CONSENSUS_RULES = ("unanimous", "majority", "no-objection")
 DEFAULT_QUORUM = 2   # consensus always involves someone besides the decider
 DOC_KINDS = ("note", "diagnosis", "plan", "proposal", "decision", "review", "adr")
@@ -37,13 +40,15 @@ ROUTINE_OUTCOMES = ("ok", "issues", "failed")   # issues/failed also post a warn
 # What this server can do - published in whoami, `coord server` (server_info) and the Agent Card.
 FEATURES = ("sessions", "messages", "claims", "fences", "roles", "discussions", "consensus", "documents",
             "document-patches", "tasks", "a2a", "push-notifications", "memory", "strategy", "routines",
-            "server-info")
+            "server-info", "wake-hints", "delegation-scopes", "reservations", "superseding")
 # What each release brought agents: announced to every project when the server starts on a newer version.
 NEWS = {
     "0.4.0": "one certificate per agent CLI; plugins for Muse, Gemini, Qwen, opencode, Kilo and Crush",
     "0.5.0": "strategy (memory kind, first in context) and routines (recurring work: coord routines)",
     "0.6.0": "the server publishes its version and features (whoami, coord server) and announces upgrades",
     "0.6.1": "Deep Code support (tools/agent_plugins.py install deepcode, with its own certificate)",
+    "0.7.0": "wake hints in poll/context (when to look again); support-with-reservation; objections need a "
+             "reason; propose --supersedes; delegate a sub-scope; coord-db export/prune/vacuum",
 }
 SERVER_NAME = "coord-server"   # sender of the server's own messages (upgrade notices)
 
@@ -76,7 +81,7 @@ CREATE INDEX IF NOT EXISTS ix_claims_active ON claims(project_id, released_at);
 CREATE TABLE IF NOT EXISTS claim_roles(
     claim_id INTEGER NOT NULL, session_id TEXT NOT NULL, role TEXT NOT NULL,
     granted_by TEXT NOT NULL, granted_at REAL NOT NULL, accepted INTEGER NOT NULL DEFAULT 1,
-    PRIMARY KEY(claim_id, session_id, role));
+    scope_type TEXT, scope TEXT, PRIMARY KEY(claim_id, session_id, role));
 CREATE TABLE IF NOT EXISTS discussions(
     id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL,
     created_by TEXT NOT NULL, created_by_name TEXT NOT NULL, topic TEXT NOT NULL,
@@ -91,7 +96,7 @@ CREATE TABLE IF NOT EXISTS discussion_participants(
 CREATE TABLE IF NOT EXISTS proposals(
     id INTEGER PRIMARY KEY AUTOINCREMENT, discussion_id INTEGER NOT NULL,
     author_session_id TEXT NOT NULL, author_name TEXT NOT NULL, body TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'open', created_at REAL NOT NULL);
+    status TEXT NOT NULL DEFAULT 'open', created_at REAL NOT NULL, supersedes_id INTEGER);
 CREATE TABLE IF NOT EXISTS reactions(
     proposal_id INTEGER NOT NULL, author_session_id TEXT NOT NULL,
     author_name TEXT NOT NULL, stance TEXT NOT NULL, comment TEXT NOT NULL DEFAULT '',
@@ -303,6 +308,9 @@ class CoordBase:
         ("discussions", "consensus_detail", "TEXT"),
         ("discussions", "deadline", "REAL"),
         ("claim_roles", "accepted", "INTEGER NOT NULL DEFAULT 1"),   # grants made before stay in effect
+        ("claim_roles", "scope_type", "TEXT"),                       # a delegate's sub-scope (NULL: the whole claim)
+        ("claim_roles", "scope", "TEXT"),
+        ("proposals", "supersedes_id", "INTEGER"),
     )
 
     @classmethod

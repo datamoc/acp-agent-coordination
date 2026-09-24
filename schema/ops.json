@@ -20,6 +20,7 @@
   ],
   "stances": [
    "support",
+   "support-with-reservation",
    "object",
    "abstain",
    "need-more-info"
@@ -542,6 +543,12 @@
      "type": "string",
      "nullable": false,
      "required": true
+    },
+    {
+     "name": "scope",
+     "type": "string",
+     "nullable": true,
+     "required": false
     }
    ]
   },
@@ -912,6 +919,12 @@
      "type": "string",
      "nullable": false,
      "required": true
+    },
+    {
+     "name": "supersedes",
+     "type": "string",
+     "nullable": true,
+     "required": false
     },
     {
      "name": "client_id",

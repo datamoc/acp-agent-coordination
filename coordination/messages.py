@@ -148,4 +148,5 @@ class MessagesMixin:
                 + self.tasks(project=project, status="offered", assigned_session=session)
                 + self.tasks(project=project, status="accepted", assigned_session=session),
                 "discussions": self.discussions(project=project),
-                "routines": self.routines(project=project, due=True)}
+                "routines": self.routines(project=project, due=True),
+                "wake": self.wake(session)}

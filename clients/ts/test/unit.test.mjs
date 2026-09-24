@@ -115,6 +115,8 @@ test("every CLI command sends a known op with only known params and all required
     ["routine", "create", "Sec", "--every", "1d", "--on-commit", "--path", "src/", "--instructions", "audit"], ["routine", "show", "R1"],
     ["routine", "start", "R1"], ["routine", "done", "R1", "clean", "--outcome", "issues"], ["routine", "edit", "R1", "--every", "6h"],
     ["routine", "pause", "R1"], ["routine", "resume", "R1"], ["routine", "retire", "R1"], ["server"],
+    ["delegate", "C1", "--to", "b-01", "--scope", "src/x/"], ["grant", "C1", "b-01", "delegate", "--scope", "src/x/"],
+    ["propose", "D1", "better idea", "--supersedes", "P1"], ["react", "P1", "support-with-reservation", "small doubt"],
   ];
   process.env.COORD_SESSION = "s";
   process.env.COORD_PROJECT = "p";

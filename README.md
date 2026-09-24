@@ -18,6 +18,7 @@ architecture, a claim conflict, a consensus discussion and a routine's lifecycle
 | Certificate management (local CA) | `coordination/pki.py` | Python + openssl | `coord-admin` |
 | Server certificate sources | `coordination/certsource.py` | Python | `coord-server --cert-source` |
 | Local mode bridge | `coordination/local.py` | Python | `coord-local` |
+| Database upkeep | `coordination/maintenance.py` | Python | `coord-db` |
 | **Client** (CLI + library) | `clients/ts/` | **TypeScript**, Node >= 20, no runtime deps | `coord` |
 | **Agent plugin** (Claude Code, Codex, Muse, Gemini, Qwen; `tools/agent_plugins.py` for opencode, Kilo, Crush) | `plugins/coord/` | JS (bundled client) | `/coord:join` ... |
 | Wire contract | `schema/ops.json`, `schema/project-vectors.json` | generated | `uv run tools/gen_schema.py` |
@@ -225,6 +226,18 @@ and recurring work done without being asked):
   result; `routine show R1` its last runs. The server keeps the schedule
   and the lease - it never runs anything: a routine waits for an agent to
   poll, like everything else here.
+
+### Waking up and database upkeep
+
+- **Wake hints**: `poll` and `context` return `wake: {next_at, in_seconds, reason}` - when this
+  session should look again: a due routine or an offer (now), a discussion deadline, a claim
+  10 min before it expires, at the latest the poll that keeps the session alive. The server
+  cannot wake a CLI agent; one that can schedule itself (a loop, a cron, a wake-up when its
+  quota returns) uses `next_at`. The skill says what to leave behind before stopping.
+- **`coord-db`** (the administrator's, not an agent op): `coord-db export [--project P]
+  [--out f.json]`, `coord-db prune --older-than 30d [--apply]` (a dry run without `--apply`;
+  keeps documents, memory, discussions, tasks, routines and unresolved questions/warnings),
+  `coord-db vacuum`. Safe while `coord-server` runs.
 
 ### Server version and features
 

@@ -54,7 +54,9 @@ const COMMANDS: Record<string, Cmd> = {
   release: { pos: [{ name: "claim", nargs: "?" }], opts: [b("--all")] },
   locks: { opts: [b("--all"), s("--project")] },
   "fence-check": { pos: [{ name: "claim" }, { name: "fence", type: "int" }] },
-  grant: { pos: [{ name: "claim" }, { name: "to" }, { name: "role", choices: K.roles }] },
+  grant: { pos: [{ name: "claim" }, { name: "to" }, { name: "role", choices: K.roles }], opts: [s("--scope")] },
+  delegate: { help: "hand part of your claim to another session (it claims and commits inside it; you keep the rest)",
+              pos: [{ name: "claim" }], opts: [s("--to", { required: true }), s("--scope")] },
   revoke: { pos: [{ name: "claim" }, { name: "to" }, { name: "role", choices: K.roles }] },
   roles: { pos: [{ name: "claim" }] },
   role: { help: "answer a coeditor/delegate role offered on someone's claim", sub: {
@@ -70,7 +72,7 @@ const COMMANDS: Record<string, Cmd> = {
              pos: [{ name: "topic" }], opts: [s("--claim"), s("--with", { dest: "with_" }),
                                                s("--rule", { default: "unanimous", choices: K.consensus_rules }), i("--quorum"),
                                                s("--deadline")] },
-  propose: { pos: [{ name: "discussion" }, { name: "body" }] },
+  propose: { pos: [{ name: "discussion" }, { name: "body" }], opts: [s("--supersedes")] },
   react: { pos: [{ name: "proposal" }, { name: "stance", choices: K.stances }, { name: "comment", nargs: "?", default: "" }] },
   discussion: { pos: [{ name: "discussion" }] },
   discussions: { opts: [s("--project")] },
@@ -273,7 +275,11 @@ export async function run(path: string[], a: NS, c: CoordClient): Promise<[strin
     case "release": return [cmd, await call("release", { session: S(), claim: a.claim, all: a.all }), 0];
     case "locks": return [cmd, await call("locks", { project: a.project || detectProject(), all: a.all }), 0];
     case "fence-check": return [cmd, await call("fence_check", { claim: a.claim, fence: a.fence }), 0];
-    case "grant": case "revoke": return [cmd, await call(cmd, { session: S(), claim: a.claim, to: a.to, role: a.role }), 0];
+    case "grant": return [cmd, await call("grant", { session: S(), claim: a.claim, to: a.to, role: a.role,
+                                                    ...(a.scope ? { scope: rel(a.scope) } : {}) }), 0];
+    case "delegate": return ["grant", await call("grant", { session: S(), claim: a.claim, to: a.to, role: "delegate",
+                                                            ...(a.scope ? { scope: rel(a.scope) } : {}) }), 0];
+    case "revoke": return [cmd, await call(cmd, { session: S(), claim: a.claim, to: a.to, role: a.role }), 0];
     case "roles": return [cmd, await call("roles", { claim: a.claim }), 0];
     case "role": return [cmd, path[1] === "accept" ? await call("role_accept", { session: S(), claim: a.claim, role: a.role })
                                                    : await call("role_decline", { session: S(), claim: a.claim, role: a.role, reason: a.reason }), 0];
@@ -300,7 +306,8 @@ export async function run(path: string[], a: NS, c: CoordClient): Promise<[strin
                                                          deadline: a.deadline,
                                                          participants: a.with_ ? String(a.with_).split(",").map((x) => x.trim()).filter(Boolean) : null,
                                                          client_id: uuid() }), 0];
-    case "propose": return [cmd, await call("propose", { session: S(), discussion: a.discussion, body: a.body, client_id: uuid() }), 0];
+    case "propose": return [cmd, await call("propose", { session: S(), discussion: a.discussion, body: a.body,
+                                                         supersedes: a.supersedes, client_id: uuid() }), 0];
     case "react": return [cmd, await call("react", { session: S(), proposal: a.proposal, stance: a.stance, comment: a.comment }), 0];
     case "discussion": return [cmd, await call("discussion", { discussion: a.discussion }), 0];
     case "discussions": return [cmd, await call("discussions", { project: a.project || detectProject() }), 0];

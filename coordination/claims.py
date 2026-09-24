@@ -21,6 +21,15 @@ class ClaimsMixin:
             "SELECT * FROM claims WHERE project_id=? AND released_at IS NULL AND expires_at>?" + self._LIVE_OWNER,
             (project, now, now - SESSION_TTL)).fetchall()
 
+    def _delegated(self, db, c, session_id: str, stype: str, path: str) -> bool:
+        """An accepted delegate role on claim `c` covers (stype, path): the whole claim, or its sub-scope."""
+        r = db.execute("SELECT scope_type, scope FROM claim_roles WHERE claim_id=? AND session_id=? AND"
+                       " role='delegate' AND accepted=1", (c["claim_id"], session_id)).fetchone()
+        if r is None:
+            return False
+        outer = (r["scope_type"], r["scope"]) if r["scope"] is not None else (c["scope_type"], c["scope"])
+        return scopes.contains(outer[0], outer[1], stype, path)
+
     def _roles(self, db, claim_id: int, session_id: str) -> set[str]:
         return {r[0] for r in db.execute(              # only roles the grantee accepted count
             "SELECT role FROM claim_roles WHERE claim_id=? AND session_id=? AND accepted=1",
@@ -52,8 +61,7 @@ class ClaimsMixin:
                         raise CoordError("already_held", f"you already hold C{c['claim_id']}; "
                                          f"use `coord renew C{c['claim_id']}`", self._claim_dict(c))
                     continue
-                if "delegate" in self._roles(db, c["claim_id"], session) and \
-                        scopes.contains(c["scope_type"], c["scope"], stype, path):
+                if self._delegated(db, c, session, stype, path):
                     continue
                 raise CoordError("conflict", f"{scopes.display(stype, path)} overlaps C{c['claim_id']} "
                                  f"({scopes.display(c['scope_type'], c['scope'])}) held by "
@@ -139,29 +147,43 @@ class ClaimsMixin:
             raise CoordError("stale_fence", f"fence {fence} is stale for C{cid} (current {row['fence']})")
         return {"ok": True, "claim": f"C{cid}", "fence": row["fence"]}
 
-    def grant(self, session: str, claim: str, to: str, role: str) -> dict:
+    def grant(self, session: str, claim: str, to: str, role: str, scope: str | None = None) -> dict:
+        """Give someone a role on your claim. `scope` (delegate only) narrows the delegation to a part
+        of the claim: the delegate may then claim and commit inside it, with its own lease and fence."""
         if role not in ROLES:
             raise CoordError("bad_role", f"role must be one of {', '.join(ROLES)}")
+        if scope is not None and role != "delegate":
+            raise CoordError("bad_args", "--scope only narrows a delegate role")
         with self._tx() as db:
             me = self._session(db, session)
             row = self._owned(db, session, claim)
             target = self._resolve_name(db, to, me["project_id"])
+            sub = self._norm(scope, None) if scope is not None else (None, None)
+            if scope is not None and not scopes.contains(row["scope_type"], row["scope"], *sub):
+                raise CoordError("bad_scope", f"{scopes.display(*sub)} is not inside C{row['claim_id']} "
+                                 f"({scopes.display(row['scope_type'], row['scope'])})")
             consent = role in ROLES_BY_CONSENT        # write duties: an offer the grantee accepts or declines
             cid = row["claim_id"]
             existing = db.execute("SELECT accepted FROM claim_roles WHERE claim_id=? AND session_id=? AND role=?",
                                   (cid, target["session_id"], role)).fetchone()
+            where = scopes.display(*sub) if scope is not None else row["scope"]
             if existing is None:
-                db.execute("INSERT INTO claim_roles VALUES(?,?,?,?,?,?)",
-                           (cid, target["session_id"], role, session, self.clock(), 0 if consent else 1))
+                db.execute("INSERT INTO claim_roles(claim_id, session_id, role, granted_by, granted_at, accepted,"
+                           " scope_type, scope) VALUES(?,?,?,?,?,?,?,?)",
+                           (cid, target["session_id"], role, session, self.clock(), 0 if consent else 1, *sub))
                 if consent:
                     self._notify(db, me, target["session_id"],
-                                 f"[C{cid} {row['scope']}] {me['display_name']} offers you the {role} role - "
+                                 f"[C{cid} {where}] {me['display_name']} offers you the {role} role - "
                                  f"coord role accept C{cid} {role} / coord role decline C{cid} {role} \"why\"",
                                  kind="question", claim_id=cid)
+            elif scope is not None:   # re-delegating to the same session: the new sub-scope replaces the old
+                db.execute("UPDATE claim_roles SET scope_type=?, scope=? WHERE claim_id=? AND session_id=? AND role=?",
+                           (*sub, cid, target["session_id"], role))
             status = "granted" if existing is not None and existing["accepted"] or not consent else "offered"
             self._event(db, me["project_id"], "claim.role_granted" if status == "granted" else "claim.role_offered",
                         session, "claim", cid, to=target["display_name"], role=role)
-            return {"claim": f"C{cid}", "to": target["display_name"], "role": role, "status": status}
+            return {"claim": f"C{cid}", "to": target["display_name"], "role": role, "status": status,
+                    **({"scope": where} if scope is not None else {})}
 
     def _role_answer(self, session: str, claim: str, role: str, accept: bool, reason: str = "") -> dict:
         with self._tx() as db:
@@ -204,9 +226,10 @@ class ClaimsMixin:
     def roles(self, claim: str) -> list[dict]:
         cid = parse_id("claim", claim)
         with self._read() as db:
-            rows = db.execute("SELECT r.role, r.accepted, s.display_name FROM claim_roles r JOIN sessions s"
-                              " ON s.session_id=r.session_id WHERE claim_id=?", (cid,)).fetchall()
-        return [{"session": r["display_name"], "role": r["role"], "status": "granted" if r["accepted"] else "offered"}
+            rows = db.execute("SELECT r.role, r.accepted, r.scope_type, r.scope, s.display_name FROM claim_roles r"
+                              " JOIN sessions s ON s.session_id=r.session_id WHERE claim_id=?", (cid,)).fetchall()
+        return [{"session": r["display_name"], "role": r["role"], "status": "granted" if r["accepted"] else "offered",
+                 **({"scope": scopes.display(r["scope_type"], r["scope"])} if r["scope"] is not None else {})}
                 for r in rows]
 
     def ask(self, session: str, claim: str, to: str, body: str, role: str = "advisor",
@@ -240,7 +263,7 @@ class ClaimsMixin:
                         continue
                     if not scopes.overlaps("exact", path, c["scope_type"], c["scope"]):
                         continue
-                    if "delegate" in self._roles(db, c["claim_id"], session):
+                    if self._delegated(db, c, session, "exact", path):
                         continue
                     conflicts.append({"file": path, "claim": f"C{c['claim_id']}", "owner": c["owner_name"],
                                       "scope": scopes.display(c["scope_type"], c["scope"])})

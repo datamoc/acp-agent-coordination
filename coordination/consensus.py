@@ -2,7 +2,7 @@
 
 import json
 
-from .core import CONSENSUS_RULES, DEFAULT_QUORUM, STANCES, CoordError, iso, parse_id, parse_when
+from .core import CONSENSUS_RULES, DEFAULT_QUORUM, STANCES, SUPPORTING, CoordError, iso, parse_id, parse_when
 
 
 class ConsensusMixin:
@@ -89,6 +89,7 @@ class ConsensusMixin:
             else:
                 out.append({"name": name, "stance": None, "implied": False})
         count = lambda st: sum(1 for x in out if x["stance"] == st)
+        supporting = sum(1 for x in out if x["stance"] in SUPPORTING)
         who = lambda *st: ", ".join(x["name"] for x in out if x["stance"] in st)
         why, n = [], len(out)
         responded = sum(1 for x in out if x["stance"] is not None)
@@ -99,18 +100,23 @@ class ConsensusMixin:
                 why.append(f"not unanimous: {who('object', 'need-more-info')} did not agree")
             if count(None):
                 why.append(f"not unanimous: no stance from {who(None)}")
-            if not count("support"):
+            if not supporting:
                 why.append("nobody supports it")
         elif rule == "majority":
-            if count("support") * 2 <= n:
-                why.append(f"no majority: {count('support')} of {n} participants support it")
+            if supporting * 2 <= n:
+                why.append(f"no majority: {supporting} of {n} participants support it")
         else:   # no-objection: silence is consent
             if count("object") or count("need-more-info"):
                 why.append(f"objection from {who('object', 'need-more-info')}")
+        reservations = [{"name": x["name"], "comment": reacted[sid]["comment"]}
+                        for (sid, _), x in zip(people, out) if x["stance"] == "support-with-reservation"]
         return {"rule": rule, "quorum": quorum, "met": not why, "why": why, "participants": out,
-                "open": not fixed, "deadline": iso(d["deadline"])}
+                "reservations": reservations, "open": not fixed, "deadline": iso(d["deadline"])}
 
-    def propose(self, session: str, discussion: str, body: str, client_id: str | None = None) -> dict:
+    def propose(self, session: str, discussion: str, body: str, supersedes: str | None = None,
+                client_id: str | None = None) -> dict:
+        """A proposal; `supersedes` replaces one of yours (or, as the opener, anyone's) in the same
+        discussion - the old one can no longer be reacted to or decided, its stances do not carry over."""
         def fn(db):
             me = self._session(db, session)
             did = parse_id("discussion", discussion)
@@ -119,21 +125,39 @@ class ConsensusMixin:
                 raise CoordError("missing", f"no discussion D{did}")
             if d["status"] != "open":
                 raise CoordError("closed", f"D{did} is {d['status']}")
+            old = None
+            if supersedes:
+                oid = parse_id("proposal", supersedes)
+                old = db.execute("SELECT * FROM proposals WHERE id=? AND discussion_id=?", (oid, did)).fetchone()
+                if old is None:
+                    raise CoordError("missing", f"P{oid} is not part of D{did}")
+                if old["status"] != "open":
+                    raise CoordError("superseded", f"P{oid} is already {old['status']}")
+                if old["author_session_id"] != session and d["created_by"] != session:
+                    raise CoordError("forbidden", f"only {old['author_name']} (its author) or "
+                                     f"{d['created_by_name']} (who opened D{did}) can supersede P{oid}")
             pid = db.execute("INSERT INTO proposals(discussion_id, author_session_id, author_name,"
-                             " body, created_at) VALUES(?,?,?,?,?)",
-                             (did, session, me["display_name"], body, self.clock())).lastrowid
+                             " body, created_at, supersedes_id) VALUES(?,?,?,?,?,?)",
+                             (did, session, me["display_name"], body, self.clock(),
+                              old["id"] if old else None)).lastrowid
+            if old is not None:
+                db.execute("UPDATE proposals SET status='superseded' WHERE id=?", (old["id"],))
             m = db.execute("INSERT INTO messages(project_id, from_session_id, from_name, kind, body,"
                            " thread_id, reply_to, created_at) VALUES(?,?,?,?,?,?,?,?)",
                            (d["project_id"], session, me["display_name"], "proposal",
-                            f"[P{pid} on D{did}] {body}", d["message_id"], d["message_id"],
+                            f"[P{pid} on D{did}" + (f", supersedes P{old['id']}" if old else "") + f"] {body}",
+                            d["message_id"], d["message_id"],
                             self.clock())).lastrowid
             self._event(db, d["project_id"], "proposal.created", session, "proposal", pid)
-            return {"proposal": f"P{pid}", "id": pid, "message": m}
+            return {"proposal": f"P{pid}", "id": pid, "message": m,
+                    **({"supersedes": f"P{old['id']}"} if old else {})}
         return self._mutate("propose", client_id, fn)
 
     def react(self, session: str, proposal: str, stance: str, comment: str = "") -> dict:
         if stance not in STANCES:
             raise CoordError("bad_stance", f"stance must be one of {', '.join(STANCES)}")
+        if stance == "object" and not comment.strip():
+            raise CoordError("comment_required", "an objection needs its reason: react P.. object \"why\"")
         with self._tx() as db:
             me = self._session(db, session)
             pid = parse_id("proposal", proposal)
@@ -143,6 +167,8 @@ class ConsensusMixin:
                 raise CoordError("missing", f"no proposal P{pid}")
             if p["dstatus"] != "open":
                 raise CoordError("closed", "discussion is closed")
+            if p["status"] == "superseded":
+                raise CoordError("superseded", f"P{pid} was superseded - react to its replacement")
             db.execute("INSERT INTO reactions VALUES(?,?,?,?,?,?) ON CONFLICT(proposal_id,"
                        " author_session_id) DO UPDATE SET stance=excluded.stance,"
                        " comment=excluded.comment, created_at=excluded.created_at",
@@ -165,6 +191,7 @@ class ConsensusMixin:
                     tally[r["stance"]] += 1
                 props.append({"proposal": f"P{p['id']}", "author": p["author_name"], "body": p["body"],
                               "status": p["status"], "tally": tally,
+                              "supersedes": f"P{p['supersedes_id']}" if p["supersedes_id"] else None,
                               "reactions": [{"by": r["author_name"], "stance": r["stance"],
                                              "comment": r["comment"]} for r in rs],
                               "consensus": self._consensus(db, d, p["id"], deciding=True)})
@@ -206,9 +233,12 @@ class ConsensusMixin:
             if d["status"] != "open":
                 raise CoordError("closed", f"D{did} is already {d['status']}")
             pid = parse_id("proposal", proposal) if proposal else None
-            if pid is not None and db.execute("SELECT 1 FROM proposals WHERE id=? AND discussion_id=?",
-                                              (pid, did)).fetchone() is None:
-                raise CoordError("missing", f"P{pid} is not part of D{did}")
+            if pid is not None:
+                row = db.execute("SELECT status FROM proposals WHERE id=? AND discussion_id=?", (pid, did)).fetchone()
+                if row is None:
+                    raise CoordError("missing", f"P{pid} is not part of D{did}")
+                if row["status"] == "superseded":
+                    raise CoordError("superseded", f"P{pid} was superseded - decide on its replacement")
             detail = self._consensus(db, d, pid, deciding=d["created_by"] == session)
             opener = d["created_by"] == session
             participant = any(x["name"] == me["display_name"] for x in detail["participants"])
@@ -225,7 +255,7 @@ class ConsensusMixin:
                                  "stances, or decide explicitly with --no-consensus \"reason\"", detail)
             if pid is not None:
                 db.execute("UPDATE proposals SET status=CASE WHEN id=? THEN 'accepted' ELSE 'rejected' END"
-                           " WHERE discussion_id=?", (pid, did))
+                           " WHERE discussion_id=? AND status!='superseded'", (pid, did))
             now = self.clock()
             reached = detail["met"] and bool(consensus)
             if detail["met"] and not consensus:

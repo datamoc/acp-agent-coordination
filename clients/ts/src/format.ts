@@ -11,6 +11,13 @@ export function fmtMsg(m: any): string {
 
 const every = (s: number) => (s % 86400 === 0 ? `${s / 86400}d` : s % 3600 === 0 ? `${s / 3600}h` : `${Math.round(s / 60)}m`);
 
+/** When to look again: "wake: now - R2 due: ..." or "wake: in 12 min (10:42Z) - renew or release C12". */
+export function fmtWake(w: any): string {
+  const s = w.in_seconds;
+  const when = s <= 0 ? "now" : s < 90 ? `in ${s} s` : s < 5400 ? `in ${Math.round(s / 60)} min` : `in ${(s / 3600).toFixed(1)} h`;
+  return `wake: ${when}${s > 0 ? ` (${w.next_at})` : ""} - ${w.reason}`;
+}
+
 export function fmtRoutine(x: any): string {
   const when = [x.every ? `every ${every(x.every)}` : "",
                 x.on_commit ? `on commit${x.paths.length ? ` (${x.paths.join(", ")})` : ""}` : ""].filter(Boolean).join(" + ");
@@ -50,6 +57,7 @@ export function human(cmd: string, r: any): string {
     out.push("tasks: " + (r.tasks.map((t: any) => `${t.task} ${t.title}`).join(", ") || "-"));
     out.push("discussions: " + (r.discussions.map((d: any) => `${d.discussion} ${d.topic}`).join(", ") || "-"));
     if (r.routines?.length) out.push("routines due: " + r.routines.map((x: any) => `${x.routine} ${x.title} (${x.why})`).join(", "));
+    if (r.wake) out.push(fmtWake(r.wake));
     return out.join("\n");
   }
   if (cmd === "doc-show") return `${r.document} r${r.revision}/${r.latest_revision} [${r.kind}/${r.status}] ${r.title}\n\n${r.content}`;
@@ -62,7 +70,8 @@ export function human(cmd: string, r: any): string {
                    `  rule: ${r.rule ?? "unanimous"}, quorum ${r.quorum ?? 2}, participants: ${who}`];
     for (const p of r.proposals) {
       const t = Object.entries(p.tally).filter(([, v]) => v).map(([k, v]) => `${k}=${v}`).join(" ");
-      lines.push(`  ${p.proposal} [${p.status}] ${p.author}: ${p.body}  ${t}`);
+      lines.push(`  ${p.proposal} [${p.status}] ${p.author}${p.supersedes ? ` (replaces ${p.supersedes})` : ""}: ${p.body}  ${t}`);
+      for (const x of p.consensus?.reservations ?? []) lines.push(`    reservation from ${x.name}: ${x.comment || "-"}`);
       if (p.consensus && r.status === "open") lines.push(`    ${consensusLine(p.consensus)}`);
     }
     if (r.decision) {
@@ -103,6 +112,7 @@ export function human(cmd: string, r: any): string {
     lines.push(...(r.strategy ?? []).map((m: any) => `strategy: ${m.title}: ${m.content}`));
     lines.push(...r.overview.map((m: any) => `overview: ${m.title}: ${m.content}`));
     lines.push(...(r.routines ?? []).map((x: any) => `routine due: ${x.routine} ${x.title} (${x.why}) - coord routine start ${x.routine}`));
+    if (r.wake) lines.push(fmtWake(r.wake));
     lines.push(...r.memory.map((m: any) => `memory: ${m.memory} [${m.kind}] ${m.title}`));
     lines.push(...r.my_claims.map((c: any) => `claim: ${c.claim} ${c.scope}`));
     lines.push(...[...r.my_tasks, ...r.open_tasks].map((t: any) => `task: ${t.task} [${t.status}] ${t.title}`));

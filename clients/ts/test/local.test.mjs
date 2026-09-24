@@ -114,3 +114,27 @@ test("coord server: version, features and this client's version", () => {
   const who = coord(["--json", "whoami", "cli"], { env, cwd: dir }).json;
   assert.equal(who.server.version, r.version);
 });
+
+test("delegation of a sub-scope, a reservation and the wake hint through the CLI", () => {
+  const dir = tmp();
+  const env = localEnv(join(dir, "d.db"));
+  const run = (args, session, ok = true) => {
+    const r = coord(["--json", ...args], { env: session ? { ...env, COORD_SESSION: session } : env, cwd: dir });
+    if (ok) assert.equal(r.code, 0, r.out + r.err);
+    return r.json;
+  };
+  const a = run(["whoami", "own"]).session_id, b = run(["whoami", "del"]).session_id;
+  const c = run(["claim", "src/parser/"], a).claim;
+  assert.equal(run(["delegate", c, "--to", "del-01", "--scope", "src/parser/tests/"], a).scope, "src/parser/tests/");
+  run(["role", "accept", c, "delegate"], b);
+  assert.equal(run(["claim", "src/parser/tests/"], b).scope, "src/parser/tests/");
+  assert.equal(run(["claim", "src/parser/core.py"], b, false).error, "conflict");
+  const d = run(["discuss", "size", "--with", "del-01"], a).discussion;
+  const p = run(["propose", d, "10k"], a).proposal;
+  assert.equal(run(["react", p, "object"], b, false).error, "comment_required");
+  run(["react", p, "support-with-reservation", "may be small"], b);
+  const human = coord(["discussion", d], { env, cwd: dir }).out;
+  assert.match(human, /reservation from del-01: may be small/);
+  const poll = coord(["poll"], { env: { ...env, COORD_SESSION: a }, cwd: dir }).out;
+  assert.match(poll, /^wake: in \d+ min \(.+\) - /m);
+});

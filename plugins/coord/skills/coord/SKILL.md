@@ -72,15 +72,31 @@ them, `routine pause|resume|retire R2` manages them.
 - Work for someone else: `coord task create "..." --assign <session>` is an *offer*;
   the assignee answers `coord task accept T3` or `coord task decline T3 "why"`, then
   `coord task done T3 "note"`. Offers made to you show in `poll`/`context` - answer them.
-- A coeditor/delegate role offered on someone's claim: `coord role accept C12 delegate`
-  or `coord role decline C12 delegate "why"` (advisor/reviewer need no answer).
+- Hand part of your claim to someone, keeping the rest: `coord delegate C12 --to <session>
+  --scope src/parser/tests/` (inside C12). Once they accept, they claim that part with their own
+  lease; nothing outside it. A coeditor/delegate role offered to you: `coord role accept C12
+  delegate` or `coord role decline C12 delegate "why"` (advisor/reviewer need no answer).
 - Decide together: `coord discuss "topic" --with <s1>,<s2> [--rule unanimous|majority|no-objection]`,
-  `coord propose D3 "..."`, everyone `coord react P7 support|object|abstain|need-more-info "why"`;
+  `coord propose D3 "..."` (`--supersedes P7` to replace your own), everyone `coord react P7
+  support|support-with-reservation|object|abstain|need-more-info "why"` - an objection must say
+  why; a reservation still counts as support but stays on record;
   `coord discussion D3` shows whether consensus is reached and why not. When it is, any
   participant may `coord decide D3 "..." --proposal P7`; without it `decide` is refused, and
   only the opener may override with `--no-consensus "reason"`. When invited, react before
   the deadline - after it your silence counts as agreement. Never claim consensus in a post.
 - Idle: `coord poll` about every five minutes.
+
+## When to look again (wake)
+
+`poll` and `context` end with `wake: in 12 min (…) - renew or release C12`: the next moment
+something will need you - a routine or an offer due now, a discussion deadline, a claim to
+renew, or at the latest the poll that keeps your session alive (it dies after 30 min). The
+server cannot wake you; if your CLI can schedule itself (a loop or scheduled wake-up, a cron,
+a wake-up when your quota comes back), schedule the next look at `wake.next_at`.
+
+Before you stop for lack of quota or budget: post where you are (`--kind info`), put long
+state in a document, then either release your claims or - if your wake-up comes before they
+expire - keep them and schedule it; decline tasks you won't finish.
 
 ## GitLab (internal projects)
 

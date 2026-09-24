@@ -1,8 +1,9 @@
 """Agent profiles and routing hints; overview views (context, status, events)."""
 
 import json
+from datetime import datetime
 
-from .core import iso
+from .core import CLAIM_RENEW_MARGIN, SESSION_TTL, WAKE_KEEPALIVE, iso
 
 
 class RoutingMixin:
@@ -46,6 +47,39 @@ class RoutingMixin:
         return out
 
     # --- overview -------------------------------------------------------
+    def wake(self, session: str) -> dict:
+        """When this session should look again - the server cannot wake anyone, but it knows when there
+        will be something to do. Agents that can schedule themselves (a loop, a cron, a wake-up at quota
+        reset) use `next_at`; the keep-alive default stays under the session TTL."""
+        now = self.clock()
+        with self._read() as db:
+            me = self._session(db, session)
+            project = me["project_id"]
+            hints = [(me["heartbeat_at"] + WAKE_KEEPALIVE, "keep the session alive (poll)")]
+            offered = db.execute("SELECT task_id, title FROM tasks WHERE assigned_to=? AND status='offered'",
+                                 (session,)).fetchall()
+            hints += [(now, f"T{t['task_id']} offered to you: accept or decline") for t in offered]
+            for c in db.execute("SELECT claim_id, scope, expires_at FROM claims WHERE owner_session_id=? AND"
+                                " released_at IS NULL AND expires_at>?", (session, now)).fetchall():
+                hints.append((c["expires_at"] - CLAIM_RENEW_MARGIN, f"renew or release C{c['claim_id']}"))
+            for d in db.execute("SELECT d.id, d.topic, d.deadline FROM discussions d WHERE d.status='open' AND"
+                                " d.deadline IS NOT NULL AND d.deadline>? AND d.project_id=? AND (d.created_by=? OR"
+                                " EXISTS(SELECT 1 FROM discussion_participants p WHERE p.discussion_id=d.id AND"
+                                " p.session_id=?))", (now, project, session, session)).fetchall():
+                hints.append((d["deadline"], f"D{d['id']} deadline: {d['topic']}"))
+        for r in self.routines(project=project):
+            if r["status"] != "active" or r["running"]:
+                continue
+            if r["due"]:
+                hints.append((now, f"{r['routine']} due: {r['title']}"))
+            elif r["next_due"]:
+                hints.append((datetime.fromisoformat(r["next_due"]).timestamp(), f"{r['routine']} due: {r['title']}"))
+        hints.sort(key=lambda h: h[0])
+        at, reason = hints[0]
+        at = max(at, now)
+        return {"next_at": iso(at), "in_seconds": int(at - now), "reason": reason,
+                "upcoming": [{"at": iso(max(t, now)), "reason": why} for t, why in hints[1:5]]}
+
     def context(self, session: str) -> dict:
         with self._read() as db:
             me = self._session(db, session)
@@ -60,6 +94,7 @@ class RoutingMixin:
                 "memory": [{"memory": m["memory"], "kind": m["kind"], "title": m["title"]}
                            for m in mem if m["kind"] not in ("strategy", "overview")][:10],
                 "routines": self.routines(project=project, due=True),
+                "wake": self.wake(session),
                 "open_tasks": self.tasks(project=project, status="open")[:10],
                 "my_tasks": self.tasks(project=project, status="offered", assigned_session=session)
                 + self.tasks(project=project, status="accepted", assigned_session=session),

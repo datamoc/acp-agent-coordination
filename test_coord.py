@@ -278,7 +278,8 @@ def consensus():
     c.react(b, p2["proposal"], "need-more-info")                         # upsert
     show = c.discussion(d["discussion"])
     assert show["proposals"][0]["tally"]["support"] == 2
-    assert show["proposals"][1]["tally"] == {"support": 0, "object": 0, "abstain": 0, "need-more-info": 1}
+    assert show["proposals"][1]["tally"] == {"support": 0, "support-with-reservation": 0, "object": 0, "abstain": 0,
+                                              "need-more-info": 1}
     raises("forbidden", c.decide, b, d["discussion"], "x")
     r = c.decide(a, d["discussion"], "Use BEGIN IMMEDIATE", proposal=p1["proposal"])
     show = c.discussion(d["discussion"])
@@ -286,7 +287,7 @@ def consensus():
     assert show["decision_document"] == r["document"]
     assert "BEGIN IMMEDIATE" in c.doc_show(r["document"])["content"]
     assert [m["kind"] for m in c.thread(show["thread"])] == ["question", "proposal", "proposal", "decision"]
-    raises("closed", c.react, a, p1["proposal"], "object")
+    raises("closed", c.react, a, p1["proposal"], "object", "too late")
 
 
 @check
@@ -331,7 +332,7 @@ def consensus_participants_rules_and_quorum():
         p = c.propose(a, d, "idea")["proposal"]
         for sid, st in zip((b, x, y), stances):
             if st:
-                c.react(sid, p, st)
+                c.react(sid, p, st, "why not" if st == "object" else "")
         ev = c.discussion(d)["proposals"][0]["consensus"]
         r = c.decide(a, d, "decided", proposal=p) if ev["met"] else \
             c.decide(a, d, "decided", proposal=p, consensus=False, reason="override")
@@ -353,7 +354,7 @@ def consensus_participants_rules_and_quorum():
     # only participants count: an outsider's objection is shown, not counted
     d = c.discuss(a, "pair", participants=["b-01"])["discussion"]
     p = c.propose(b, d, "b's idea")["proposal"]                          # author b: implied support
-    c.react(x, p, "object")
+    c.react(x, p, "object", "too slow")
     show = c.discussion(d)
     assert show["participants"] == ["a-01", "b-01"] and show["rule"] == "unanimous" and show["quorum"] == 2
     ev = show["proposals"][0]["consensus"]
@@ -584,6 +585,86 @@ def strategy_leads_every_context():
     ctx = c.context(b)
     assert [m["content"] for m in ctx["strategy"]] == ["Match v3.3.8 first; document every divergence."]
     assert [m["title"] for m in ctx["memory"]] == ["Commits"]                 # strategy is not repeated there
+
+
+@check
+def objections_reservations_and_superseding():
+    c, _ = fresh()
+    a = c.whoami("a")["session_id"]; b = c.whoami("b")["session_id"]; x = c.whoami("x")["session_id"]
+    d = c.discuss(a, "cache", participants=["b-01", "x-01"], rule="unanimous")["discussion"]
+    p1 = c.propose(b, d, "LRU cache")["proposal"]
+    raises("comment_required", c.react, x, p1, "object")                  # an objection needs its reason
+    c.react(x, p1, "object", "unbounded memory")
+    raises("forbidden", c.propose, x, d, "mine", supersedes=p1)           # not its author, not the opener
+    p2 = c.propose(b, d, "LRU cache, 10k entries", supersedes=p1)
+    assert p2["supersedes"] == p1
+    raises("superseded", c.react, a, p1, "support")
+    raises("superseded", c.decide, a, d, "x", proposal=p1)
+    c.react(x, p2["proposal"], "support-with-reservation", "10k may be small")   # counts as support
+    c.react(a, p2["proposal"], "support")
+    detail = c.discussion(d)["proposals"][1]["consensus"]
+    assert detail["met"] and detail["reservations"] == [{"name": "x-01", "comment": "10k may be small"}]
+    props = c.discussion(d)["proposals"]
+    assert [q["status"] for q in props] == ["superseded", "open"] and props[1]["supersedes"] == p1
+    c.decide(a, d, "LRU, 10k", proposal=p2["proposal"])
+    assert [q["status"] for q in c.discussion(d)["proposals"]] == ["superseded", "accepted"]
+
+
+@check
+def delegate_a_sub_scope_of_a_claim():
+    c, _ = fresh()
+    a = c.whoami("claude")["session_id"]; b = c.whoami("codex")["session_id"]
+    cl = c.claim(a, "src/parser/")["claim"]
+    raises("bad_scope", c.grant, a, cl, "codex-01", "delegate", scope="src/lexer/")   # outside the claim
+    raises("bad_args", c.grant, a, cl, "codex-01", "advisor", scope="src/parser/x/")
+    assert c.grant(a, cl, "codex-01", "delegate", scope="src/parser/tests/")["status"] == "offered"
+    raises("conflict", c.claim, b, "src/parser/tests/")                     # not accepted yet
+    c.role_accept(b, cl, "delegate")
+    sub = c.claim(b, "src/parser/tests/")                                  # its own lease and fence
+    assert sub["fence"] > c.locks(owner_session=a)[0]["fence"]
+    raises("conflict", c.claim, b, "src/parser/core.py")                    # outside the delegated part
+    assert c.check(b, ["src/parser/tests/t1.py"])["ok"]
+    assert not c.check(b, ["src/parser/core.py"])["ok"]
+    assert c.roles(cl) == [{"session": "codex-01", "role": "delegate", "status": "granted", "scope": "src/parser/tests/"}]
+    c.release(a, cl)                                                         # the parent goes, the delegated claim stays
+    assert [x["claim"] for x in c.locks()] == [sub["claim"]]
+
+
+@check
+def wake_hints_say_when_to_look_again():
+    c, clock = fresh()
+    a = c.whoami("claude")["session_id"]; b = c.whoami("codex")["session_id"]
+    w = c.poll(a)["wake"]
+    assert w["reason"].startswith("keep the session alive") and 0 < w["in_seconds"] < 1800
+    c.claim(a, "src/", ttl=1200)                                           # expires in 20 min
+    assert c.poll(a)["wake"]["reason"] == "renew or release C1" and c.poll(a)["wake"]["in_seconds"] == 600
+    c.discuss(b, "naming", participants=["claude-01"], deadline="5m")
+    assert c.poll(a)["wake"]["reason"].startswith("D1 deadline")
+    c.task_create(b, "review", assign="claude-01")
+    assert c.context(a)["wake"]["in_seconds"] == 0 and "offered to you" in c.context(a)["wake"]["reason"]
+
+
+@check
+def coord_db_prunes_only_what_nobody_reads():
+    from coordination import maintenance
+    c, clock = fresh()
+    a = c.whoami("claude")["session_id"]
+    c.post(a, "old info"); q = c.post(a, "old open question", kind="question")
+    cl = c.claim(a, "src/")["claim"]; c.release(a, cl)
+    c.doc_create(a, "Plan", content="kept")
+    real = time.time()
+    with c._tx() as db:                                                     # age everything by 40 days
+        for t, col in (("messages", "created_at"), ("claims", "released_at"), ("events", "created_at")):
+            db.execute(f"UPDATE {t} SET {col}=?", (real - 40 * 86400,))
+    dry = maintenance.prune(str(c.path), "30d")
+    assert not dry["applied"] and dry["would_remove"]["messages"] == 1 and dry["would_remove"]["released claims"] == 1
+    assert len(c.inbox(limit=None)) == 2                                      # a dry run changes nothing
+    maintenance.prune(str(c.path), "30d", apply=True)
+    assert [m["body"] for m in c.inbox(limit=None)] == ["old open question"]  # unresolved questions stay
+    assert c.docs()[0]["title"] == "Plan" and c.locks(all=True) == []
+    ex = maintenance.export(str(c.path), project="default")
+    assert "documents" in ex["tables"] and "idempotency" not in ex["tables"]   # project rows only
+    assert maintenance.vacuum(str(c.path))["bytes_after"] > 0
 
 
 @check
