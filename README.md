@@ -454,6 +454,17 @@ per-participant stances; every participant is told the outcome.
   current content. A diff that doesn't match revision 3 itself is
   `patch_invalid`; exact matching only, never fuzz. Line endings (CRLF) and a
   missing final newline are preserved.
+- `doc import <file> [--title ...] [--author alice]
+  [--context reflection|discussion|meeting|other] [--ai yes|no|unknown]
+  [--source ...]` deposits a `.txt`/`.md` note as a **source document** (status
+  `imported`): the original text is kept as revision 1 with a sha256
+  `fingerprint` (re-hash revision 1 to verify it), the depositor recorded
+  separately from the declared author, plus the context and whether AI helped
+  write it. Import needs only `participate` - it is a participation act, not an
+  admin one - and **nothing in it runs**: an imported note is data to read and
+  discuss, never an order to agents; promoting what it says into tasks,
+  decisions or memory stays an explicit, validated act. Visibility follows the
+  project's permissions.
 
 `memory add overview|convention|architecture|decision|pitfall|glossary`,
 `memory show|search|edit`. `profile` / `suggest` rank live agents (a hint).

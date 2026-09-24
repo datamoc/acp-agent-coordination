@@ -8,7 +8,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CoordClient, tokenSource, transportFromEnv } from "./client.js";
 import { ConfigError, loadConfig } from "./config.js";
@@ -82,6 +82,10 @@ const COMMANDS = {
         pos: [{ name: "discussion" }, { name: "decision" }], opts: [s("--proposal"), s("--no-consensus"), s("--reason", { default: "" })] },
     doc: { help: "collaborative documents", sub: {
             create: { pos: [{ name: "title" }], opts: [s("--kind", { default: "note", choices: K.doc_kinds }), s("--file"), s("--content", { default: "" })] },
+            import: { help: "deposit a .txt/.md note: a source document pending review, with its provenance - nothing in it runs",
+                pos: [{ name: "file" }], opts: [s("--title"), s("--author"), s("--source"),
+                    s("--context", { default: "reflection", choices: K.note_contexts }),
+                    s("--ai", { default: "unknown", choices: ["yes", "no", "unknown"] })] },
             show: { pos: [{ name: "document" }], opts: [i("--revision")] },
             edit: { pos: [{ name: "document" }], opts: [i("--base-revision", { required: true }), s("--file"), s("--content"),
                     s("--message", { alias: "-m", default: "" })] },
@@ -387,6 +391,11 @@ export async function run(path, a, c) {
         case "doc": {
             switch (path[1]) {
                 case "create": return ["doc", await call("doc_create", { session: S(), title: a.title, kind: a.kind, content: a.file ? readContent(a) : a.content, client_id: uuid() }), 0];
+                case "import": return ["doc-import", await call("doc_import", { session: S(), title: a.title || basename(a.file),
+                        content: readContent(a), author: a.author || "",
+                        context: a.context,
+                        ai_assisted: a.ai === "unknown" ? null : a.ai === "yes",
+                        source: a.source || a.file, client_id: uuid() }), 0];
                 case "show": return ["doc-show", await call("doc_show", { document: a.document, revision: a.revision, session: maybeS() }), 0];
                 case "edit": return ["doc", await call("doc_edit", { session: S(), document: a.document, base_revision: a.base_revision, content: readContent(a), message: a.message, client_id: uuid() }), 0];
                 case "patch": { // --from: diff the edited file against that revision here, send only the diff

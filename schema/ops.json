@@ -40,6 +40,12 @@
    "review",
    "adr"
   ],
+  "note_contexts": [
+   "reflection",
+   "discussion",
+   "meeting",
+   "other"
+  ],
   "memory_kinds": [
    "strategy",
    "overview",
@@ -409,6 +415,59 @@
     },
     {
      "name": "session",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "doc_import": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "title",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "content",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "author",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "context",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "ai_assisted",
+     "type": "boolean",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "source",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "client_id",
      "type": "string",
      "nullable": true,
      "required": false

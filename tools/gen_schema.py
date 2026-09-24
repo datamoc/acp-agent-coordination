@@ -48,8 +48,8 @@ def schema() -> dict:
                            "required": p.default is inspect.Parameter.empty})
         ops[op] = {"kind": "write" if op in WRITE_OPS else "read", "params": params}
     enums = {name.lower(): list(getattr(service, name))
-             for name in ("MESSAGE_KINDS", "ROLES", "PROJECT_ROLES", "STANCES", "DOC_KINDS", "MEMORY_KINDS",
-                          "CONSENSUS_RULES", "ROUTINE_STATUSES", "ROUTINE_OUTCOMES")}
+             for name in ("MESSAGE_KINDS", "ROLES", "PROJECT_ROLES", "STANCES", "DOC_KINDS", "NOTE_CONTEXTS",
+                          "MEMORY_KINDS", "CONSENSUS_RULES", "ROUTINE_STATUSES", "ROUTINE_OUTCOMES")}
     return {"version": 1, "transport": "POST /call {op, args}", "enums": enums, "ops": ops}
 
 

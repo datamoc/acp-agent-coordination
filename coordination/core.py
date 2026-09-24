@@ -41,6 +41,7 @@ SUPPORTING = ("support", "support-with-reservation")   # both count for consensu
 CONSENSUS_RULES = ("unanimous", "majority", "no-objection")
 DEFAULT_QUORUM = 2   # consensus always involves someone besides the decider
 DOC_KINDS = ("note", "diagnosis", "plan", "proposal", "decision", "review", "adr")
+NOTE_CONTEXTS = ("reflection", "discussion", "meeting", "other")   # what an imported note came from
 MEMORY_KINDS = ("strategy", "overview", "convention", "architecture", "decision", "pitfall", "glossary")
 TASK_STATUSES = ("open", "offered", "accepted", "done", "cancelled")   # offered: assigned, not yet accepted
 ROLES_BY_CONSENT = ("coeditor", "delegate")   # carry write duties: the grantee must accept them
@@ -76,6 +77,9 @@ NEWS = {
     "0.11.0": "project permissions: a roster makes a project restricted - coord members, coord member set "
               "<name> --role viewer|contributor|decider|admin (view, participate, decide, administer); "
               "a project with no members stays open exactly as before, and the Keycloak mapping gains decider",
+    "0.12.0": "coord doc import <file>: a .txt/.md note lands as a source document pending review, with its "
+              "provenance - the original kept as revision 1, sha256 fingerprint, declared author separate "
+              "from the depositor, context and AI-assisted flag; nothing inside it runs until validated",
 }
 SERVER_NAME = "coord-server"   # sender of the server's own messages (upgrade notices)
 
@@ -135,7 +139,9 @@ CREATE TABLE IF NOT EXISTS documents(
     id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, title TEXT NOT NULL,
     kind TEXT NOT NULL, created_by TEXT NOT NULL, revision INTEGER NOT NULL,
     content TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'draft',
-    created_at REAL NOT NULL, updated_at REAL NOT NULL);
+    created_at REAL NOT NULL, updated_at REAL NOT NULL,
+    origin TEXT, fingerprint TEXT, author_name TEXT, ai_assisted INTEGER,
+    context TEXT, source TEXT);
 CREATE TABLE IF NOT EXISTS document_revisions(
     document_id INTEGER NOT NULL, revision INTEGER NOT NULL,
     author_session_id TEXT NOT NULL, author_name TEXT NOT NULL,
@@ -394,6 +400,13 @@ class CoordBase:
         ("proposals", "supersedes_id", "INTEGER"),
         ("sessions", "user", "TEXT"),                                # the association user + CLI + model
         ("sessions", "model", "TEXT"),
+        # imported notes (0.12): provenance kept beside the content, NULL for documents created in coord
+        ("documents", "origin", "TEXT"),                             # 'import' | NULL
+        ("documents", "fingerprint", "TEXT"),                        # sha256 of the deposited original
+        ("documents", "author_name", "TEXT"),                        # declared author, NULL = the depositor
+        ("documents", "ai_assisted", "INTEGER"),                     # 1/0, NULL = not stated
+        ("documents", "context", "TEXT"),                            # reflection | discussion | meeting | other
+        ("documents", "source", "TEXT"),                             # where the file came from
     )
 
     @classmethod

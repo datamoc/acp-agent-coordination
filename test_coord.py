@@ -1,5 +1,6 @@
 """v2 coordination tests: uv run test_coord.py (temp dirs only)."""
 
+import hashlib
 import json
 import os
 import multiprocessing as mp
@@ -332,6 +333,37 @@ def project_permissions():
     assert c.members(session=s_o)["restricted"] is False
     raises("missing", c.member_remove, s_o, n_o)                   # nothing to remove: it is open
     c.post(s_x, "free again")
+
+
+@check
+def imported_notes_keep_their_provenance():
+    """A deposited .txt/.md is a source document pending review, with who/what/where kept."""
+    c, _ = fresh()
+    w = c.whoami("writer")
+    s, name = w["session_id"], w["name"]
+    body = "# Playtest retro\n\nThe boss freezes when the save fails.\n"
+    r = c.doc_import(s, "Retro playtest", body, author="alice", context="meeting",
+                     ai_assisted=True, source="notes/playtest.md")
+    assert r["status"] == "imported" and r["deposited_by"] == name and r["author"] == "alice"
+    assert r["fingerprint"] == "sha256:" + hashlib.sha256(body.encode()).hexdigest()
+
+    d = c.doc_show(r["document"], session=s)
+    assert d["content"] == body                                   # the original is kept verbatim (revision 1)
+    assert (d["origin"], d["context"], d["source"]) == ("import", "meeting", "notes/playtest.md")
+    assert d["ai_assisted"] is True and d["author"] == "alice" and d["deposited_by"] == name
+
+    # without stated provenance: the author is the depositor, AI assistance unknown, default context
+    d2 = c.doc_show(c.doc_import(s, "plain", "just text")["document"], session=s)
+    assert d2["author"] == d2["deposited_by"] == name
+    assert d2["ai_assisted"] is None and d2["context"] == "reflection" and d2["fingerprint"].startswith("sha256:")
+
+    # it is a source, not an order: importing spawns no task, no message, no discussion
+    assert c.tasks() == [] and c.inbox(s) == [] and c.discussions() == []
+    assert any(x["status"] == "imported" for x in c.docs(session=s))   # visible with its status
+
+    # guards
+    raises("empty", c.doc_import, s, "x", "   ")
+    raises("bad_context", c.doc_import, s, "x", "y", context="standup")
 
 
 # --- consensus & documents ---------------------------------------------

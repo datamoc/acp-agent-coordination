@@ -1,7 +1,9 @@
 """Collaborative documents with revisions and optimistic concurrency."""
 
+import hashlib
+
 from . import textpatch
-from .core import DOC_KINDS, CoordBase, CoordError, iso, parse_id
+from .core import DOC_KINDS, NOTE_CONTEXTS, CoordBase, CoordError, iso, parse_id
 
 
 class DocumentsMixin(CoordBase):
@@ -26,6 +28,50 @@ class DocumentsMixin(CoordBase):
             return {"document": f"DOC{did}", "id": did, "revision": 1}
         return self._mutate("doc_create", client_id, fn)
 
+    def doc_import(self, session: str, title: str, content: str, author: str = "",
+                   context: str = "reflection", ai_assisted: bool | None = None,
+                   source: str = "", client_id: str | None = None) -> dict:
+        """Deposit a .txt/.md note as a source document pending review (status `imported`).
+
+        Provenance is kept beside the content: the original text as revision 1, its sha256
+        fingerprint (anyone can re-hash revision 1 and compare), the depositor (`created_by`)
+        separately from the declared `author`, the context it came from, and whether it was
+        written or amended with AI (None = not stated). It is a source, not an order: nothing
+        in it runs - promoting what it says into tasks, decisions or memory stays an explicit,
+        validated act. Visibility follows the project's permissions. Participation, not an
+        admin operation: `participate` is the only right it needs."""
+        title = (title or "").strip()
+        if not title:
+            raise CoordError("empty", "the note needs a title (--title, or the file's name)")
+        content = content or ""
+        if not content.strip():
+            raise CoordError("empty", "the file is empty")
+        if context not in NOTE_CONTEXTS:
+            raise CoordError("bad_context", f"context must be one of {', '.join(NOTE_CONTEXTS)}")
+
+        def fn(db):
+            me, project = self._access(db, session, None, "participate")
+            now = self.clock()
+            fingerprint = "sha256:" + hashlib.sha256(content.encode("utf-8")).hexdigest()
+            did = db.execute(
+                "INSERT INTO documents("
+                "project_id, title, kind, created_by, revision, content, status, created_at, updated_at,"
+                " origin, fingerprint, author_name, ai_assisted, context, source)"
+                " VALUES(?, ?, ?, ?, 1, ?, 'imported', ?, ?, 'import', ?, ?, ?, ?, ?)",
+                (project, title, "note", me["display_name"], content, now, now, fingerprint,
+                 (author or "").strip() or None,
+                 None if ai_assisted is None else int(bool(ai_assisted)),
+                 context, source or "")).lastrowid
+            db.execute("INSERT INTO document_revisions VALUES(?,?,?,?,?,?,?)",
+                       (did, 1, me["session_id"], me["display_name"], content,
+                        f"imported ({context})" + (f" from {source}" if source else ""), now))
+            self._event(db, project, "document.imported", session, "document", did,
+                        fingerprint=fingerprint, context=context)
+            return {"document": f"DOC{did}", "id": did, "revision": 1, "status": "imported",
+                    "fingerprint": fingerprint, "author": (author or "").strip() or me["display_name"],
+                    "deposited_by": me["display_name"]}
+        return self._mutate("doc_import", client_id, fn)
+
     def doc_show(self, document: str, revision: int | None = None, session: str | None = None) -> dict:
         did = parse_id("document", document)
         with self._read() as db:
@@ -40,9 +86,15 @@ class DocumentsMixin(CoordBase):
                 if r is None:
                     raise CoordError("missing", f"DOC{did} has no revision {revision}")
                 content, rev = r["content"], r["revision"]
-        return {"document": f"DOC{did}", "title": d["title"], "kind": d["kind"], "status": d["status"],
-                "revision": rev, "latest_revision": d["revision"], "created_by": d["created_by"],
-                "updated_at": iso(d["updated_at"]), "content": content}
+        out = {"document": f"DOC{did}", "title": d["title"], "kind": d["kind"], "status": d["status"],
+               "revision": rev, "latest_revision": d["revision"], "created_by": d["created_by"],
+               "updated_at": iso(d["updated_at"]), "content": content}
+        if d["origin"] == "import":      # provenance beside the content: who deposited, what it was
+            out.update(origin="import", fingerprint=d["fingerprint"],
+                       author=d["author_name"] or d["created_by"], deposited_by=d["created_by"],
+                       ai_assisted=None if d["ai_assisted"] is None else bool(d["ai_assisted"]),
+                       context=d["context"], source=d["source"])
+        return out
 
     def doc_edit(self, session: str, document: str, base_revision: int, content: str,
                  message: str = "", client_id: str | None = None) -> dict:
