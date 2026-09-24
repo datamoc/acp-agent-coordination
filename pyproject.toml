@@ -1,6 +1,6 @@
 [project]
 name = "coord"
-version = "0.7.0"
+version = "0.8.0"
 description = "coord server and certificate management: claims, messages, tasks for concurrent agent sessions (clients: clients/ts)"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -24,6 +24,9 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools]
 py-modules = []
 packages = ["coordination"]
+
+[tool.setuptools.package-data]
+coordination = ["ui/*"]
 
 [tool.uv]
 # Use the OS trust store: behind a TLS-intercepting corporate proxy, uv's
