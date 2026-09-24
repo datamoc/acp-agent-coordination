@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   viewBox="0 0 800 800"
+   role="img"
+   aria-labelledby="title desc"
+   version="1.1"
+   id="svg6"
+   sodipodi:docname="coord-logo-pentagramme.svg"
+   inkscape:version="1.3.2 (091e20e, 2023-11-25, custom)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview6"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:zoom="1.136875"
+     inkscape:cx="430.12644"
+     inkscape:cy="380.42881"
+     inkscape:window-width="3840"
+     inkscape:window-height="2054"
+     inkscape:window-x="-11"
+     inkscape:window-y="-11"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg6" />
+  <title
+     id="title">Logo coord en pentagramme</title>
+  <desc
+     id="desc">Les lettres c, o, o, r et d occupent les cinq pointes d'un pentagramme. Un astérisque est au centre. Les six signes ont chacun une couleur différente.</desc>
+  <defs
+     id="defs1">
+    <style
+       id="style1">
+      .glyph {
+        font-family: &quot;DejaVu Sans&quot;, &quot;Noto Sans&quot;, Arial, sans-serif;
+        font-size: 104px;
+        font-weight: 800;
+        text-anchor: middle;
+        dominant-baseline: middle;
+        paint-order: stroke fill;
+        stroke: #ffffff;
+        stroke-width: 5px;
+        stroke-linejoin: round;
+      }
+    </style>
+  </defs>
+  <!-- The five vertices follow the reading order clockwise from the top. -->
+  <g
+     id="g6"
+     transform="translate(-4.1000412,18.899997)">
+    <text
+       class="glyph"
+       x="400"
+       y="117"
+       fill="#e45756"
+       id="text1"
+       style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:400px;font-family:'Libertinus Sans';-inkscape-font-specification:'Libertinus Sans, Bold';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal">c</text>
+    <text
+       class="glyph"
+       x="682"
+       y="313"
+       fill="#ed9b28"
+       id="text2"
+       style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:400px;font-family:'Libertinus Sans';-inkscape-font-specification:'Libertinus Sans, Bold';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal">o</text>
+    <text
+       class="glyph"
+       x="577"
+       y="634"
+       fill="#37a66b"
+       id="text3"
+       style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:400px;font-family:'Libertinus Sans';-inkscape-font-specification:'Libertinus Sans, Bold';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal">o</text>
+    <text
+       class="glyph"
+       x="223"
+       y="648"
+       fill="#3b78db"
+       id="text4"
+       style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:400px;font-family:'Libertinus Sans';-inkscape-font-specification:'Libertinus Sans, Bold';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal">r</text>
+    <text
+       class="glyph"
+       x="130"
+       y="331"
+       fill="#8b5acb"
+       id="text5"
+       style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:400px;font-family:'Libertinus Sans';-inkscape-font-specification:'Libertinus Sans, Bold';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal">d</text>
+    <text
+       class="glyph"
+       x="406.70663"
+       y="878.90717"
+       fill="#8b5acb"
+       id="text5-1"
+       style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:1333.33px;font-family:'Libertinus Sans';-inkscape-font-specification:'Libertinus Sans, Bold';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;dominant-baseline:middle;text-anchor:middle;fill:#dc4f9b;fill-opacity:1;stroke:#ffffff;stroke-width:5px;stroke-linejoin:round;paint-order:stroke fill"><tspan
+         sodipodi:role="line"
+         id="tspan6"
+         x="406.70663"
+         y="878.90717">*</tspan></text>
+  </g>
+</svg>

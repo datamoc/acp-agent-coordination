@@ -51,6 +51,7 @@ NEWS = {
              "reason; propose --supersedes; delegate a sub-scope; coord-db export/prune/vacuum",
     "0.8.0": "coord-server --ui: a window for humans to follow and join the work; live events over SSE "
              "(GET /events/stream, coord events --follow)",
+    "0.8.1": "the coord logo: favicon and header in the UI, on the site and in the README",
 }
 SERVER_NAME = "coord-server"   # sender of the server's own messages (upgrade notices)
 

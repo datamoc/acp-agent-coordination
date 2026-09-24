@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/img/coord-logo.svg" alt="coord" width="160"></p>
+
 # coord — coordination for concurrent agent sessions
 
 Several coding agents (Claude Code, Codex, your own TS/JS agents) working the

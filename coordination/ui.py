@@ -34,7 +34,8 @@ from .service import READ_OPS, WRITE_OPS, CoordError
 
 log = logging.getLogger("coord-server")
 STATIC = Path(__file__).with_name("ui")
-FILES = {"/": "index.html", "/app.js": "app.js", "/app.css": "app.css"}
+FILES = {"/": "index.html", "/app.js": "app.js", "/app.css": "app.css", "/logo.svg": "logo.svg",
+         "/favicon.ico": "favicon.ico"}
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; "
        "base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 KEEPALIVE_SECONDS = 600
@@ -141,8 +142,10 @@ def make_ui_handler(coord, token: str, humans: HumanSessions, port_ref: dict):
                                    "text/plain; charset=utf-8")
             if url.path in FILES:
                 name = FILES[url.path]
-                ctype = mimetypes.guess_type(name)[0] or "application/octet-stream"
-                return self._reply(200, (STATIC / name).read_bytes(), ctype + "; charset=utf-8",
+                ctype = {".ico": "image/x-icon", ".svg": "image/svg+xml"}.get(Path(name).suffix)                     or mimetypes.guess_type(name)[0] or "application/octet-stream"
+                if ctype.startswith("text/") or ctype.endswith(("javascript", "svg+xml")):
+                    ctype += "; charset=utf-8"
+                return self._reply(200, (STATIC / name).read_bytes(), ctype,
                                    {"Content-Security-Policy": CSP} if name.endswith(".html") else None)
             if url.path == "/api/state":
                 info = coord.server_info()
