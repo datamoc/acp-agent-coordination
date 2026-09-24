@@ -1,6 +1,6 @@
 [project]
 name = "coord"
-version = "0.6.1"
+version = "0.7.0"
 description = "coord server and certificate management: claims, messages, tasks for concurrent agent sessions (clients: clients/ts)"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -10,6 +10,7 @@ dependencies = []
 coord-server = "coordination.server:main"
 coord-admin = "coordination.pki:main"
 coord-local = "coordination.local:main"
+coord-db = "coordination.maintenance:main"
 
 [project.optional-dependencies]
 gitlab = [
