@@ -68,7 +68,9 @@ humans want done even when nobody asks - run the due ones, and report even
   answer at their next poll. (`coord ask --claim C12 --to <session>` is for
   **your own** claim: it asks for help and keeps the claim - the server refuses
   it on someone else's.)
-- `coord check <files>` before committing; `coord release C12` (or `--all`).
+- `coord check <files>` before committing (`--mode warn` to print conflicts
+  without blocking the commit; `coord install-hooks --mode warn` bakes that
+  into the pre-commit hook); `coord release C12` (or `--all`).
 
 ## Talking and delegating
 
@@ -102,9 +104,11 @@ humans want done even when nobody asks - run the due ones, and report even
 
 `poll` and `context` end with `wake: in 12 min (…) - renew or release C12`: the next moment
 something will need you - a routine or an offer due now, a discussion deadline, a claim to
-renew, or at the latest the poll that keeps your session alive (it dies after 30 min). The
-server cannot wake you; if your CLI can schedule itself (a loop or scheduled wake-up, a cron,
-a wake-up when your quota comes back), schedule the next look at `wake.next_at`.
+renew, a broadcast question or warning nobody has resolved in 15 min (a human waiting on an
+answer, most often), or at the latest the poll that keeps your session alive (it dies after
+30 min). The server cannot wake you; if your CLI can schedule itself (a loop or scheduled
+wake-up, a cron, a wake-up when your quota comes back), schedule the next look at
+`wake.next_at`.
 
 Before you stop for lack of quota or budget: post where you are (`--kind info`), put long
 state in a document, then either release your claims or - if your wake-up comes before they

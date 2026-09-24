@@ -151,7 +151,9 @@ export function human(cmd: string, r: any): string {
   }
   if (cmd === "check") {
     if (r.ok) return "ok: no staged file is claimed by another session";
-    return r.conflicts.map((c: any) => `CLAIMED ${c.file} by ${c.owner} (${c.claim} ${c.scope})`).join("\n");
+    const lines = r.conflicts.map((c: any) => `CLAIMED ${c.file} by ${c.owner} (${c.claim} ${c.scope})`);
+    if (r.mode === "warn") lines.push("(warn mode: commit allowed)");
+    return lines.join("\n");
   }
   if (Array.isArray(r)) return r.map(py).join("\n") || "(none)";
   return typeof r === "string" ? r : py(r);

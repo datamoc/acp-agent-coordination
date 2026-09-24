@@ -141,6 +141,29 @@ test("every CLI command sends a known op with only known params and all required
   assert.deepEqual(Object.keys(OPS).filter((op) => !used.has(op)), [], "every server op is reachable from the CLI");
 });
 
+test("check --mode warn/fail: exit code, not the sent op (T22)", async () => {
+  const fake = new CoordClient({ async send(op, args) {
+    assert.equal(op, "check"); assert.deepEqual(Object.keys(args).sort(), ["files", "session"].sort());
+    return { ok: true, result: { ok: false, conflicts: [{ file: "a.py", claim: "C1", owner: "b-01", scope: "a.py" }] } };
+  } });
+  process.env.COORD_SESSION = "s"; process.env.COORD_PROJECT = "p";
+  try {
+    const { path: p1, ns: n1 } = parse(["check", "a.py"]);
+    const [, r1, code1] = await run(p1, n1, fake);
+    assert.equal(code1, 1); assert.equal(r1.mode, "fail");
+    const { path: p2, ns: n2 } = parse(["check", "a.py", "--mode", "warn"]);
+    const [, r2, code2] = await run(p2, n2, fake);
+    assert.equal(code2, 0); assert.equal(r2.mode, "warn");
+    process.env.COORD_CHECK_MODE = "warn";
+    const { path: p3, ns: n3 } = parse(["check", "a.py"]);
+    const [, , code3] = await run(p3, n3, fake);
+    assert.equal(code3, 0);
+  } finally {
+    delete process.env.COORD_SESSION; delete process.env.COORD_PROJECT; delete process.env.COORD_CHECK_MODE;
+  }
+  assert.throws(() => parse(["check", "a.py", "--mode", "nope"]), /invalid choice/);
+});
+
 test("NO_PROXY handling", () => {
   const env = { NO_PROXY: "localhost,.dci.local,exact.example" };
   assert.ok(bypassProxy("127.0.0.1", env));

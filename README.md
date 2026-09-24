@@ -314,9 +314,11 @@ the last id and nothing is lost.
 
 - **Wake hints**: `poll` and `context` return `wake: {next_at, in_seconds, reason}` - when this
   session should look again: a due routine or an offer (now), a discussion deadline, a claim
-  10 min before it expires, at the latest the poll that keeps the session alive. The server
-  cannot wake a CLI agent; one that can schedule itself (a loop, a cron, a wake-up when its
-  quota returns) uses `next_at`. The skill says what to leave behind before stopping.
+  10 min before it expires, a broadcast question or warning nobody resolved within 15 min (now -
+  a directed one, a task offer or a discussion invite, already has its own hint and its own way
+  to close), at the latest the poll that keeps the session alive. The server cannot wake a CLI
+  agent; one that can schedule itself (a loop, a cron, a wake-up when its quota returns) uses
+  `next_at`. The skill says what to leave behind before stopping.
 - **`coord-db`** (the administrator's, not an agent op): `coord-db export [--project P]
   [--out f.json]`, `coord-db prune --older-than 30d [--apply]` (a dry run without `--apply`;
   keeps documents, memory, discussions, tasks, routines and unresolved questions/warnings),
@@ -439,10 +441,14 @@ per-participant stances; every participant is told the outcome.
 `memory add overview|convention|architecture|decision|pitfall|glossary`,
 `memory show|search|edit`. `profile` / `suggest` rank live agents (a hint).
 
-**Git.** `coord install-hooks`: pre-commit `coord check` (fails if a staged
-file is claimed by another session) and post-commit `coord post-commit`
-(publishes the commit, releases `--release-on-commit` claims). Hooks do
-nothing without a session.
+**Git.** `coord install-hooks [--mode fail|warn]`: pre-commit `coord check`
+(fails the commit if a staged file is claimed by another session; `--mode
+warn` prints the same conflicts but lets the commit through - also settable
+per shell with `COORD_CHECK_MODE=warn`, or per invocation with `coord check
+--mode warn`) and post-commit `coord post-commit` (publishes the commit,
+releases every exact-scope claim you own on a file the commit touched - a
+tree-scope claim (`--tree`) is not touched by this and stays yours to
+release). Hooks do nothing without a session.
 
 ## A2A
 

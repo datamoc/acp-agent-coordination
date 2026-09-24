@@ -3,7 +3,7 @@
 import json
 from datetime import datetime
 
-from .core import CLAIM_RENEW_MARGIN, SESSION_TTL, WAKE_KEEPALIVE, iso
+from .core import CLAIM_RENEW_MARGIN, SESSION_TTL, WAKE_KEEPALIVE, WAKE_UNANSWERED, iso
 
 
 class RoutingMixin:
@@ -67,6 +67,14 @@ class RoutingMixin:
                                 " EXISTS(SELECT 1 FROM discussion_participants p WHERE p.discussion_id=d.id AND"
                                 " p.session_id=?))", (now, project, session, session)).fetchall():
                 hints.append((d["deadline"], f"D{d['id']} deadline: {d['topic']}"))
+            # Broadcast questions/warnings only: a directed one (task offer, discussion invite, `ask`) already
+            # has its own hint (offered task, discussion deadline) and its own resolution path, not `resolve`.
+            for q in db.execute("SELECT id, kind, from_name, created_at FROM messages WHERE project_id=? AND"
+                                " resolved_at IS NULL AND kind IN ('question','warning') AND to_session_id IS NULL"
+                                " AND from_session_id!=? AND created_at<=? AND NOT EXISTS(SELECT 1 FROM discussions"
+                                " WHERE message_id=messages.id)",
+                                (project, session, now - WAKE_UNANSWERED)).fetchall():
+                hints.append((now, f"M{q['id']} unresolved {q['kind']} from {q['from_name']}: reply or `coord resolve {q['id']}`"))
         for r in self.routines(project=project):
             if r["status"] != "active" or r["running"]:
                 continue

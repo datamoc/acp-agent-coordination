@@ -279,8 +279,12 @@ class ClaimsMixin:
                 except CoordError:
                     pass
             released = []
+            # Exact-scope claims are how you protect a file while you edit it; the commit is that
+            # file's natural release point, so every exact claim on a committed file goes - not only
+            # ones opted in with --release-on-commit (still honoured, and still the only way to
+            # auto-release a tree-scope claim, which this loop does not touch).
             for c in db.execute("SELECT * FROM claims WHERE owner_session_id=? AND released_at IS NULL"
-                                " AND scope_type='exact' AND release_on_commit=1", (session,)).fetchall():
+                                " AND scope_type='exact'", (session,)).fetchall():
                 if c["scope"] in paths:
                     db.execute("UPDATE claims SET released_at=?, released_by=? WHERE claim_id=?",
                                (self.clock(), session, c["claim_id"]))

@@ -20,6 +20,7 @@ SESSION_TTL = 1800
 CLAIM_TTL = 7200
 WAKE_KEEPALIVE = 1500        # poll again within 25 min: the session dies after 30
 CLAIM_RENEW_MARGIN = 600     # wake 10 min before a claim expires
+WAKE_UNANSWERED = 900        # an unresolved question/warning older than 15 min becomes a wake-now hint
 MSG_RECOMMENDED = 300
 MSG_MAX = 10000
 INBOX_DEFAULT = 20

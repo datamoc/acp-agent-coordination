@@ -59,9 +59,10 @@ const COMMANDS = {
         } },
     ask: { pos: [{ name: "body" }], opts: [s("--claim", { required: true }), s("--to", { required: true }),
             s("--role", { default: "advisor", choices: K.roles }), kind("question")] },
-    check: { pos: [{ name: "files", nargs: "*" }] },
+    check: { pos: [{ name: "files", nargs: "*" }], opts: [s("--mode", { choices: ["fail", "warn"] })] },
     "post-commit": { opts: [s("--sha")] },
-    "install-hooks": { help: "git pre-commit (coord check) and post-commit hooks" },
+    "install-hooks": { help: "git pre-commit (coord check) and post-commit hooks",
+        opts: [s("--mode", { default: "fail", choices: ["fail", "warn"] })] },
     discuss: { help: "open a discussion; consensus is computed from the participants' stances",
         pos: [{ name: "topic" }], opts: [s("--claim"), s("--with", { dest: "with_" }),
             s("--rule", { default: "unanimous", choices: K.consensus_rules }), i("--quorum"),
@@ -330,7 +331,10 @@ export async function run(path, a, c) {
         case "check": {
             const files = a.files.length ? a.files.map(rel) : gitLines("diff", "--cached", "--name-only");
             const r = await call("check", { session: S(), files });
-            return [cmd, r, r.ok ? 0 : 1];
+            const mode = a.mode || process.env.COORD_CHECK_MODE || "fail";
+            if (mode !== "fail" && mode !== "warn")
+                throw new UsageError(`--mode must be fail or warn, not ${mode}`);
+            return [cmd, { ...r, mode }, r.ok || mode === "warn" ? 0 : 1];
         }
         case "post-commit": {
             const sha = a.sha || git("rev-parse", "HEAD");
@@ -340,7 +344,7 @@ export async function run(path, a, c) {
             const hooks = join(repoRoot(), ".git", "hooks");
             const exe = `"${process.execPath}" "${fileURLToPath(import.meta.url)}"`;
             const guard = '[ -z "$COORD_SESSION" ] && [ ! -f .coord-session ] && exit 0';
-            writeFileSync(join(hooks, "pre-commit"), `#!/bin/sh\n${guard}\n${exe} check\n`);
+            writeFileSync(join(hooks, "pre-commit"), `#!/bin/sh\n${guard}\n${exe} check --mode ${a.mode}\n`);
             writeFileSync(join(hooks, "post-commit"), `#!/bin/sh\n${guard}\n${exe} post-commit || true\n`);
             for (const h of ["pre-commit", "post-commit"]) {
                 try {

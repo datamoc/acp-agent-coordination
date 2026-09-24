@@ -174,12 +174,13 @@ def ask_keeps_claim_and_advisor_cannot_write():
 def git_check_and_post_commit():
     c, _ = fresh()
     a = c.whoami("a")["session_id"]; b = c.whoami("b")["session_id"]
-    c.claim(a, "x.py", release_on_commit=True); c.claim(a, "y.py")
-    r = c.check(b, ["x.py", "z.py"])
-    assert not r["ok"] and r["conflicts"][0]["file"] == "x.py"
+    c.claim(a, "x.py", release_on_commit=True); c.claim(a, "y.py")               # T23: exact claims
+    c.claim(a, "src/", tree=True)                                               # release on commit
+    r = c.check(b, ["x.py", "z.py"])                                            # regardless of the flag;
+    assert not r["ok"] and r["conflicts"][0]["file"] == "x.py"                   # a tree claim does not
     r = c.post_commit(a, "abc123", ["x.py", "y.py"])
-    assert len(r["released"]) == 1
-    assert [cl["scope"] for cl in c.locks()] == ["y.py"]
+    assert sorted(r["released"]) == ["C1", "C2"]
+    assert [cl["scope"] for cl in c.locks()] == ["src/"]
     assert any(e["kind"] == "commit.created" and e["id"] == "abc123" for e in c.events())
 
 
@@ -716,6 +717,15 @@ def wake_hints_say_when_to_look_again():
     assert c.poll(a)["wake"]["reason"].startswith("D1 deadline")
     c.task_create(b, "review", assign="claude-01")
     assert c.context(a)["wake"]["in_seconds"] == 0 and "offered to you" in c.context(a)["wake"]["reason"]
+    c.task_accept(a, "T1"); c.task_done(a, "T1")
+    c.resolve(a, 1, "picked a name")                                        # clear D1's own invite message too
+    q = c.post(b, "how long until v1.0?", kind="question")["id"]
+    assert not any("unresolved question" in h for h in [c.poll(a)["wake"]["reason"], *[u["reason"] for u in c.poll(a)["wake"]["upcoming"]]])
+    c.release(a, "C1")                                                      # out of the way: isolate the question hint
+    clock.t += 901                                                          # older than WAKE_UNANSWERED: now a wake-now hint
+    assert c.poll(a)["wake"]["reason"] == f"M{q} unresolved question from codex-01: reply or `coord resolve {q}`"
+    c.resolve(a, q, "soon")
+    assert "unresolved question" not in c.poll(a)["wake"]["reason"]
 
 
 @check
