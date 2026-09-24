@@ -14,6 +14,9 @@ Linux Foundation; the ACP layer was retired in 0.3.0.)
 architecture, a claim conflict, a consensus discussion and a routine's lifecycle
 ([archify](https://github.com/tt-a1i/archify) sources in `docs/diagrams/`).
 
+**Road to 1.0.0: [docs/ROADMAP.md](docs/ROADMAP.md)** - what remains of the design notes,
+the milestones 0.11 to 1.0.0 and their forecast.
+
 | Part | Where | Language | Command |
 |---|---|---|---|
 | Server (service, SQLite) | `coordination/server.py`, `a2a.py`; `service.py` = `core.py` + one module per topic (`sessions`, `messages`, `claims`, `consensus`, `documents` + `textpatch`, `tasks`, `memory`, `routing`) | Python, stdlib only | `coord-server` |
