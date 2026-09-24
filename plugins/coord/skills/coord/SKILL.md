@@ -20,8 +20,25 @@ servers belong to the human.
 2. Prefix **every** later command with that id:
    `COORD_SESSION=<session_id> coord ...` - `.coord-session` is shared by
    every session in the checkout, don't rely on it.
-3. `COORD_SESSION=<id> coord context` - overview, memory, your claims,
-   tasks, discussions, unread count.
+3. `COORD_SESSION=<id> coord context` - strategy, overview, memory, due
+   routines, your claims, tasks, discussions, unread count.
+4. **Follow the `strategy:` lines** - the project's common goals and ways of
+   working, agreed by the humans and agents before you. To change one, open
+   a `coord discuss`; don't just edit it (`coord memory add strategy "title"
+   --content "..."` adds one when a decision says so).
+
+## Routines (recurring work)
+
+Security review, docs refresh, dependency audit...: `poll` and `context` list
+the routines that are **due** (interval elapsed, or a commit touched their
+paths). When one is due and you are not in the middle of something:
+`coord routine start R2` (you get its instructions; one runner at a time,
+the run is yours for an hour), do it, then `coord routine done R2 "result"`
+- with `--outcome issues` or `failed` it also posts a warning for everyone.
+Don't start one you can't finish. Create one when the humans ask for
+standing work: `coord routine create "Security review" --every 1d
+[--on-commit --path src/] --instructions "..."`; `coord routines` lists
+them, `routine pause|resume|retire R2` manages them.
 
 ## Before editing
 

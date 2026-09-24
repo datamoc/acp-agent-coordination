@@ -9,6 +9,17 @@ export function fmtMsg(m: any): string {
   return `#${m.id} [${m.at}] ${m.from}${to} ${m.kind}${re}${cl}: ${m.body}${done}`;
 }
 
+const every = (s: number) => (s % 86400 === 0 ? `${s / 86400}d` : s % 3600 === 0 ? `${s / 3600}h` : `${Math.round(s / 60)}m`);
+
+export function fmtRoutine(x: any): string {
+  const when = [x.every ? `every ${every(x.every)}` : "",
+                x.on_commit ? `on commit${x.paths.length ? ` (${x.paths.join(", ")})` : ""}` : ""].filter(Boolean).join(" + ");
+  const state = x.status !== "active" ? `[${x.status}]` : x.running ? `[running: ${x.running}]` : x.due ? `[due: ${x.why}]`
+    : `[next ${x.next_due ?? "on commit"}]`;
+  const last = x.last_run_at ? ` | last ${x.last_outcome ?? "?"} by ${x.last_run_by} ${x.last_run_at}${x.last_result ? `: ${x.last_result}` : ""}` : "";
+  return `${x.routine} ${state} ${x.title} (${when})${last}`;
+}
+
 export function fmtClaim(c: any): string {
   return `${c.claim} ${c.scope} (${c.scope_type}) ${c.owner} fence=${c.fence} until ${c.expires_at}`
     + (c.note ? ` - ${c.note}` : "") + (c.released ? " [released]" : "");
@@ -38,6 +49,7 @@ export function human(cmd: string, r: any): string {
     out.push("claims: " + (r.my_claims.map((c: any) => `${c.claim} ${c.scope}`).join(", ") || "-"));
     out.push("tasks: " + (r.tasks.map((t: any) => `${t.task} ${t.title}`).join(", ") || "-"));
     out.push("discussions: " + (r.discussions.map((d: any) => `${d.discussion} ${d.topic}`).join(", ") || "-"));
+    if (r.routines?.length) out.push("routines due: " + r.routines.map((x: any) => `${x.routine} ${x.title} (${x.why})`).join(", "));
     return out.join("\n");
   }
   if (cmd === "doc-show") return `${r.document} r${r.revision}/${r.latest_revision} [${r.kind}/${r.status}] ${r.title}\n\n${r.content}`;
@@ -67,9 +79,23 @@ export function human(cmd: string, r: any): string {
   if (cmd === "memory") {
     return r.map((m: any) => `${m.memory} [${m.kind}] ${m.title} (r${m.revision}, ${m.updated_by})\n${m.content}`).join("\n\n") || "(no memory)";
   }
+  if (cmd === "routines") return r.map(fmtRoutine).join("\n") || "(no routines)";
+  if (cmd === "routine") {
+    const runs = (r.runs ?? []).map((x: any) => `  run ${x.run} ${x.by} (${x.trigger}) ${x.outcome ?? "running or abandoned"}${x.result ? `: ${x.result}` : ""}`);
+    return [fmtRoutine(r), ...(r.instructions ? ["", r.instructions] : []), ...(runs.length ? ["", ...runs] : [])].join("\n");
+  }
+  if (cmd === "routine-new") return `${r.routine} created - due now (first run)`;
+  if (cmd === "routine-start") {
+    return `${r.routine} run ${r.run} (${r.trigger}) is yours until ${r.until}: ${r.title}`
+      + (r.instructions ? `\n\n${r.instructions}` : "") + (r.last_result ? `\n\nlast result: ${r.last_result}` : "")
+      + `\n\nwhen finished: coord routine done ${r.routine} "result" [--outcome issues|failed]`;
+  }
+  if (cmd === "routine-done") return `${r.routine} run ${r.run}: ${r.outcome}`;
   if (cmd === "context") {
     const lines = [`you: ${r.me.name} gen ${r.me.generation} project ${r.me.project} | unread ${r.unread}`];
+    lines.push(...(r.strategy ?? []).map((m: any) => `strategy: ${m.title}: ${m.content}`));
     lines.push(...r.overview.map((m: any) => `overview: ${m.title}: ${m.content}`));
+    lines.push(...(r.routines ?? []).map((x: any) => `routine due: ${x.routine} ${x.title} (${x.why}) - coord routine start ${x.routine}`));
     lines.push(...r.memory.map((m: any) => `memory: ${m.memory} [${m.kind}] ${m.title}`));
     lines.push(...r.my_claims.map((c: any) => `claim: ${c.claim} ${c.scope}`));
     lines.push(...[...r.my_tasks, ...r.open_tasks].map((t: any) => `task: ${t.task} [${t.status}] ${t.title}`));

@@ -95,7 +95,23 @@ const COMMANDS = {
             add: { pos: [{ name: "kind", choices: K.memory_kinds }, { name: "title" }], opts: [s("--file"), s("--content"), s("--source", { default: "" })] },
             edit: { pos: [{ name: "memory" }], opts: [i("--base-revision", { required: true }), s("--file"), s("--content"), b("--archive")] },
         } },
-    context: { help: "start-of-session view: overview, memory, my claims, tasks, discussions, unread" },
+    strategy: { help: "the project's common strategy (memory kind strategy): goals and ways of working every agent follows" },
+    routines: { help: "recurring work (security review, docs...): what is due, running, last result",
+        opts: [b("--due"), b("--all")] },
+    routine: { help: "a routine comes back every interval and/or after commits touching its paths", sub: {
+            create: { pos: [{ name: "title" }], opts: [s("--every"), b("--on-commit"), { flag: "--path", kind: "append", dest: "paths" },
+                    s("--instructions"), s("--file")] },
+            show: { pos: [{ name: "routine" }] },
+            start: { help: "take this run (one runner at a time; the lease frees itself after an hour)", pos: [{ name: "routine" }] },
+            done: { pos: [{ name: "routine" }, { name: "result", nargs: "?", default: "" }],
+                opts: [s("--outcome", { default: "ok", choices: K.routine_outcomes })] },
+            edit: { pos: [{ name: "routine" }], opts: [s("--title"), s("--every"), s("--instructions"), s("--file"),
+                    { flag: "--path", kind: "append", dest: "paths" }] },
+            pause: { pos: [{ name: "routine" }] },
+            resume: { pos: [{ name: "routine" }] },
+            retire: { pos: [{ name: "routine" }] },
+        } },
+    context: { help: "start-of-session view: strategy, overview, memory, due routines, my claims, tasks, discussions, unread" },
     profile: { opts: [s("--provider"), s("--model"), s("--family"), s("--category"), s("--reasoning"), { flag: "--capability", kind: "append" }] },
     suggest: { help: "suggest agents for a task (hint only; you choose)",
         opts: [s("--task"), s("--prefer-category"), { flag: "--capability", kind: "append" }, s("--reasoning")] },
@@ -348,6 +364,27 @@ export async function run(path, a, c) {
                 case "add": return ["memory-add", await call("memory_add", { session: S(), kind: a.kind, title: a.title, content: readContent(a), source: a.source, client_id: uuid() }), 0];
                 default: return ["memory-edit", await call("memory_edit", { session: S(), memory: a.memory, base_revision: a.base_revision, content: readContent(a),
                         status: a.archive ? "archived" : null }), 0];
+            }
+        }
+        case "strategy": return ["memory", await call("memory", { project: detectProject(), kind: "strategy" }), 0];
+        case "routines": {
+            const r = await call("routines", { project: detectProject(), due: a.due, include_retired: a.all });
+            return [cmd, r, 0];
+        }
+        case "routine": {
+            const text = () => (a.file ? readFileSync(a.file, "utf8") : a.instructions);
+            switch (path[1]) {
+                case "create": return ["routine-new", await call("routine_create", { session: S(), title: a.title, instructions: text() ?? "",
+                        every: a.every, on_commit: a.on_commit, paths: a.paths, client_id: uuid() }), 0];
+                case "show": return ["routine", await call("routine_get", { routine: a.routine }), 0];
+                case "start": return ["routine-start", await call("routine_start", { session: S(), routine: a.routine }), 0];
+                case "done": return ["routine-done", await call("routine_done", { session: S(), routine: a.routine, result: a.result, outcome: a.outcome }), 0];
+                case "edit": return ["routine", await call("routine_update", { session: S(), routine: a.routine, title: a.title, every: a.every,
+                        instructions: text(), paths: a.paths }), 0];
+                default: {
+                    const status = { pause: "paused", resume: "active", retire: "retired" }[path[1]];
+                    return ["routine", await call("routine_update", { session: S(), routine: a.routine, status }), 0];
+                }
             }
         }
         case "context": return [cmd, await call("context", { session: S() }), 0];

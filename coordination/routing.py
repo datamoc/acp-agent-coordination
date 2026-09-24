@@ -55,9 +55,11 @@ class RoutingMixin:
         project = me["project_id"]
         mem = self.memory(project=project)
         return {"me": {"name": me["display_name"], "generation": me["generation"], "project": project},
+                "strategy": [m for m in mem if m["kind"] == "strategy"],   # in full: every agent follows it
                 "overview": [m for m in mem if m["kind"] == "overview"],
                 "memory": [{"memory": m["memory"], "kind": m["kind"], "title": m["title"]}
-                           for m in mem if m["kind"] != "overview"][:10],
+                           for m in mem if m["kind"] not in ("strategy", "overview")][:10],
+                "routines": self.routines(project=project, due=True),
                 "open_tasks": self.tasks(project=project, status="open")[:10],
                 "my_tasks": self.tasks(project=project, status="offered", assigned_session=session)
                 + self.tasks(project=project, status="accepted", assigned_session=session),
@@ -79,7 +81,8 @@ class RoutingMixin:
         return {"project": project or "(all)", "messages": msgs[0], "open_questions": msgs[1],
                 "live_sessions": len(self.presence(project)), "active_claims": len(self.locks(project)),
                 "open_tasks": len(self.tasks(project, "open")),
-                "open_discussions": len(self.discussions(project))}
+                "open_discussions": len(self.discussions(project)),
+                "due_routines": len(self.routines(project, due=True))}
 
     def events(self, after: int = 0, project: str | None = None, limit: int = 100) -> list[dict]:
         with self._read() as db:

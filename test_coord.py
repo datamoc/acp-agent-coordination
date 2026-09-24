@@ -575,6 +575,58 @@ def tasks_memory_routing():
     assert ctx["memory"][0]["title"] == "Transactions"
 
 
+@check
+def strategy_leads_every_context():
+    c, _ = fresh()
+    a = c.whoami("claude")["session_id"]; b = c.whoami("codex")["session_id"]
+    c.memory_add(a, "strategy", "Port fidelity", "Match v3.3.8 first; document every divergence.")
+    c.memory_add(a, "convention", "Commits", "Private index")
+    ctx = c.context(b)
+    assert [m["content"] for m in ctx["strategy"]] == ["Match v3.3.8 first; document every divergence."]
+    assert [m["title"] for m in ctx["memory"]] == ["Commits"]                 # strategy is not repeated there
+
+
+@check
+def routines_come_back_by_interval_and_commit():
+    c, clock = fresh()
+    a = c.whoami("claude")["session_id"]; b = c.whoami("codex")["session_id"]
+    raises("bad_args", c.routine_create, a, "nothing")                        # needs --every or --on-commit
+    raises("bad_every", c.routine_create, a, "busy", every="1m")
+    sec = c.routine_create(a, "Security review", "audit deps and secrets", every="1d")["routine"]
+    docs = c.routine_create(a, "Docs", "refresh README", on_commit=True, paths=["src/"])["routine"]
+    due = {r["routine"]: r["why"] for r in c.poll(b)["routines"]}
+    assert due == {sec: "first run", docs: "first run"}
+    run = c.routine_start(b, sec)
+    assert run["instructions"] == "audit deps and secrets" and run["run"] == 1
+    raises("running", c.routine_start, a, sec)                                # one runner at a time
+    raises("forbidden", c.routine_done, a, sec, "x")
+    assert sec not in {r["routine"] for r in c.routines(due=True)}           # running: not offered
+    c.routine_done(b, sec, "no findings")
+    c.routine_start(a, docs); c.routine_done(a, docs, "up to date")
+    assert c.routines(due=True) == []
+    clock.t += 86400                                                          # interval elapsed
+    a = c.whoami("claude")["session_id"]; b = c.whoami("codex")["session_id"]   # sessions last 30 min
+    assert [r["why"] for r in c.routines(due=True)] == ["interval"]
+    c.post_commit(a, "abc123", ["tests/x.py"])                                # outside the watched paths
+    assert docs not in {r["routine"] for r in c.routines(due=True)}
+    assert c.post_commit(a, "def456", ["src/a.py"])["routines_due"] == [docs]
+    assert {r["routine"]: r["why"] for r in c.routines(due=True)}[docs] == "commit def456"
+    c.routine_start(b, sec)                                                   # abandoned run frees itself
+    clock.t += 3601
+    a = c.whoami("claude")["session_id"]
+    c.routine_start(a, sec)
+    c.routine_done(a, sec, "2 CVEs in lodash", outcome="issues")              # issues -> a warning for all
+    assert c.inbox(kind="warning")[-1]["body"].startswith(f"[{sec}] Security review: issues")
+    runs = c.routine_get(sec)["runs"]
+    assert [(r["run"], r["outcome"]) for r in runs] == [(3, "issues"), (2, None), (1, "ok")]
+    c.routine_update(a, docs, status="paused")
+    assert docs not in {r["routine"] for r in c.routines(due=True)}
+    raises("not_active", c.routine_start, a, docs)
+    assert c.status()["due_routines"] == 0
+    c.routine_update(a, docs, status="active")
+    assert c.status()["due_routines"] == 1                                    # the commit it missed is kept
+
+
 # --- transport -----------------------------------------------------------
 def _serve(httpd):
     t = threading.Thread(target=httpd.serve_forever, daemon=True)

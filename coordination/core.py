@@ -28,9 +28,11 @@ STANCES = ("support", "object", "abstain", "need-more-info")
 CONSENSUS_RULES = ("unanimous", "majority", "no-objection")
 DEFAULT_QUORUM = 2   # consensus always involves someone besides the decider
 DOC_KINDS = ("note", "diagnosis", "plan", "proposal", "decision", "review", "adr")
-MEMORY_KINDS = ("overview", "convention", "architecture", "decision", "pitfall", "glossary")
+MEMORY_KINDS = ("strategy", "overview", "convention", "architecture", "decision", "pitfall", "glossary")
 TASK_STATUSES = ("open", "offered", "accepted", "done", "cancelled")   # offered: assigned, not yet accepted
 ROLES_BY_CONSENT = ("coeditor", "delegate")   # carry write duties: the grantee must accept them
+ROUTINE_STATUSES = ("active", "paused", "retired")
+ROUTINE_OUTCOMES = ("ok", "issues", "failed")   # issues/failed also post a warning
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -118,13 +120,25 @@ CREATE TABLE IF NOT EXISTS agent_profiles(
     session_id TEXT PRIMARY KEY, provider TEXT, model_id TEXT, model_family TEXT,
     category TEXT, reasoning_level TEXT, capabilities_json TEXT NOT NULL DEFAULT '[]',
     updated_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS routines(
+    routine_id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, title TEXT NOT NULL,
+    instructions TEXT NOT NULL DEFAULT '', every REAL, on_commit INTEGER NOT NULL DEFAULT 0,
+    paths TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'active', created_by TEXT NOT NULL,
+    pending INTEGER NOT NULL DEFAULT 1, pending_reason TEXT,
+    runner_session_id TEXT, runner_name TEXT, run_expires REAL,
+    last_run_at REAL, last_run_by TEXT, last_outcome TEXT, last_result TEXT,
+    created_at REAL NOT NULL, updated_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS routine_runs(
+    routine_id INTEGER NOT NULL, run INTEGER NOT NULL, session_id TEXT NOT NULL, name TEXT NOT NULL,
+    trigger TEXT, started_at REAL NOT NULL, finished_at REAL, outcome TEXT, result TEXT,
+    PRIMARY KEY(routine_id, run));
 CREATE TABLE IF NOT EXISTS idempotency(
     client_id TEXT PRIMARY KEY, op TEXT NOT NULL, result_json TEXT NOT NULL,
     created_at REAL NOT NULL);
 """
 
 PREFIX = {"claim": "C", "discussion": "D", "proposal": "P", "document": "DOC",
-          "task": "T", "memory": "M", "message": "#"}
+          "task": "T", "memory": "M", "message": "#", "routine": "R"}
 
 
 class CoordError(Exception):

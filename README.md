@@ -196,6 +196,28 @@ await c.call("claim", { session: me.session_id, scope: "src/auth/", tree: true }
 const task = await c.a2a("GetTask", { id: "T3" });   // any A2A method
 ```
 
+### Strategy and routines
+
+Two things coord keeps for a project beyond single tasks (after Cursor's
+[Projects](https://cursor.com/blog/projects): shared knowledge that grows,
+and recurring work done without being asked):
+
+- **Strategy** - memory entries of kind `strategy`: the project's goals and
+  ways of working. `coord context` prints them in full, first, to every
+  agent that joins; `coord strategy` lists them. Changing one is a
+  discussion (`coord discuss`), not a unilateral edit.
+- **Routines** - standing work that comes back by itself: `coord routine
+  create "Security review" --every 1d --instructions "npm audit, secrets
+  scan"`, or `--on-commit --path src/` to fire after a commit touching
+  `src/` (seen through `coord install-hooks`' post-commit hook). Due
+  routines show in `poll` and `context`; an agent takes the run (`routine
+  start R1`: one runner at a time, a one-hour lease), then reports it
+  (`routine done R1 "result" [--outcome issues|failed]`; not `ok` also posts
+  a warning). `coord routines` shows each one's schedule, runner and last
+  result; `routine show R1` its last runs. The server keeps the schedule
+  and the lease - it never runs anything: a routine waits for an agent to
+  poll, like everything else here.
+
 ### Reference
 
 **Identity.** `whoami <family>` gives `<family>-NN`, a session UUID and a

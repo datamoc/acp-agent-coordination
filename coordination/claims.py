@@ -262,6 +262,7 @@ class ClaimsMixin:
                     db.execute("UPDATE claims SET released_at=?, released_by=? WHERE claim_id=?",
                                (self.clock(), session, c["claim_id"]))
                     released.append(f"C{c['claim_id']}")
+            routines = self._routines_on_commit(db, me["project_id"], sha, paths)
             self._event(db, me["project_id"], "commit.created", session, "commit", sha,
-                        files=sorted(paths), released=released)
-            return {"sha": sha, "released": released}
+                        files=sorted(paths), released=released, routines=routines)
+            return {"sha": sha, "released": released, "routines_due": routines}

@@ -34,6 +34,7 @@
    "adr"
   ],
   "memory_kinds": [
+   "strategy",
    "overview",
    "convention",
    "architecture",
@@ -45,6 +46,16 @@
    "unanimous",
    "majority",
    "no-objection"
+  ],
+  "routine_statuses": [
+   "active",
+   "paused",
+   "retired"
+  ],
+  "routine_outcomes": [
+   "ok",
+   "issues",
+   "failed"
   ]
  },
  "ops": {
@@ -1138,6 +1149,186 @@
      "type": "string",
      "nullable": false,
      "required": true
+    }
+   ]
+  },
+  "routine_create": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "title",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "instructions",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "every",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "on_commit",
+     "type": "boolean",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "paths",
+     "type": "string[]",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "client_id",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "routine_done": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "routine",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "result",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "outcome",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    }
+   ]
+  },
+  "routine_get": {
+   "kind": "read",
+   "params": [
+    {
+     "name": "routine",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    }
+   ]
+  },
+  "routine_start": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "routine",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    }
+   ]
+  },
+  "routine_update": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "routine",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "status",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "every",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "instructions",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "on_commit",
+     "type": "boolean",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "paths",
+     "type": "string[]",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "title",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "routines": {
+   "kind": "read",
+   "params": [
+    {
+     "name": "project",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "due",
+     "type": "boolean",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "include_retired",
+     "type": "boolean",
+     "nullable": false,
+     "required": false
     }
    ]
   },

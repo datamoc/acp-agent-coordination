@@ -79,3 +79,28 @@ test("consensus through the CLI: participants, rule, computed result, visible re
   assert.match(content, /reason: release blocker/);
   assert.equal(coord(["discuss", "x", "--rule", "dictator"], as(lead)).code, 2);          // usage error
 });
+
+test("strategy and routines through the CLI", () => {
+  const dir = tmp();
+  const env = localEnv(join(dir, "r.db"));
+  const run = (args, session, ok = true) => {
+    const r = coord(["--json", ...args], { env: session ? { ...env, COORD_SESSION: session } : env, cwd: dir });
+    if (ok) assert.equal(r.code, 0, r.out + r.err);
+    return r.json;
+  };
+  const s = run(["whoami", "cli"]).session_id;
+  run(["memory", "add", "strategy", "Fidelity", "--content", "v3.3.8 first"], s);
+  assert.equal(run(["context"], s).strategy[0].content, "v3.3.8 first");
+  assert.equal(run(["strategy"])[0].title, "Fidelity");
+  const r = run(["routine", "create", "Security review", "--every", "1d", "--on-commit", "--path", "src/",
+                 "--instructions", "npm audit; grep for secrets"], s).routine;
+  assert.deepEqual(run(["poll"], s).routines.map((x) => x.routine), [r]);
+  const start = coord(["routine", "start", r], { env: { ...env, COORD_SESSION: s }, cwd: dir });
+  assert.match(start.out, /is yours until .+: Security review\n\nnpm audit; grep for secrets/);
+  assert.equal(run(["routine", "done", r, "2 advisories", "--outcome", "issues"], s).outcome, "issues");
+  assert.deepEqual(run(["routines", "--due"]), []);
+  const list = coord(["routines"], { env, cwd: dir });
+  assert.match(list.out, new RegExp(`^${r} \[next .+\] Security review \(every 1d \+ on commit \(src\)\) \| last issues by cli-01 .+: 2 advisories$`, "m"));
+  run(["routine", "pause", r], s);
+  assert.equal(run(["routine", "show", r]).status, "paused");
+});

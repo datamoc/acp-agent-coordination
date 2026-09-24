@@ -111,7 +111,10 @@ test("every CLI command sends a known op with only known params and all required
     ["role", "accept", "C1", "delegate"], ["role", "decline", "C1", "coeditor", "not mine"], ["memory", "show"], ["memory", "search", "q"],
     ["memory", "add", "pitfall", "T", "--content", "c"], ["memory", "edit", "M1", "--base-revision", "1", "--content", "c", "--archive"],
     ["context"], ["profile", "--category", "reasoning", "--capability", "debugging"], ["suggest", "--prefer-category", "reasoning"],
-    ["projects"], ["status"], ["events"],
+    ["projects"], ["status"], ["events"], ["strategy"], ["routines", "--due", "--all"],
+    ["routine", "create", "Sec", "--every", "1d", "--on-commit", "--path", "src/", "--instructions", "audit"], ["routine", "show", "R1"],
+    ["routine", "start", "R1"], ["routine", "done", "R1", "clean", "--outcome", "issues"], ["routine", "edit", "R1", "--every", "6h"],
+    ["routine", "pause", "R1"], ["routine", "resume", "R1"], ["routine", "retire", "R1"],
   ];
   process.env.COORD_SESSION = "s";
   process.env.COORD_PROJECT = "p";

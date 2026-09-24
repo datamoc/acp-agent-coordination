@@ -147,4 +147,5 @@ class MessagesMixin:
                 "tasks": [t for t in self.tasks(project=project, status="open")]
                 + self.tasks(project=project, status="offered", assigned_session=session)
                 + self.tasks(project=project, status="accepted", assigned_session=session),
-                "discussions": self.discussions(project=project)}
+                "discussions": self.discussions(project=project),
+                "routines": self.routines(project=project, due=True)}
