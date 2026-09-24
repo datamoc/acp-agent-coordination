@@ -60,6 +60,9 @@ NEWS = {
              "P1,P2,P3",
     "0.10.0": "the task graph (task create --after, task link, blocked tasks, unblock notices, tasks --graph) "
               "and a UI in tabs with the graph",
+    "0.10.1": "orphaned tasks are reclaimable: when a task's creator and assignee are both gone, any live "
+              "session may decline, do or cancel it (with the reason recorded) instead of blocking its "
+              "dependents forever",
 }
 SERVER_NAME = "coord-server"   # sender of the server's own messages (upgrade notices)
 
