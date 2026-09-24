@@ -1,12 +1,25 @@
 name: ci
 on: [push, pull_request]
 jobs:
-  test:
+  # Python across every supported version and OS (v2 §18): the server is stdlib-only, so this is
+  # what actually needs the matrix. The schema/plugin/TS checks below don't vary by Python version,
+  # so they run once (matrix job) rather than once per combination.
+  python:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
     runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: uv sync --locked
+      - run: uv run test_coord.py                     # server, PKI, renewal, OIDC, cert sources
+  test:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5

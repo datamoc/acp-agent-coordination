@@ -618,8 +618,9 @@ from 0.3: keep them on a branch (`git branch acp-0.2-local`), then
 
 ## GitLab (internal)
 
-- **CI**: `.gitlab-ci.yml` (Python server + TS client, same as GitHub). CI
-  variables: `UV_IMAGE` (mirror of the uv image), `CORPORATE_CA_PEM` (File,
+- **CI**: `.gitlab-ci.yml` (Python server + TS client, same Python 3.11-3.14
+  matrix as GitHub; macOS is GitHub-only). CI variables: `UV_IMAGE_PREFIX`
+  (mirror of the uv image, PY_VERSION appended), `CORPORATE_CA_PEM` (File,
   TLS-inspecting proxy), `UV_INDEX_URL`, `WINDOWS_RUNNER_TAG`.
 - **glab**: the GitLab CLI for agents (issues, MRs, CI) — it acts as the
   person who ran `glab auth login --hostname <host>`.

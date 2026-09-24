@@ -1,8 +1,11 @@
-# GitLab CI: the same suites as .github/workflows/ci.yml (Python server + TS client).
+# GitLab CI: the same suites as .github/workflows/ci.yml (Python server + TS client), across the
+# same Python 3.11-3.14 matrix (v2 §18) - macOS is GitHub-only, since GitLab.com's macOS runners
+# are a paid SaaS tier and self-hosted "internal" instances rarely have one at all.
 #
 # Project/group CI variables you may need on an internal instance:
-#   UV_IMAGE           an image with uv + Python (Node 22 is added if missing; mirror it if runners
-#                      cannot reach ghcr.io)
+#   UV_IMAGE_PREFIX    prefix of an image with uv + Python, PY_VERSION appended (Node 22 is added
+#                      if missing); mirror it if runners cannot reach ghcr.io, e.g.
+#                      registry.internal/uv:python (default ghcr.io/astral-sh/uv:python)
 #   CORPORATE_CA_PEM   "File" variable with the corporate root CA, when PyPI is reached
 #                      through a TLS-inspecting proxy (pyproject sets uv system-certs)
 #   UV_INDEX_URL       an internal PyPI mirror (e.g. a GitLab/Nexus proxy), if any
@@ -10,7 +13,7 @@
 #                      exists when this is set
 
 variables:
-  UV_IMAGE: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+  UV_IMAGE_PREFIX: ghcr.io/astral-sh/uv:python
   UV_CACHE_DIR: .uv-cache
   UV_LINK_MODE: copy
 
@@ -31,7 +34,10 @@ stages: [test]
 
 test:linux:
   stage: test
-  image: $UV_IMAGE
+  image: "${UV_IMAGE_PREFIX}${PY_VERSION}-bookworm-slim"
+  parallel:
+    matrix:
+      - PY_VERSION: ["3.11", "3.12", "3.13", "3.14"]
   extends: .uv-cache
   before_script:
     - apt-get update -qq && apt-get install -y -qq --no-install-recommends openssl git ca-certificates >/dev/null
