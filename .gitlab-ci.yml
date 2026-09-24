@@ -75,3 +75,25 @@ test:windows:
     - if: $WINDOWS_RUNNER_TAG == null || $WINDOWS_RUNNER_TAG == ""
       when: never
     - when: on_success
+
+# What a user installs (T26, v2 §18): the wheel and the npm tarball, each installed into a
+# fresh, isolated environment, then coord-server + coord whoami end to end - the same script
+# GitHub's `install` job runs.
+install:linux:
+  stage: test
+  image: "${UV_IMAGE_PREFIX}3.12-bookworm-slim"
+  extends: .uv-cache
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq --no-install-recommends openssl git ca-certificates >/dev/null
+    - |
+      if [ -n "$CORPORATE_CA_PEM" ]; then
+        cp "$CORPORATE_CA_PEM" /usr/local/share/ca-certificates/corporate-ca.crt && update-ca-certificates >/dev/null
+      fi
+    - |
+      if ! command -v node >/dev/null; then
+        apt-get install -y -qq nodejs npm >/dev/null
+      fi
+  script:
+    - bash tools/install-smoke.sh
+  after_script:
+    - uv cache prune --ci

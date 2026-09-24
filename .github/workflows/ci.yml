@@ -39,3 +39,16 @@ jobs:
       - run: npm run bundle-plugin && git diff --exit-code -- plugins/coord/client
         working-directory: clients/ts
         shell: bash
+  # What a user installs (T26, v2 §18): the wheel and the npm tarball, each installed into a
+  # fresh, isolated environment, then coord-server + coord whoami end to end - the same script
+  # the GitLab job runs. Linux only: the wheel is py3-none-any and the tarball is plain JS, and
+  # the matrix above already covers the checkout path on Windows/macOS.
+  install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: bash tools/install-smoke.sh
