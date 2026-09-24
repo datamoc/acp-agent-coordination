@@ -1,0 +1,193 @@
+{
+  "schema_version": 1,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "A routine's life: due, run, report",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1080,
+      680
+    ]
+  },
+  "lanes": [
+    {
+      "id": "main",
+      "label": "Cycle"
+    },
+    {
+      "id": "exceptions",
+      "label": "Recovery"
+    },
+    {
+      "id": "terminal",
+      "label": "End"
+    }
+  ],
+  "states": [
+    {
+      "id": "created",
+      "type": "start",
+      "label": "Created",
+      "sublabel": "routine create",
+      "lane": "main",
+      "col": 0,
+      "step": "01",
+      "tag": "first run due"
+    },
+    {
+      "id": "due",
+      "type": "decision",
+      "label": "Due",
+      "sublabel": "interval or commit",
+      "lane": "main",
+      "col": 1,
+      "step": "02",
+      "tag": "in poll + context"
+    },
+    {
+      "id": "running",
+      "type": "active",
+      "label": "Running",
+      "sublabel": "routine start",
+      "lane": "main",
+      "col": 2,
+      "step": "03",
+      "tag": "1 h lease"
+    },
+    {
+      "id": "reported",
+      "type": "decision",
+      "label": "Reported",
+      "sublabel": "routine done",
+      "lane": "main",
+      "col": 3,
+      "step": "04",
+      "tag": "outcome"
+    },
+    {
+      "id": "ok",
+      "type": "success",
+      "label": "ok",
+      "sublabel": "last result kept",
+      "lane": "main",
+      "col": 4,
+      "step": "05",
+      "tag": "run history"
+    },
+    {
+      "id": "abandoned",
+      "type": "failure",
+      "label": "Abandoned",
+      "sublabel": "lease expired",
+      "lane": "exceptions",
+      "col": 0,
+      "tag": "frees itself"
+    },
+    {
+      "id": "issues",
+      "type": "failure",
+      "label": "issues / failed",
+      "sublabel": "warning to all",
+      "lane": "exceptions",
+      "col": 1,
+      "tag": "stays scheduled"
+    },
+    {
+      "id": "retired",
+      "type": "neutral",
+      "label": "Retired",
+      "sublabel": "routine retire",
+      "lane": "terminal",
+      "col": 2,
+      "tag": "terminal"
+    }
+  ],
+  "transitions": [
+    {
+      "id": "created-due",
+      "from": "created",
+      "to": "due",
+      "variant": "emphasis"
+    },
+    {
+      "id": "due-running",
+      "from": "due",
+      "to": "running",
+      "variant": "emphasis"
+    },
+    {
+      "id": "running-reported",
+      "from": "running",
+      "to": "reported",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left",
+      "route": "straight"
+    },
+    {
+      "id": "reported-ok",
+      "from": "reported",
+      "to": "ok",
+      "variant": "emphasis"
+    },
+    {
+      "id": "running-abandoned",
+      "from": "running",
+      "to": "abandoned",
+      "variant": "security"
+    },
+    {
+      "id": "abandoned-running",
+      "from": "abandoned",
+      "to": "running",
+      "label": "taken again",
+      "variant": "dashed",
+      "labelDx": -34
+    },
+    {
+      "id": "reported-issues",
+      "from": "reported",
+      "to": "issues",
+      "variant": "security"
+    },
+    {
+      "id": "issues-running",
+      "from": "issues",
+      "to": "running",
+      "label": "next run",
+      "variant": "dashed"
+    },
+    {
+      "id": "ok-retired",
+      "from": "ok",
+      "to": "retired",
+      "variant": "default"
+    },
+    {
+      "id": "ok-due",
+      "from": "ok",
+      "to": "due",
+      "label": "next interval or commit",
+      "variant": "dashed",
+      "route": "top-channel"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Schedule",
+      "items": [
+        "--every 30m | 6h | 1d | 2w, and/or --on-commit --path src/",
+        "pause / resume keep the commits missed meanwhile"
+      ]
+    },
+    {
+      "dot": "orange",
+      "title": "One runner",
+      "items": [
+        "routine start takes a one-hour lease; others see running: <name>",
+        "The server keeps schedule and lease, never runs anything"
+      ]
+    }
+  ]
+}

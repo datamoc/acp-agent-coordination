@@ -1,0 +1,185 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "Two agents, one file: claim, conflict, question, release",
+    "quality_profile": "showcase",
+    "column_fit": "spread",
+    "viewBox": [
+      1080,
+      630
+    ],
+    "views": [
+      {
+        "id": "join-claim",
+        "label": "Join and claim",
+        "focus": [
+          "claude",
+          "server"
+        ],
+        "note": "whoami names the session; the claim is checked for overlap inside one BEGIN IMMEDIATE transaction."
+      },
+      {
+        "id": "conflict",
+        "label": "Conflict, then a question",
+        "focus": [
+          "codex",
+          "server",
+          "claude"
+        ],
+        "note": "The second agent does not edit: it asks the owner, who reads it at its next poll."
+      },
+      {
+        "id": "release",
+        "label": "Release and hand over",
+        "focus": [
+          "claude",
+          "server",
+          "codex"
+        ],
+        "note": "Releasing the claim lets the waiting agent claim the file."
+      }
+    ]
+  },
+  "participants": [
+    {
+      "id": "claude",
+      "type": "external",
+      "label": "claude-01",
+      "sublabel": "Claude Code session"
+    },
+    {
+      "id": "server",
+      "type": "backend",
+      "label": "coord-server",
+      "sublabel": "claims in SQLite"
+    },
+    {
+      "id": "codex",
+      "type": "external",
+      "label": "codex-01",
+      "sublabel": "Codex session"
+    }
+  ],
+  "segments": [
+    {
+      "from": 150,
+      "to": 266,
+      "label": "Join and claim"
+    },
+    {
+      "from": 280,
+      "to": 420,
+      "label": "Conflict: ask, don't edit"
+    },
+    {
+      "from": 434,
+      "to": 540,
+      "label": "Release and hand over"
+    }
+  ],
+  "messages": [
+    {
+      "from": "claude",
+      "to": "server",
+      "y": 168,
+      "label": "whoami claude",
+      "variant": "emphasis"
+    },
+    {
+      "from": "server",
+      "to": "claude",
+      "y": 196,
+      "label": "claude-01 + session_id",
+      "variant": "return"
+    },
+    {
+      "from": "claude",
+      "to": "server",
+      "y": 224,
+      "label": "claim src/auth/",
+      "variant": "emphasis"
+    },
+    {
+      "from": "server",
+      "to": "claude",
+      "y": 252,
+      "label": "C12 fence=12",
+      "variant": "return"
+    },
+    {
+      "from": "codex",
+      "to": "server",
+      "y": 296,
+      "label": "claim src/auth/login.py",
+      "variant": "emphasis"
+    },
+    {
+      "from": "server",
+      "to": "codex",
+      "y": 324,
+      "label": "conflict: C12 by claude-01",
+      "variant": "return"
+    },
+    {
+      "from": "codex",
+      "to": "server",
+      "y": 352,
+      "label": "post --to claude-01 question",
+      "variant": "default"
+    },
+    {
+      "from": "claude",
+      "to": "server",
+      "y": 380,
+      "label": "poll",
+      "variant": "dashed"
+    },
+    {
+      "from": "server",
+      "to": "claude",
+      "y": 408,
+      "label": "#41 question from codex-01",
+      "variant": "return"
+    },
+    {
+      "from": "claude",
+      "to": "server",
+      "y": 448,
+      "label": "reply 41 + release C12",
+      "variant": "emphasis"
+    },
+    {
+      "from": "codex",
+      "to": "server",
+      "y": 476,
+      "label": "poll, then claim login.py",
+      "variant": "default"
+    },
+    {
+      "from": "server",
+      "to": "codex",
+      "y": 504,
+      "label": "C13 fence=13: edit",
+      "variant": "return"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Claims",
+      "items": [
+        "A file, or a whole tree with a trailing /",
+        "Overlap checked in one transaction; a fence rejects stale writers"
+      ]
+    },
+    {
+      "dot": "orange",
+      "title": "On conflict",
+      "items": [
+        "Don't edit: ask the owner, who reads it at its next poll",
+        "Agents poll: nothing is pushed; claims lapse if a session dies"
+      ]
+    }
+  ]
+}

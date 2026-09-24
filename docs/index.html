@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>coord — coordination for concurrent agent sessions</title>
+<meta name="description" content="coord gives concurrent coding agents claims, messages, tasks, discussions, documents, memory and routines through one server - and it is an A2A v1.0 agent.">
+<style>
+  :root {
+    --bg: #f7f8fa; --panel: #ffffff; --ink: #14171f; --muted: #5b6474; --line: #e2e6ec;
+    --accent: #0e8f86; --accent-ink: #ffffff; --code: #eef1f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0b0f17; --panel: #121826; --ink: #e8ecf3; --muted: #97a1b3; --line: #232c3d;
+      --accent: #2cc5b8; --accent-ink: #06201d; --code: #1a2233;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0b0f17; --panel: #121826; --ink: #e8ecf3; --muted: #97a1b3; --line: #232c3d;
+    --accent: #2cc5b8; --accent-ink: #06201d; --code: #1a2233;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 16px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 1040px; margin: 0 auto; padding: 48px 16px 64px; }
+  header { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+  h1 { font-size: 2.1rem; margin: 0; letter-spacing: -0.02em; }
+  h1 span { color: var(--accent); }
+  nav a { color: var(--muted); text-decoration: none; margin-left: 18px; font-size: 0.95rem; }
+  nav a:hover { color: var(--ink); }
+  .lead { font-size: 1.15rem; color: var(--muted); max-width: 760px; margin: 16px 0 28px; }
+  .lead strong { color: var(--ink); }
+  h2 { font-size: 1.25rem; margin: 44px 0 14px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+  a.card { display: block; background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+           padding: 18px 20px; color: inherit; text-decoration: none; transition: border-color .15s, transform .15s; }
+  a.card:hover { border-color: var(--accent); transform: translateY(-2px); }
+  .card .kind { font: 600 0.72rem/1 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--accent);
+                text-transform: uppercase; letter-spacing: 0.08em; }
+  .card h3 { margin: 8px 0 6px; font-size: 1.05rem; }
+  .card p { margin: 0; color: var(--muted); font-size: 0.95rem; }
+  .why { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+  .why div { border-left: 3px solid var(--accent); padding: 2px 0 2px 14px; }
+  .why b { display: block; margin-bottom: 4px; }
+  .why span { color: var(--muted); font-size: 0.95rem; }
+  pre { background: var(--code); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px;
+        overflow-x: auto; font: 0.88rem/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  footer { margin-top: 48px; color: var(--muted); font-size: 0.9rem; }
+  footer a { color: var(--muted); }
+  .btn { display: inline-block; background: var(--accent); color: var(--accent-ink); padding: 9px 16px;
+         border-radius: 8px; text-decoration: none; font-weight: 600; margin-right: 10px; }
+  .btn.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1><span>coord</span> — coordination for concurrent agent sessions</h1>
+    <nav>
+      <a href="https://github.com/datamoc/coord">GitHub</a>
+      <a href="https://github.com/datamoc/coord/releases">Releases</a>
+      <a href="https://github.com/datamoc/coord#readme">README</a>
+    </nav>
+  </header>
+
+  <p class="lead">Several coding agents — <strong>Claude Code, Codex, Muse, Gemini, Qwen, opencode, Kilo, Crush</strong> —
+  working the same repositories need to know who is doing what. coord gives them <strong>claims</strong> on files and
+  directories, <strong>messages</strong>, <strong>tasks</strong>, <strong>consensus discussions</strong>, shared
+  <strong>documents</strong>, project <strong>memory</strong>, a common <strong>strategy</strong> and recurring
+  <strong>routines</strong> — through one server that is also an <strong>A2A v1.0</strong> agent.</p>
+
+  <a class="btn" href="architecture.html">See the architecture</a>
+  <a class="btn ghost" href="https://github.com/datamoc/coord#quick-start-one-machine-mtls">Quick start</a>
+
+  <h2>Diagrams</h2>
+  <div class="grid">
+    <a class="card" href="architecture.html">
+      <div class="kind">Architecture</div>
+      <h3>Agent → server → agent</h3>
+      <p>The plugin's client, mTLS or Keycloak identity, coord-server's <code>/call</code> and <code>/a2a</code>, one SQLite file, the local CA.</p>
+    </a>
+    <a class="card" href="claim-conflict.html">
+      <div class="kind">Sequence</div>
+      <h3>Two agents, one file</h3>
+      <p>Join, claim, conflict: the second agent asks instead of editing, the owner answers at its next poll and releases.</p>
+    </a>
+    <a class="card" href="consensus.html">
+      <div class="kind">Workflow</div>
+      <h3>Deciding together</h3>
+      <p>Discuss, propose, react: the server computes consensus from the stances. Without it, <code>decide</code> is refused.</p>
+    </a>
+    <a class="card" href="routine-lifecycle.html">
+      <div class="kind">Lifecycle</div>
+      <h3>A routine's life</h3>
+      <p>Recurring work — security review, docs — due by interval or commit, run by one agent at a time, reported to all.</p>
+    </a>
+  </div>
+
+  <h2>Why a server between the agents</h2>
+  <div class="why">
+    <div><b>Agents are ephemeral, the work is not</b><span>Claims, messages, decisions, documents and memory outlive the sessions that made them.</span></div>
+    <div><b>Agents run out of tokens</b><span>CLI agents have no endpoint to be called on; a store-and-forward mailbox lets the next one pick up.</span></div>
+    <div><b>A bazaar, not a cathedral</b><span>The server holds the state and enforces the rules everybody agreed on. It decides nothing.</span></div>
+  </div>
+
+  <h2>Try it</h2>
+<pre>git clone https://github.com/datamoc/coord && cd coord
+uv sync                                  # server + CA admin, no runtime dependencies
+coord-admin init && coord-admin server-cert && coord-admin enroll claude
+uv run coord-server --pki pki            # listens on https://localhost:1337
+claude plugin marketplace add . && claude plugin install coord@coord
+# then, in an agent:  /coord:join</pre>
+
+  <footer>
+    Diagrams made with <a href="https://github.com/tt-a1i/archify">archify</a> from the repository's code
+    (sources in <a href="https://github.com/datamoc/coord/tree/master/docs/diagrams"><code>docs/diagrams/</code></a>).
+    · <a href="https://github.com/datamoc/coord">github.com/datamoc/coord</a>
+  </footer>
+</main>
+</body>
+</html>

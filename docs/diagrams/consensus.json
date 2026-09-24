@@ -1,0 +1,266 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Deciding together: consensus is computed, never declared",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "happy-path",
+        "label": "Discussion to decision",
+        "focus": [
+          "open",
+          "invite",
+          "propose",
+          "react",
+          "compute",
+          "decide",
+          "record"
+        ],
+        "note": "An agent opens it, the participants propose and react; the server computes consensus, then any participant may decide."
+      },
+      {
+        "id": "no-consensus",
+        "label": "Without consensus",
+        "focus": [
+          "compute",
+          "refused",
+          "override",
+          "record"
+        ],
+        "note": "decide is refused; only the opener may override, and the reason is recorded."
+      }
+    ],
+    "legend": {
+      "mode": "auto",
+      "entries": {
+        "external": {
+          "label": "agent command"
+        },
+        "messagebus": {
+          "label": "messages"
+        },
+        "backend": {
+          "label": "server check"
+        },
+        "database": {
+          "label": "recorded"
+        },
+        "security": {
+          "label": "refusal / override"
+        }
+      }
+    }
+  },
+  "lanes": [
+    {
+      "id": "agents",
+      "label": "Agents"
+    },
+    {
+      "id": "server",
+      "label": "coord-server"
+    },
+    {
+      "id": "exception",
+      "label": "No consensus",
+      "variant": "exception"
+    }
+  ],
+  "phases": [
+    {
+      "id": "open-phase",
+      "label": "Open",
+      "fromCol": 0,
+      "toCol": 1
+    },
+    {
+      "id": "debate",
+      "label": "Propose + react",
+      "fromCol": 2,
+      "toCol": 3,
+      "variant": "emphasis"
+    },
+    {
+      "id": "close",
+      "label": "Compute + decide",
+      "fromCol": 4,
+      "toCol": 5
+    }
+  ],
+  "mainPath": [
+    "open",
+    "invite",
+    "propose",
+    "react",
+    "compute",
+    "decide",
+    "record"
+  ],
+  "nodes": [
+    {
+      "id": "open",
+      "lane": "agents",
+      "col": 0,
+      "type": "external",
+      "label": "discuss",
+      "sublabel": "topic, --with, --rule",
+      "width": 140
+    },
+    {
+      "id": "invite",
+      "lane": "server",
+      "col": 1,
+      "type": "messagebus",
+      "label": "Invitations",
+      "sublabel": "direct messages",
+      "width": 140
+    },
+    {
+      "id": "propose",
+      "lane": "agents",
+      "col": 2,
+      "type": "external",
+      "label": "propose",
+      "sublabel": "P7 in D3",
+      "width": 140
+    },
+    {
+      "id": "react",
+      "lane": "agents",
+      "col": 3,
+      "type": "external",
+      "label": "react",
+      "sublabel": "support / object / abstain",
+      "width": 150
+    },
+    {
+      "id": "compute",
+      "lane": "server",
+      "col": 4,
+      "type": "backend",
+      "label": "Consensus?",
+      "sublabel": "rule + quorum",
+      "tag": "deadline: silence agrees",
+      "width": 150
+    },
+    {
+      "id": "decide",
+      "lane": "agents",
+      "col": 5,
+      "type": "external",
+      "label": "decide",
+      "sublabel": "--proposal P7",
+      "width": 140
+    },
+    {
+      "id": "record",
+      "lane": "server",
+      "col": 5,
+      "type": "database",
+      "label": "Decision",
+      "sublabel": "document + notices",
+      "width": 140
+    },
+    {
+      "id": "refused",
+      "lane": "exception",
+      "col": 4,
+      "type": "security",
+      "label": "decide refused",
+      "sublabel": "why not: listed",
+      "width": 150
+    },
+    {
+      "id": "override",
+      "lane": "exception",
+      "col": 5,
+      "type": "security",
+      "label": "--no-consensus",
+      "sublabel": "opener, with a reason",
+      "width": 150
+    }
+  ],
+  "edges": [
+    {
+      "id": "open-invite",
+      "from": "open",
+      "to": "invite",
+      "variant": "emphasis"
+    },
+    {
+      "id": "invite-propose",
+      "from": "invite",
+      "to": "propose",
+      "fromSide": "right",
+      "toSide": "bottom"
+    },
+    {
+      "id": "propose-react",
+      "from": "propose",
+      "to": "react",
+      "label": "stances"
+    },
+    {
+      "id": "react-compute",
+      "from": "react",
+      "to": "compute"
+    },
+    {
+      "id": "compute-decide",
+      "from": "compute",
+      "to": "decide",
+      "label": "reached",
+      "variant": "emphasis"
+    },
+    {
+      "id": "decide-record",
+      "from": "decide",
+      "to": "record",
+      "variant": "emphasis"
+    },
+    {
+      "id": "compute-refused",
+      "from": "compute",
+      "to": "refused",
+      "label": "not reached",
+      "variant": "security",
+      "role": "error",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "refused-override",
+      "from": "refused",
+      "to": "override",
+      "variant": "dashed",
+      "role": "branch"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Rules",
+      "items": [
+        "unanimous, majority or no-objection",
+        "A quorum: someone besides the decider"
+      ]
+    },
+    {
+      "dot": "orange",
+      "title": "Deadlines",
+      "items": [
+        "After the deadline, silence counts as agreement",
+        "coord discussion D3 says why consensus is not reached"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "No shortcut",
+      "items": [
+        "Never claim consensus in a post",
+        "An override is recorded with its reason"
+      ]
+    }
+  ]
+}

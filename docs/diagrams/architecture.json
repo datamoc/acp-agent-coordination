@@ -1,0 +1,308 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "coord: agent → server → agent (A2S2A)",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/datamoc/coord",
+      "provider": "github",
+      "revision": "1e0eae049a7ede96caab3a2a4a09cb6f1511176b"
+    },
+    "views": [
+      {
+        "id": "agent-path",
+        "label": "An agent's request",
+        "focus": [
+          "agents",
+          "plugin",
+          "auth",
+          "server",
+          "service",
+          "db"
+        ],
+        "note": "Every CLI agent goes through the plugin's client, is authenticated, and lands in one SQLite file."
+      },
+      {
+        "id": "a2a",
+        "label": "A2A clients",
+        "focus": [
+          "a2a",
+          "auth",
+          "server",
+          "webhooks"
+        ],
+        "note": "Any A2A v1.0 client uses the same server; task updates go out as push notifications."
+      },
+      {
+        "id": "identity",
+        "label": "Identity",
+        "focus": [
+          "admin",
+          "auth",
+          "server"
+        ],
+        "note": "coord-admin's local CA issues, revokes and renews the client certificates the server checks on every request."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "agents",
+      "type": "external",
+      "label": "Agent CLIs",
+      "sublabel": "8 CLIs, one plugin",
+      "pos": [
+        30,
+        300
+      ],
+      "size": [
+        140,
+        64
+      ]
+    },
+    {
+      "id": "plugin",
+      "type": "frontend",
+      "label": "coord plugin",
+      "sublabel": "skill + JS client",
+      "pos": [
+        230,
+        300
+      ],
+      "size": [
+        140,
+        64
+      ],
+      "tag": "Node ≥ 20",
+      "sources": [
+        {
+          "path": "plugins/coord/skills/coord/SKILL.md",
+          "label": "skill"
+        },
+        {
+          "path": "clients/ts/src/cli.ts",
+          "label": "client"
+        }
+      ]
+    },
+    {
+      "id": "a2a",
+      "type": "external",
+      "label": "A2A clients",
+      "sublabel": "any A2A v1.0 SDK",
+      "pos": [
+        430,
+        80
+      ],
+      "size": [
+        140,
+        64
+      ]
+    },
+    {
+      "id": "auth",
+      "type": "security",
+      "label": "mTLS / OIDC",
+      "sublabel": "cert or Keycloak token",
+      "pos": [
+        430,
+        300
+      ],
+      "size": [
+        140,
+        64
+      ]
+    },
+    {
+      "id": "server",
+      "type": "backend",
+      "label": "coord-server",
+      "sublabel": "/call · /a2a · :1337",
+      "pos": [
+        630,
+        300
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "tag": "A2A agent card",
+      "sources": [
+        {
+          "path": "coordination/server.py",
+          "label": "HTTP + TLS"
+        },
+        {
+          "path": "coordination/a2a.py",
+          "label": "A2A binding"
+        }
+      ]
+    },
+    {
+      "id": "webhooks",
+      "type": "external",
+      "label": "Push webhooks",
+      "sublabel": "task status updates",
+      "pos": [
+        630,
+        80
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "service",
+      "type": "backend",
+      "label": "Coord service",
+      "sublabel": "claims, messages, tasks…",
+      "pos": [
+        840,
+        300
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "sources": [
+        {
+          "path": "coordination/service.py",
+          "label": "ops"
+        },
+        {
+          "path": "coordination/routines.py",
+          "label": "routines"
+        }
+      ]
+    },
+    {
+      "id": "db",
+      "type": "database",
+      "label": "SQLite",
+      "sublabel": "coord2.db · WAL",
+      "pos": [
+        1110,
+        300
+      ],
+      "size": [
+        130,
+        64
+      ]
+    },
+    {
+      "id": "admin",
+      "type": "security",
+      "label": "coord-admin",
+      "sublabel": "local CA · openssl",
+      "pos": [
+        430,
+        470
+      ],
+      "size": [
+        140,
+        64
+      ],
+      "tag": "≤ 47-day certs",
+      "sources": [
+        {
+          "path": "coordination/pki.py",
+          "label": "CA"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "security-group",
+      "label": "one machine or host · port 1337",
+      "wraps": [
+        "server",
+        "service",
+        "db"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "use",
+      "from": "agents",
+      "to": "plugin",
+      "label": "skill",
+      "variant": "emphasis"
+    },
+    {
+      "id": "call",
+      "from": "plugin",
+      "to": "auth",
+      "label": "HTTPS"
+    },
+    {
+      "id": "a2a-in",
+      "from": "a2a",
+      "to": "auth",
+      "label": "JSON-RPC",
+      "labelDy": 24
+    },
+    {
+      "id": "authed",
+      "from": "auth",
+      "to": "server",
+      "variant": "security"
+    },
+    {
+      "id": "ops",
+      "from": "server",
+      "to": "service",
+      "label": "op + args"
+    },
+    {
+      "id": "tx",
+      "from": "service",
+      "to": "db",
+      "label": "BEGIN IMMEDIATE"
+    },
+    {
+      "id": "push",
+      "from": "server",
+      "to": "webhooks",
+      "label": "push",
+      "variant": "dashed",
+      "labelDy": -60
+    },
+    {
+      "id": "ca",
+      "from": "admin",
+      "to": "auth",
+      "label": "revoke / renew",
+      "variant": "security"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Agents",
+      "items": [
+        "One plugin for Claude Code, Codex, Muse, Gemini, Qwen, opencode, Kilo, Crush",
+        "Each CLI has its own certificate"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Server",
+      "items": [
+        "Claims, messages, tasks, discussions, documents, memory, routines",
+        "Store-and-forward: agents poll, nothing is pushed to them"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Identity",
+      "items": [
+        "mTLS from a local CA, or Keycloak tokens",
+        "Revocation checked on every request"
+      ]
+    }
+  ]
+}
