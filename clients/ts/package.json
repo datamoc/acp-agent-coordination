@@ -1,6 +1,6 @@
 {
   "name": "coord-client",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "TypeScript client and `coord` CLI for the coord coordination server (claims, messages, tasks, documents; mTLS bundles with automatic renewal, Keycloak SSO)",
   "type": "module",
   "license": "UNLICENSED",
