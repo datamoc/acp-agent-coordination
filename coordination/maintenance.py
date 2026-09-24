@@ -3,6 +3,7 @@
     coord-db export [--project P] [--out file.json]   every table (a project's rows only with --project)
     coord-db prune --older-than 30d [--apply]         dry run unless --apply
     coord-db vacuum                                   checkpoint the WAL and compact the file
+    coord-db merge-project OLD NEW [--apply]          move everything of project OLD into NEW
 
 prune only removes what nobody needs to read again: events, idempotency keys, ended sessions,
 released claims (and their roles), finished routine runs, and messages - except unresolved
@@ -19,7 +20,7 @@ import time
 from pathlib import Path
 
 from . import state_home
-from .core import CoordBase, parse_when
+from .core import SERVER_NAME, CoordBase, parse_when
 
 
 def _db(path: str) -> sqlite3.Connection:
@@ -83,6 +84,50 @@ def prune(path: str, older_than: str, apply: bool = False) -> dict:
     return {"older_than": older_than, "applied": apply, "removed" if apply else "would_remove": counts}
 
 
+def merge_project(path: str, old: str, new: str, apply: bool = False) -> dict:
+    """Move every row of project `old` into `new` (a renamed repository, or sessions that joined under
+    a wrong project id). A dry run unless `apply`; one transaction."""
+    if old == new:
+        raise SystemExit("coord-db: OLD and NEW are the same project")
+    db = _db(path)
+    tables = [r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")]
+    counts = {}
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        if not db.execute("SELECT 1 FROM repos WHERE project_id=? UNION SELECT 1 FROM sessions WHERE project_id=?",
+                          (old, old)).fetchone():
+            raise SystemExit(f"coord-db: no project {old!r}")
+        moved_ids = {r[0] for r in db.execute("SELECT id FROM messages WHERE project_id=?", (old,))}
+        for t in tables:
+            if t == "repos" or "project_id" not in {r[1] for r in db.execute(f"PRAGMA table_info({t})")}:
+                continue
+            n = db.execute(f"SELECT COUNT(*) FROM {t} WHERE project_id=?", (old,)).fetchone()[0]
+            if n:
+                counts[t] = n
+                if apply:
+                    db.execute(f"UPDATE {t} SET project_id=? WHERE project_id=?", (new, old))
+        open_ids = [r[0] for r in db.execute("SELECT id FROM messages WHERE project_id=? AND resolved_at IS NULL AND"
+                                             " kind IN ('question','warning') ORDER BY id", (new if apply else old,))
+                    if not apply or r[0] in moved_ids]
+        if apply:
+            db.execute("INSERT OR IGNORE INTO repos(project_id, provider, created_at) SELECT ?, provider, created_at"
+                       " FROM repos WHERE project_id=?", (new, old))
+            db.execute("DELETE FROM repos WHERE project_id=?", (old,))
+            if counts.get("messages"):     # their ids are older than the live cursors: poll would never show them
+                note = (f"{counts['messages']} messages from project {old} were merged into this one"
+                        + (f"; still open: {', '.join(f'#{i}' for i in open_ids)} (coord thread N)" if open_ids else ""))
+                db.execute("INSERT INTO messages(project_id, from_session_id, from_name, kind, body, created_at)"
+                           " VALUES(?,?,?,?,?,?)", (new, SERVER_NAME, SERVER_NAME, "info", note, time.time()))
+        db.execute("COMMIT" if apply else "ROLLBACK")
+    except BaseException:
+        db.execute("ROLLBACK")
+        raise
+    finally:
+        db.close()
+    return {"from": old, "into": new, "applied": apply, "moved" if apply else "would_move": counts,
+            "open_messages": open_ids}
+
+
 def vacuum(path: str) -> dict:
     before = os.path.getsize(path)
     db = _db(path)
@@ -104,6 +149,9 @@ def main(argv=None) -> int:
     r.add_argument("--older-than", required=True, help="30d, 12h, ...")
     r.add_argument("--apply", action="store_true")
     sub.add_parser("vacuum", help="checkpoint the WAL and compact the file")
+    m = sub.add_parser("merge-project", help="move project OLD into NEW (a rename, a wrong project id); dry run "
+                       "without --apply")
+    m.add_argument("old"); m.add_argument("new"); m.add_argument("--apply", action="store_true")
     a = p.parse_args(argv)
     if not Path(a.db).exists():
         print(f"coord-db: no database at {a.db}", file=sys.stderr)
@@ -117,6 +165,8 @@ def main(argv=None) -> int:
             print(data)
     elif a.cmd == "prune":
         print(json.dumps(prune(a.db, a.older_than, a.apply)))
+    elif a.cmd == "merge-project":
+        print(json.dumps(merge_project(a.db, a.old, a.new, a.apply)))
     else:
         print(json.dumps(vacuum(a.db)))
     return 0

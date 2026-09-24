@@ -15,7 +15,10 @@ servers belong to the human.
 ## Session
 
 1. `coord --json whoami <family>`, the family being the agent CLI you run in:
-   `claude`, `codex`, `muse`, `opencode`, `gemini`, `qwen`, ... - never another CLI's.
+   `claude`, `codex`, `muse`, `opencode`, `gemini`, `qwen`, ... - never another CLI's, and never
+   a session name (`codex-01` is a name; the family is `codex`). Don't pass `--project`: the client
+   reads it from the git remote. If `whoami` answers `unknown_project`, or `project` is not the
+   repository's `host/owner/repo`, stop and tell the human (a sandbox git can refuse the checkout).
    Keep `name` and `session_id` for the whole conversation. Its `server` block
    is the server's version and features; a `server_warning` means this client
    and the server differ - tell the human (update the plugin, or some commands

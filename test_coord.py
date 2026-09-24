@@ -668,6 +668,40 @@ def coord_db_prunes_only_what_nobody_reads():
 
 
 @check
+def whoami_refuses_session_names_and_bare_project_names():
+    """An agent whose sandbox could not read git improvised `whoami codex-01 --project mwg-pixel-dungeon`:
+    a session name as family, and a project nobody else was in. Both are refused, with the fix."""
+    c, _ = fresh()
+    c.whoami("claude", project="github.com/datamoc/mwg-pixel-dungeon")
+    e = raises("bad_family", c.whoami, "codex-01", project="github.com/datamoc/mwg-pixel-dungeon")
+    assert e.data == {"family": "codex"}
+    e = raises("unknown_project", c.whoami, "codex", project="mwg-pixel-dungeon")
+    assert e.data == {"did_you_mean": ["github.com/datamoc/mwg-pixel-dungeon"]}
+    assert c.whoami("codex", project="scratch")["project"] == "scratch"      # a bare name nobody uses: local mode
+
+
+@check
+def coord_db_merges_a_project_into_another():
+    from coordination import maintenance
+    c, _ = fresh()
+    good = c.whoami("claude", project="github.com/o/repo")["session_id"]
+    stray = c.whoami("codex", project="scratch")["session_id"]
+    with c._tx() as db:                                                   # as if it joined before the guard
+        db.execute("UPDATE sessions SET project_id='repo' WHERE session_id=?", (stray,))
+        db.execute("UPDATE repos SET project_id='repo' WHERE project_id='scratch'")
+    q = c.post(stray, "is the size budget still yours?", kind="question")["id"]
+    c.post(stray, "done with the verifier", kind="done")
+    dry = maintenance.merge_project(str(c.path), "repo", "github.com/o/repo")
+    assert not dry["applied"] and dry["would_move"]["messages"] == 2 and dry["open_messages"] == [q]
+    out = maintenance.merge_project(str(c.path), "repo", "github.com/o/repo", apply=True)
+    assert out["moved"]["sessions"] == 1 and out["moved"]["messages"] == 2
+    assert [p["project"] for p in c.projects()] == ["github.com/o/repo"]
+    note = c.inbox(project="github.com/o/repo", limit=None)[-1]
+    assert note["from"] == "coord-server" and f"#{q}" in note["body"]
+    assert c.inbox(good, limit=None)[0]["body"] == "is the size budget still yours?"   # now visible to the others
+
+
+@check
 def server_publishes_its_version_and_features():
     c, _ = fresh()
     who = c.whoami("claude")

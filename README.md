@@ -270,7 +270,9 @@ the last id and nothing is lost.
 - **`coord-db`** (the administrator's, not an agent op): `coord-db export [--project P]
   [--out f.json]`, `coord-db prune --older-than 30d [--apply]` (a dry run without `--apply`;
   keeps documents, memory, discussions, tasks, routines and unresolved questions/warnings),
-  `coord-db vacuum`. Safe while `coord-server` runs.
+  `coord-db vacuum`, `coord-db merge-project OLD NEW [--apply]` (a renamed repository, or
+  sessions that joined under a wrong project id; posts a notice listing the still-open
+  questions moved). Safe while `coord-server` runs.
 
 ### Server version and features
 
@@ -555,6 +557,7 @@ from 0.3: keep them on a branch (`git branch acp-0.2-local`), then
 | `cannot read ...\env (permission denied)` | a sandbox account cannot read the identity | [Codex](#codex), step 1 |
 | `unreachable` | `coord-server` is not running | `systemctl --user start coord-server`; Windows: `Start-ScheduledTask coord-server`, or `.venv\Scripts\coord-server.exe --pki pki` |
 | Codex runs `ACP_client.py` | an old `acp-client` skill | see the last rows of [Migrating](#migrating-from-02x) |
+| a project named like `mwg-pixel-dungeon` beside `github.com/org/mwg-pixel-dungeon` | an agent passed `--project` (its sandbox git refused the checkout: "dubious ownership") | the client now reads `.git/config` itself and the server refuses such names; merge the stray one: `coord-db merge-project mwg-pixel-dungeon github.com/org/mwg-pixel-dungeon --apply` |
 | requests fail, the server says nothing | requests are not logged by default | `coord-server -v` logs one line per request (client, op, status, identity, time); `-vv` adds auth decisions, op arguments and error details; `-q` keeps errors only |
 
 ## GitLab (internal)

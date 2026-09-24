@@ -171,3 +171,20 @@ test("pollEvents: in order, resumes after the last id, stops on abort", async ()
   assert.equal(asked[0], 4);
   assert.equal(fmtEvent(log[0]), '#5 t claim.acquired claim 3 {"scope":"src/"}');
 });
+
+test("the project is read from .git/config when git refuses the checkout (sandbox: dubious ownership)", async () => {
+  const { originFromConfig, findCheckout, canonicalProject } = await import("../dist/git.js");
+  const { mkdirSync, writeFileSync } = await import("node:fs");
+  const root = tmp(), sub = join(root, "src", "deep");
+  mkdirSync(join(root, ".git"), { recursive: true });
+  mkdirSync(sub, { recursive: true });
+  writeFileSync(join(root, ".git", "config"), '[core]\n\tbare = false\n[remote "upstream"]\n\turl = https://github.com/other/x.git\n'
+    + '[remote "origin"]\n\turl = https://github.com/datamoc/mwg-pixel-dungeon.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n[branch "main"]\n');
+  assert.equal(findCheckout(sub).root, root);
+  assert.equal(canonicalProject(originFromConfig(sub)), "github.com/datamoc/mwg-pixel-dungeon");
+  const wt = tmp();                                                     // a worktree: .git is a file
+  writeFileSync(join(wt, ".git"), `gitdir: ${join(root, ".git", "worktrees", "w")}\n`);
+  mkdirSync(join(root, ".git", "worktrees", "w"), { recursive: true });
+  writeFileSync(join(root, ".git", "worktrees", "w", "commondir"), "../..\n");
+  assert.equal(canonicalProject(originFromConfig(wt)), "github.com/datamoc/mwg-pixel-dungeon");
+});

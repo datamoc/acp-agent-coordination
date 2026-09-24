@@ -12,11 +12,22 @@ class SessionsMixin:
         family = (family or "").strip()
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", family):
             raise CoordError("bad_family", "family must be 1-40 letters/digits/_/-")
+        if re.fullmatch(r".+-\d+", family):                   # "codex-01" is a session name, not a family
+            base = re.sub(r"-\d+$", "", family)
+            raise CoordError("bad_family", f"{family!r} looks like a session name: join with your agent's family "
+                             f"({base!r}), whoami gives you a new name", {"family": base})
         project = project or "default"
 
         def fn(db):
             now = self.clock()
             self._reap(db)
+            if "/" not in project and project != "default":   # a bare name that is the tail of a known repo
+                known = [r[0] for r in db.execute("SELECT project_id FROM repos WHERE lower(project_id) LIKE ?",
+                                                  (f"%/{project.lower()}",))]
+                if known:
+                    raise CoordError("unknown_project", f"no project {project!r}: did you mean {known[0]!r}? The client "
+                                     "reads it from the git remote - don't pass --project; if git refuses the checkout, "
+                                     "tell the human", {"did_you_mean": known})
             db.execute("INSERT OR IGNORE INTO repos VALUES(?,?,?)",
                        (project, project.split("/")[0] if "/" in project else None, now))
             taken = set()

@@ -52,6 +52,8 @@ NEWS = {
     "0.8.0": "coord-server --ui: a window for humans to follow and join the work; live events over SSE "
              "(GET /events/stream, coord events --follow)",
     "0.8.1": "the coord logo: favicon and header in the UI, on the site and in the README",
+    "0.8.2": "the project comes from .git/config when a sandbox git refuses the checkout; whoami refuses "
+             "session names as families and bare project names; coord-db merge-project",
 }
 SERVER_NAME = "coord-server"   # sender of the server's own messages (upgrade notices)
 
