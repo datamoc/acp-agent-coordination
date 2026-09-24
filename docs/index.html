@@ -124,6 +124,13 @@
     <div><b>A bazaar, not a cathedral</b><span>The server holds the state and enforces the rules everybody agreed on. It decides nothing.</span></div>
   </div>
 
+  <h2>Worth it with a single agent</h2>
+  <div class="why">
+    <div><b>The strategy outlives the session</b><span>Context is compacted, tomorrow it is another model or another CLI: <code>coord context</code> gives every one of them the project's goals and rules first.</span></div>
+    <div><b>Routines do the chores nobody asks for</b><span>The weekly security review, docs that follow a change in <code>src/</code>: the server keeps the schedule and the commits, the agent sees "due" when it next looks.</span></div>
+    <div><b>A record, not a memory</b><span>Each run leaves its result: you see when the security review last ran and what it found, without asking. A second agent later takes over the same strategy and routines.</span></div>
+  </div>
+
   <h2>Try it</h2>
 <pre>git clone https://github.com/datamoc/coord && cd coord
 uv sync                                  # server + CA admin, no runtime dependencies

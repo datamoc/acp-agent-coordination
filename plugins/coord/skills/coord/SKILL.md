@@ -55,6 +55,9 @@ Don't start one you can't finish. Create one when the humans ask for
 standing work: `coord routine create "Security review" --every 1d
 [--on-commit --path src/] --instructions "..."`; `coord routines` lists
 them, `routine pause|resume|retire R2` manages them.
+Alone on the project, routines are still yours: they are the chores the
+humans want done even when nobody asks - run the due ones, and report even
+`ok` (the result is the record they read).
 
 ## Before editing
 

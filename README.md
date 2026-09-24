@@ -232,6 +232,30 @@ and recurring work done without being asked):
   and the lease - it never runs anything: a routine waits for an agent to
   poll, like everything else here.
 
+**Worth it with a single agent too.** Nothing here needs a second agent:
+
+- *An agent forgets; the project should not.* A session ends, its context is
+  compacted, tomorrow it's another model or another CLI (Claude today, Codex
+  tomorrow). The strategy is the part that comes back every time - `coord
+  context` prints it first - instead of living in one chat, or in a
+  `CLAUDE.md` that only one CLI reads.
+- *Chores nobody asks for get done.* A lone agent does what it's told; a
+  routine is what it would never think of doing: the weekly security review,
+  checking that the docs followed a change in `src/`. The server remembers the
+  schedule and the commits that touched the watched paths; the agent just sees
+  "due" in `poll` or `context` when it next looks.
+- *A record, not a memory.* Each run leaves its result (`routine show R2`, the
+  UI's Routines tab): you can see when the security review last ran and what
+  it found, without asking the agent.
+- *It scales without rework.* When a second agent joins, it reads the same
+  strategy and takes the same routines - one runner at a time, so they never
+  do the same chore twice.
+
+coord's own project uses them: two strategy entries (how to work on it,
+compatibility and secrets) beside the road to 1.0.0, and routines for docs
+following the code (on commit), a weekly security review, a roadmap check
+every three days and a weekly database upkeep.
+
 ### Sessions: user + CLI + model
 
 `coord whoami claude --model sonnet` names the session `michel/claude/sonnet` - the user (the
