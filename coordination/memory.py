@@ -10,18 +10,21 @@ class MemoryMixin(CoordBase):
             raise CoordError("bad_kind", f"memory kind must be one of {', '.join(MEMORY_KINDS)}")
 
         def fn(db):
-            me, _ = self._access(db, session, None, "participate")
-            now = self.clock()
-            mid = db.execute("INSERT INTO project_memory(project_id, kind, title, content, source,"
-                             " created_by, updated_by, revision, created_at, updated_at)"
-                             " VALUES(?,?,?,?,?,?,?,1,?,?)",
-                             (me["project_id"], kind, title, content, source, me["display_name"],
-                              me["display_name"], now, now)).lastrowid
-            db.execute("INSERT INTO memory_revisions VALUES(?,?,?,?,?)",
-                       (mid, 1, content, me["display_name"], now))
-            self._event(db, me["project_id"], "memory.added", session, "memory", mid)
-            return {"memory": f"M{mid}", "revision": 1}
+            me, _ = self._access(db, session, None, "admin" if kind == "policy" else "participate")
+            return {"memory": f"M{self._memory_insert(db, me, kind, title, content, source)}", "revision": 1}
         return self._mutate("memory_add", client_id, fn)
+
+    def _memory_insert(self, db, me, kind: str, title: str, content: str, source: str = "") -> int:
+        now = self.clock()
+        mid = db.execute("INSERT INTO project_memory(project_id, kind, title, content, source,"
+                         " created_by, updated_by, revision, created_at, updated_at)"
+                         " VALUES(?,?,?,?,?,?,?,1,?,?)",
+                         (me["project_id"], kind, title, content, source, me["display_name"],
+                          me["display_name"], now, now)).lastrowid
+        db.execute("INSERT INTO memory_revisions VALUES(?,?,?,?,?)",
+                   (mid, 1, content, me["display_name"], now))
+        self._event(db, me["project_id"], "memory.added", me["session_id"], "memory", mid, kind=kind)
+        return mid
 
     def memory_edit(self, session: str, memory: str, base_revision: int, content: str,
                     status: str | None = None) -> dict:
@@ -30,7 +33,7 @@ class MemoryMixin(CoordBase):
             m = db.execute("SELECT * FROM project_memory WHERE memory_id=?", (mid,)).fetchone()
             if m is None:
                 raise CoordError("missing", f"no memory M{mid}")
-            me, _ = self._access(db, session, m["project_id"], "participate")
+            me, _ = self._access(db, session, m["project_id"], "admin" if m["kind"] == "policy" else "participate")
             if m["revision"] != int(base_revision):
                 raise CoordError("revision_conflict", f"M{mid} is at revision {m['revision']}",
                                  {"current_revision": m["revision"], "current_content": m["content"]})

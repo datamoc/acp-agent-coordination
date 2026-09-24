@@ -15,20 +15,37 @@
   <select id="project" aria-label="project"></select>
   <span id="live" class="live" title="live updates">●</span>
   <nav id="tabs" role="tablist">
+    <button role="tab" data-tab="overview">Overview <span class="badge" id="b-overview"></span></button>
     <button role="tab" data-tab="now">Now <span class="badge" id="b-now"></span></button>
     <button role="tab" data-tab="tasks">Tasks <span class="badge" id="b-tasks"></span></button>
     <button role="tab" data-tab="discussions">Discussions <span class="badge" id="b-discussions"></span></button>
     <button role="tab" data-tab="routines">Routines &amp; strategy <span class="badge" id="b-routines"></span></button>
-    <button role="tab" data-tab="docs">Documents</button>
+    <button role="tab" data-tab="docs">Documents <span class="badge" id="b-docs"></span></button>
   </nav>
   <span class="grow"></span>
   <span id="me" class="muted"></span>
   <span id="version" class="muted"></span>
 </header>
 
-<main id="view-now" class="view grid3">
+<main id="view-overview" class="view two">
+  <div class="panel"><h2>Needs attention <span class="muted small">every project you may see</span></h2><div id="board"></div></div>
+  <div class="panel">
+    <h2>Activity</h2>
+    <form id="actfilter" class="inline">
+      <select id="act-project" aria-label="project"><option value="">all projects</option></select>
+      <input id="act-actor" placeholder="actor" class="narrow">
+      <select id="act-kind" aria-label="event type"><option value="">all events</option><option>task</option><option>message</option>
+        <option>claim</option><option>discussion</option><option>document</option><option>suggestion</option><option>wake</option>
+        <option>mandate</option><option>milestone</option><option>session</option></select>
+      <select id="act-since" aria-label="since"><option value="">any time</option><option>1h</option><option>6h</option><option>1d</option><option>7d</option></select>
+    </form>
+    <ul id="activity" class="list feedlines"></ul>
+  </div>
+</main>
+
+<main id="view-now" class="view grid3 hidden">
   <section class="col">
-    <div class="panel"><h2>Sessions</h2><ul id="sessions" class="list"></ul></div>
+    <div class="panel"><h2>Agents <span class="muted small">session · work</span></h2><ul id="sessions" class="list"></ul></div>
     <div class="panel"><h2>Claims</h2><ul id="claims" class="list"></ul></div>
   </section>
   <section class="col wide">
@@ -41,6 +58,7 @@
           <option>decision</option><option>review</option><option>warning</option><option>done</option>
         </select>
         <select id="to" aria-label="to"><option value="">everyone</option></select>
+        <select id="priority" aria-label="priority"><option>normal</option><option>high</option><option>urgent</option><option>low</option></select>
         <input id="body" placeholder="Write to the agents…" autocomplete="off" maxlength="10000">
         <button type="submit">Send</button>
       </form>
@@ -55,12 +73,38 @@
 
 <main id="view-tasks" class="view hidden">
   <div class="panel">
-    <h2>Task graph <span class="muted small legend"><i class="st open"></i>open <i class="st offered"></i>offered <i class="st accepted"></i>accepted <i class="st blocked"></i>blocked <i class="st done"></i>done</span></h2>
+    <h2>Task graph <span class="muted small legend"><i class="st open"></i>open <i class="st offered"></i>offered <i class="st accepted"></i>accepted <i class="st blocked"></i>blocked <i class="st done"></i>done <i class="st milestone"></i>milestone <i class="st foreign"></i>other project · edges: <b>—</b> blocks <b>- -</b> enables <b>···</b> context</span></h2>
+    <form id="graphfilter" class="inline">
+      <label class="small"><input type="checkbox" id="g-hidedone"> hide done</label>
+      <select id="g-who" aria-label="assignee"><option value="">anyone</option></select>
+      <select id="g-focus" aria-label="focus"><option value="">whole graph</option></select>
+      <select id="g-path" aria-label="path to a milestone"><option value="">no path highlighted</option></select>
+    </form>
     <div id="graph" class="graph"></div>
   </div>
   <div class="panel">
-    <h2>All tasks</h2>
+    <h2>Milestones <span class="muted small">reached, then upcoming - criteria, not percentages</span></h2>
+    <div id="milestones"></div>
+    <form id="newmilestone" class="inline">
+      <input id="ms-title" placeholder="New milestone (a verifiable result)…">
+      <input id="ms-criteria" placeholder="criteria; separated; by semicolons">
+      <input id="ms-target" placeholder="target: 30d or 2026-11-01" class="narrow">
+      <button>Add</button>
+    </form>
+  </div>
+  <div class="panel">
+    <h2>All tasks
+      <span id="taskviews" class="row small"><button class="ghost small" data-view="">all</button><button class="ghost small" data-view="ready">ready</button>
+        <button class="ghost small" data-view="blocked">blocked</button><button class="ghost small" data-view="unowned">unowned</button>
+        <button class="ghost small" data-view="recent">unblocked recently</button></span></h2>
     <ul id="tasks" class="list"></ul>
+    <form id="newlink" class="inline">
+      <input id="lk-task" placeholder="T3" class="narrow">
+      <select id="lk-type"><option>blocks</option><option>enables</option><option>related_to</option><option>duplicates</option><option>part_of</option></select>
+      <input id="lk-other" placeholder="T1" class="narrow">
+      <input id="lk-reason" placeholder="why (required)">
+      <button>Link</button>
+    </form>
     <form id="newtask" class="inline">
       <input id="tasktitle" placeholder="New task…">
       <input id="taskafter" placeholder="after T1,T2" class="narrow">
@@ -70,16 +114,43 @@
   </div>
 </main>
 
-<main id="view-discussions" class="view hidden"><div class="panel"><h2>Open discussions</h2><div id="discussions"></div></div></main>
+<main id="view-discussions" class="view hidden two">
+  <div class="panel"><h2>Open discussions</h2><div id="discussions"></div></div>
+  <div class="panel"><h2>Crisis mandates <span class="muted small">bounded, revocable, reviewed</span></h2><div id="mandates"></div></div>
+</main>
 
 <main id="view-routines" class="view hidden two">
   <div class="panel"><h2>Routines</h2><ul id="routines" class="list"></ul></div>
   <div class="panel"><h2>Strategy</h2><div id="strategy"></div></div>
 </main>
 
-<main id="view-docs" class="view hidden"><div class="panel"><h2>Documents</h2><ul id="docs" class="list"></ul></div></main>
+<main id="view-docs" class="view hidden two">
+  <div class="panel"><h2>Documents</h2><ul id="docs" class="list"></ul></div>
+  <div class="col">
+    <div class="panel">
+      <h2>Deposit a note <span class="muted small">.txt / .md - a source, not an order</span></h2>
+      <form id="importform" class="stack">
+        <input type="file" id="imp-file" accept=".txt,.md,text/plain,text/markdown">
+        <input id="imp-title" placeholder="title (default: the file name)">
+        <input id="imp-author" placeholder="author, if not you">
+        <div class="inline">
+          <select id="imp-context"><option>reflection</option><option>discussion</option><option>meeting</option><option>other</option></select>
+          <select id="imp-ai"><option value="">AI assistance: not stated</option><option value="yes">written/amended with AI</option><option value="no">no AI</option></select>
+          <input id="imp-written" placeholder="written on (2026-09-20)" class="narrow">
+        </div>
+        <div class="inline">
+          <select id="imp-vis"><option value="project">visible to the project</option><option value="private">private</option></select>
+          <input id="imp-readers" placeholder="readers if private: a,b">
+          <button>Deposit</button>
+        </div>
+      </form>
+    </div>
+    <div class="panel"><h2>Candidates <span class="muted small">waiting for review</span></h2><ul id="candidates" class="list"></ul></div>
+  </div>
+</main>
 
-<dialog id="viewer"><form method="dialog"><h3 id="vtitle"></h3><pre id="vbody"></pre><button>Close</button></form></dialog>
+<dialog id="viewer"><form method="dialog"><h3 id="vtitle"></h3><div id="vmeta" class="small muted"></div><pre id="vbody"></pre>
+  <div id="vextra"></div><div class="row"><button>Close</button></div></form></dialog>
 <div id="toast" class="toast hidden"></div>
 </body>
 </html>

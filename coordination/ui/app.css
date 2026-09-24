@@ -104,3 +104,38 @@ i.st.accepted { border-color: var(--accent); background: color-mix(in srgb, var(
 i.st.blocked { border-color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent); }
 i.st.done { border-color: var(--ok); background: color-mix(in srgb, var(--ok) 16%, transparent); }
 i.st.blocked { border-style: dashed; }
+/* human participation: session states, priorities, typed edges, milestones, mandates */
+.tag.state-active { color: var(--ok); border-color: var(--ok); }
+.tag.state-idle { color: var(--muted); }
+.tag.state-paused, .tag.state-unreachable { color: var(--warn); border-color: var(--warn); }
+.tag.state-ended { color: var(--muted); border-style: dashed; }
+.tag.ok { color: var(--ok); border-color: var(--ok); }
+li.asleep { background: color-mix(in srgb, var(--warn) 7%, transparent); }
+.chip { font-size: 11px; padding: 1px 7px; border-radius: 99px; border: 1px solid var(--line); margin: 2px 4px 2px 0; display: inline-block; }
+.chip.state-active { border-color: var(--ok); }
+.chip.state-paused, .chip.state-unreachable { border-color: var(--warn); color: var(--warn); }
+.chip.asleep { font-weight: 600; }
+.row { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-top: 4px; }
+.proj { border-top: 1px solid var(--line); padding: 8px 0; }
+.proj:first-child { border-top: 0; }
+.att { font-size: 13px; }
+.feed li.prio-urgent { border-left: 3px solid var(--bad); padding-left: 6px; }
+.feed li.prio-high { border-left: 3px solid var(--warn); padding-left: 6px; }
+.feedlines li { font-size: 13px; padding: 3px 0; }
+.stack { display: flex; flex-direction: column; gap: 6px; }
+button.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
+.ms { border-top: 1px solid var(--line); padding: 8px 0; }
+.ms:first-child { border-top: 0; }
+.ms.reached { opacity: .8; }
+.ms .crit { display: block; margin-left: 4px; }
+.mandate-active { border-left: 3px solid var(--warn); padding-left: 8px; }
+.graph .node { cursor: pointer; }
+.graph .node:focus rect { stroke-width: 3; }
+.graph .node.milestone rect { stroke-width: 2.5; }
+.graph .node.foreign rect { stroke-dasharray: 2 2; fill: color-mix(in srgb, var(--q) 6%, var(--panel)); }
+.graph .node.onpath rect { stroke: var(--bad); stroke-width: 2.5; }
+.graph .edge.onpath { stroke: var(--bad); opacity: 1; stroke-width: 2; }
+.graph .edge.enables { stroke-dasharray: 6 4; }
+.graph .edge.context { stroke-dasharray: 1 4; opacity: .5; }
+i.st.milestone { border-color: var(--ink); border-width: 2.5px; border-radius: 1px; }
+i.st.foreign { border-color: var(--q); border-style: dotted; }

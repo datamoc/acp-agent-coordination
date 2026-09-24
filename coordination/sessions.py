@@ -8,7 +8,8 @@ from .core import FEATURES, SESSION_TTL, CoordBase, CoordError, iso, server_vers
 
 class SessionsMixin(CoordBase):
     def whoami(self, family: str, project: str = "default", principal: str | None = None,
-               user: str | None = None, model: str | None = None, client_id: str | None = None) -> dict:
+               user: str | None = None, model: str | None = None, human: bool = False,
+               client_id: str | None = None) -> dict:
         """Take a session. With `user` and/or `model` the session is the association user + CLI + model,
         named `user/family/model` (michel/claude/sonnet), and a whoami for the same association (same
         project and identity) resumes its live session instead of opening another. Without them the
@@ -24,6 +25,8 @@ class SessionsMixin(CoordBase):
         def tidy(v, n):
             return re.sub(r"[^a-z0-9_.-]", "-", v.strip().lower())[:n].strip("-") or None if v else None
         user, model = tidy(user, 32), tidy(model, 40)
+        # a human takes part as themself: the UI (ui: principal) or `whoami --human`
+        kind = "human" if human or (principal or "").startswith("ui:") else "agent"
 
         def fn(db):
             now = self.clock()
@@ -45,6 +48,7 @@ class SessionsMixin(CoordBase):
                 if same is not None:                              # the same association: resume it
                     db.execute("UPDATE sessions SET heartbeat_at=? WHERE session_id=?", (now, same["session_id"]))
                     self._event(db, project, "session.resumed", same["session_id"], "session", same["session_id"])
+                    self._awake(db, same)
                     return {"session_id": same["session_id"], "name": same["display_name"],
                             "generation": same["generation"], "project": project, "resumed": True,
                             "server": {"version": server_version(), "features": list(FEATURES)}}
@@ -65,10 +69,11 @@ class SessionsMixin(CoordBase):
                                   (name,)).fetchone()[0])
             sid = str(uuid.uuid4())
             db.execute("INSERT INTO sessions(session_id, display_name, family, generation, project_id,"
-                       " principal, status, started_at, heartbeat_at, cursor, user, model) VALUES(?,?,?,?,?,?,?,?,?,"
-                       " (SELECT COALESCE(MAX(id),0) FROM messages),?,?)",
-                       (sid, name, family, gen, project, principal, "", now, now, user, model))
+                       " principal, status, started_at, heartbeat_at, cursor, user, model, kind) VALUES(?,?,?,?,?,?,?,?,?,"
+                       " (SELECT COALESCE(MAX(id),0) FROM messages),?,?,?)",
+                       (sid, name, family, gen, project, principal, "", now, now, user, model, kind))
             self._event(db, project, "session.started", sid, "session", sid, name=name, generation=gen)
+            self._awake(db, db.execute("SELECT * FROM sessions WHERE session_id=?", (sid,)).fetchone())
             return {"session_id": sid, "name": name, "generation": gen, "project": project,
                     "server": {"version": server_version(), "features": list(FEATURES)}}
         return self._mutate("whoami", client_id, fn)
@@ -89,6 +94,7 @@ class SessionsMixin(CoordBase):
             me = self._session(db, session)
             db.execute("UPDATE sessions SET heartbeat_at=?, status=? WHERE session_id=?",
                        (self.clock(), (status or "")[:400], session))
+            self._awake(db, me)
             return {"name": me["display_name"], "status": status}
 
     def end(self, session: str) -> dict:
@@ -97,7 +103,7 @@ class SessionsMixin(CoordBase):
             now = self.clock()
             n = db.execute("UPDATE claims SET released_at=?, released_by=? WHERE owner_session_id=?"
                            " AND released_at IS NULL", (now, session, session)).rowcount
-            db.execute("UPDATE sessions SET ended_at=? WHERE session_id=?", (now, session))
+            db.execute("UPDATE sessions SET ended_at=?, end_reason='ended' WHERE session_id=?", (now, session))
             self._event(db, me["project_id"], "session.ended", session, "session", session)
             return {"name": me["display_name"], "released_claims": n}
 
@@ -113,5 +119,7 @@ class SessionsMixin(CoordBase):
             rows = db.execute("SELECT * FROM sessions" + f + " ORDER BY heartbeat_at DESC", a).fetchall()
             return [{"name": r["display_name"], "generation": r["generation"], "status": r["status"],
                      "project": r["project_id"], "live": self._live(r), "seen": iso(r["heartbeat_at"]),
-                     "user": r["user"], "family": r["family"], "model": r["model"]}
+                     "user": r["user"], "family": r["family"], "model": r["model"],
+                     "state": self._session_state(r), "kind": r["kind"],
+                     **({"paused": r["pause_reason"] or ""} if r["paused_at"] is not None and self._live(r) else {})}
                     for r in rows if include_dead or self._live(r)]

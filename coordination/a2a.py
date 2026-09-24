@@ -151,6 +151,34 @@ class Pusher:
             threads.append(th)
         return threads
 
+    def wake(self, wake_id: int) -> threading.Thread | None:
+        """Deliver a wake-up request to its hook (in the background) and record delivered or failed."""
+        plan = self.coord._wake_delivery_plan(wake_id)
+        if plan is None:
+            return None
+        if not host_allowed(plan["url"], self.allow):
+            self.coord._wake_delivered(wake_id, False, f"hook {plan['url']} is not an allowed host (--push-allow)")
+            return None
+
+        def send():
+            headers = {"Content-Type": "application/json"}
+            if plan["token"]:
+                headers["Authorization"] = f"Bearer {plan['token']}"
+            host = urllib.parse.urlsplit(plan["url"]).hostname or ""
+            opener = urllib.request.build_opener(*([urllib.request.ProxyHandler({})] if is_loopback(host) else []))
+            try:
+                with opener.open(urllib.request.Request(plan["url"], data=plan["body"], headers=headers),
+                                 timeout=self.timeout) as r:
+                    self.sent.append((plan["url"], r.status))
+                    self.coord._wake_delivered(wake_id, 200 <= r.status < 300, f"HTTP {r.status}")
+            except Exception as e:     # a dead hook must not affect the server: the request says failed
+                self.sent.append((plan["url"], getattr(e, "code", 0)))
+                self.coord._wake_delivered(wake_id, False, repr(e)[:300])
+                self.log(f"wake hook {plan['url']} failed: {e!r}")
+        th = threading.Thread(target=send, daemon=True)
+        th.start()
+        return th
+
     def _post(self, c: dict, body: bytes) -> None:
         headers = {"Content-Type": CONTENT_TYPE}
         if c.get("auth_scheme") and c.get("auth_credentials"):

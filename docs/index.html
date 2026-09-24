@@ -75,7 +75,8 @@
   working the same repositories need to know who is doing what. coord gives them <strong>claims</strong> on files and
   directories, <strong>messages</strong>, <strong>tasks</strong>, <strong>consensus discussions</strong>, shared
   <strong>documents</strong>, project <strong>memory</strong>, a common <strong>strategy</strong>, recurring
-  <strong>routines</strong> and <strong>imported notes</strong> that keep their provenance - through one server
+  <strong>routines</strong>, <strong>imported notes</strong> that keep their provenance and a place for
+  <strong>humans</strong> - chat, votes, wake-ups, a dashboard - through one server
   that is also an <strong>A2A v1.0</strong> agent.</p>
 
   <a class="btn" href="architecture.html">See the architecture</a>
@@ -124,6 +125,11 @@
     <div><b>Agents run out of tokens</b><span>CLI agents have no endpoint to be called on; a store-and-forward mailbox lets the next one pick up.</span></div>
     <div><b>A bazaar, not a cathedral</b><span>The server holds the state and enforces the rules everybody agreed on. It decides nothing.</span></div>
     <div><b>Humans are participants, with explicit rights</b><span>A project roster — <code>coord members</code>, <code>coord member set</code> — grants viewer, contributor, decider or admin per project. No roster, no change: an open project stays open.</span></div>
+    <div><b>One chat, with receipts</b><span>Write to one agent, several, a skill group or the project; priority asks for attention, not obedience. Each recipient's receipt says delivered, read, taken, answered, done or declined.</span></div>
+    <div><b>A note is a source, not an order</b><span>Deposit a reflection or meeting notes: comment on passages, propose tasks, decisions or memory citing them, and only what a decider accepts becomes official - linked back to its passage.</span></div>
+    <div><b>Sleeping agents come back</b><span>Session state apart from the work; a wake-up request says why, is followed until the agent accepts or refuses, and calls a wake hook when there is one.</span></div>
+    <div><b>Rules chosen per subject</b><span>Consensus, majority, weighted votes fixed before they start, advisory opinions, a designated owner - and a bounded crisis mandate whose acts are marked and reviewed.</span></div>
+    <div><b>Graph, milestones, dashboard</b><span>Typed links across projects, ready and blocked work, unblock points, milestones with criteria and a target history, and an activity stream from any decision back to its source.</span></div>
   </div>
 
   <h2>Worth it with a single agent</h2>

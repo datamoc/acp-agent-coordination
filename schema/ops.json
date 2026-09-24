@@ -53,12 +53,16 @@
    "architecture",
    "decision",
    "pitfall",
-   "glossary"
+   "glossary",
+   "policy"
   ],
   "consensus_rules": [
    "unanimous",
    "majority",
-   "no-objection"
+   "no-objection",
+   "weighted",
+   "advisory",
+   "owner"
   ],
   "routine_statuses": [
    "active",
@@ -69,9 +73,158 @@
    "ok",
    "issues",
    "failed"
+  ],
+  "message_priorities": [
+   "low",
+   "normal",
+   "high",
+   "urgent"
+  ],
+  "ack_states": [
+   "read",
+   "taken",
+   "done",
+   "declined"
+  ],
+  "contact_policies": [
+   "open",
+   "auto",
+   "contacts_only",
+   "block_all"
+  ],
+  "doc_visibility": [
+   "project",
+   "private"
+  ],
+  "link_types": [
+   "blocks",
+   "enables",
+   "related_to",
+   "duplicates",
+   "part_of"
+  ],
+  "suggestion_targets": [
+   "task",
+   "decision",
+   "memory",
+   "question",
+   "summary"
+  ],
+  "suggestion_natures": [
+   "fact",
+   "hypothesis",
+   "opinion",
+   "decision"
+  ],
+  "session_states": [
+   "active",
+   "idle",
+   "paused",
+   "ended",
+   "unreachable"
+  ],
+  "wake_reasons": [
+   "task",
+   "message",
+   "question",
+   "unblocked",
+   "review",
+   "other"
+  ],
+  "mandate_powers": [
+   "decide",
+   "reassign",
+   "release_claims"
   ]
  },
  "ops": {
+  "ack": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "message",
+     "type": "integer",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "state",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "note",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    }
+   ]
+  },
+  "activity": {
+   "kind": "read",
+   "params": [
+    {
+     "name": "project",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "actor",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "kind",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "since",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "limit",
+     "type": "integer",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "agents": {
+   "kind": "read",
+   "params": [
+    {
+     "name": "project",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
   "ask": {
    "kind": "write",
    "params": [
@@ -113,6 +266,23 @@
     },
     {
      "name": "client_id",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "audit": {
+   "kind": "read",
+   "params": [
+    {
+     "name": "entity",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "session",
      "type": "string",
      "nullable": true,
      "required": false
@@ -176,10 +346,67 @@
      "required": false
     },
     {
+     "name": "resource",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
      "name": "client_id",
      "type": "string",
      "nullable": true,
      "required": false
+    }
+   ]
+  },
+  "contact": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "peer",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "action",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    }
+   ]
+  },
+  "contact_policy": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "policy",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    }
+   ]
+  },
+  "contacts": {
+   "kind": "read",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
     }
    ]
   },
@@ -191,6 +418,75 @@
      "type": "string",
      "nullable": false,
      "required": true
+    }
+   ]
+  },
+  "crisis_reassign": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "task",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "to",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "reason",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    }
+   ]
+  },
+  "crisis_release": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "claim",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "reason",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    }
+   ]
+  },
+  "dashboard": {
+   "kind": "read",
+   "params": [
+    {
+     "name": "project",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": true,
+     "required": false
     }
    ]
   },
@@ -230,6 +526,12 @@
     {
      "name": "reason",
      "type": "string",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "crisis",
+     "type": "boolean",
      "nullable": false,
      "required": false
     }
@@ -281,6 +583,36 @@
      "required": false
     },
     {
+     "name": "weights",
+     "type": "string[]",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "threshold",
+     "type": "number",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "quorum_weight",
+     "type": "number",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "owner",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "domain",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
      "name": "client_id",
      "type": "string",
      "nullable": true,
@@ -319,6 +651,52 @@
      "type": "string",
      "nullable": false,
      "required": false
+    },
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "doc_comment": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "document",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "body",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "quote",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "doc_comments": {
+   "kind": "read",
+   "params": [
+    {
+     "name": "document",
+     "type": "string",
+     "nullable": false,
+     "required": true
     },
     {
      "name": "session",
@@ -467,6 +845,30 @@
      "required": false
     },
     {
+     "name": "written_at",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "visibility",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "readers",
+     "type": "string[]",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "project",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
      "name": "client_id",
      "type": "string",
      "nullable": true,
@@ -511,6 +913,29 @@
      "name": "client_id",
      "type": "string",
      "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "doc_reviewed": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "document",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "note",
+     "type": "string",
+     "nullable": false,
      "required": false
     }
    ]
@@ -758,6 +1183,93 @@
     }
    ]
   },
+  "mandate_grant": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "holder",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "reason",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "powers",
+     "type": "string[]",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "duration",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "scope",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "client_id",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "mandate_revoke": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "mandate",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "reason",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    }
+   ]
+  },
+  "mandates": {
+   "kind": "read",
+   "params": [
+    {
+     "name": "project",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
   "member_remove": {
    "kind": "write",
    "params": [
@@ -950,6 +1462,180 @@
     }
    ]
   },
+  "milestone_create": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "title",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "criteria",
+     "type": "string[]",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "target",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "owner",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "scope",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "after",
+     "type": "string[]",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "client_id",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "milestone_criterion": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "milestone",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "criterion",
+     "type": "integer",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "met",
+     "type": "boolean",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "note",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    }
+   ]
+  },
+  "milestone_reach": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "milestone",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "note",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    }
+   ]
+  },
+  "milestone_target": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "milestone",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "reason",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "target",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "milestones": {
+   "kind": "read",
+   "params": [
+    {
+     "name": "project",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "pause": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "reason",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    }
+   ]
+  },
   "poll": {
    "kind": "write",
    "params": [
@@ -996,6 +1682,36 @@
     },
     {
      "name": "claim",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "priority",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "to_group",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "task",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "document",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "discussion",
      "type": "string",
      "nullable": true,
      "required": false
@@ -1172,6 +1888,23 @@
      "name": "comment",
      "type": "string",
      "nullable": false,
+     "required": false
+    }
+   ]
+  },
+  "receipts": {
+   "kind": "read",
+   "params": [
+    {
+     "name": "message",
+     "type": "integer",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": true,
      "required": false
     }
    ]
@@ -1580,6 +2313,46 @@
    "kind": "read",
    "params": []
   },
+  "setting_set": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "key",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "value",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    }
+   ]
+  },
+  "settings": {
+   "kind": "read",
+   "params": [
+    {
+     "name": "project",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
   "status": {
    "kind": "read",
    "params": [
@@ -1626,6 +2399,135 @@
     },
     {
      "name": "exclude_session",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "suggestion_add": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "source",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "target",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "title",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "quote",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "body",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "nature",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "memory_kind",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "client_id",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "suggestion_review": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "suggestion",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "accept",
+     "type": "boolean",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "note",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "title",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "body",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "suggestions": {
+   "kind": "read",
+   "params": [
+    {
+     "name": "project",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "source",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "status",
      "type": "string",
      "nullable": true,
      "required": false
@@ -1826,6 +2728,53 @@
      "type": "boolean",
      "nullable": false,
      "required": false
+    },
+    {
+     "name": "type",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "condition",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "reason",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    }
+   ]
+  },
+  "task_waive": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "task",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "after",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "reason",
+     "type": "string",
+     "nullable": false,
+     "required": true
     }
    ]
   },
@@ -1855,6 +2804,18 @@
      "type": "string",
      "nullable": true,
      "required": false
+    },
+    {
+     "name": "view",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "assigned",
+     "type": "string",
+     "nullable": true,
+     "required": false
     }
    ]
   },
@@ -1866,6 +2827,203 @@
      "type": "integer",
      "nullable": false,
      "required": true
+    },
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "unblock_points": {
+   "kind": "read",
+   "params": [
+    {
+     "name": "project",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "limit",
+     "type": "integer",
+     "nullable": false,
+     "required": false
+    }
+   ]
+  },
+  "wake_answer": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "wake",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "accept",
+     "type": "boolean",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "note",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    }
+   ]
+  },
+  "wake_hook_set": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "target",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "url",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "token",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "wake_request": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "agent",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "reason",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "ref",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "note",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "client_id",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "wake_requests": {
+   "kind": "read",
+   "params": [
+    {
+     "name": "project",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "target",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "open_only",
+     "type": "boolean",
+     "nullable": false,
+     "required": false
+    },
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "weight_set": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "name",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "weight",
+     "type": "number",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "domain",
+     "type": "string",
+     "nullable": false,
+     "required": false
+    }
+   ]
+  },
+  "weights": {
+   "kind": "read",
+   "params": [
+    {
+     "name": "project",
+     "type": "string",
+     "nullable": true,
+     "required": false
     },
     {
      "name": "session",
@@ -1900,6 +3058,12 @@
      "name": "model",
      "type": "string",
      "nullable": true,
+     "required": false
+    },
+    {
+     "name": "human",
+     "type": "boolean",
+     "nullable": false,
      "required": false
     },
     {

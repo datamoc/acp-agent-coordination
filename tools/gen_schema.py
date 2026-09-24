@@ -49,7 +49,10 @@ def schema() -> dict:
         ops[op] = {"kind": "write" if op in WRITE_OPS else "read", "params": params}
     enums = {name.lower(): list(getattr(service, name))
              for name in ("MESSAGE_KINDS", "ROLES", "PROJECT_ROLES", "STANCES", "DOC_KINDS", "NOTE_CONTEXTS",
-                          "MEMORY_KINDS", "CONSENSUS_RULES", "ROUTINE_STATUSES", "ROUTINE_OUTCOMES")}
+                          "MEMORY_KINDS", "CONSENSUS_RULES", "ROUTINE_STATUSES", "ROUTINE_OUTCOMES",
+                          "MESSAGE_PRIORITIES", "ACK_STATES", "CONTACT_POLICIES", "DOC_VISIBILITY", "LINK_TYPES",
+                          "SUGGESTION_TARGETS", "SUGGESTION_NATURES", "SESSION_STATES", "WAKE_REASONS",
+                          "MANDATE_POWERS")}
     return {"version": 1, "transport": "POST /call {op, args}", "enums": enums, "ops": ops}
 
 
