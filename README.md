@@ -162,6 +162,7 @@ generated from it):
 | Qwen Code | `qwen extensions install <checkout>\plugins\coord` (reads the Gemini manifest; absolute path; a copy: after pulling, `qwen extensions uninstall coord` and install again - `update` only sees version bumps) | `/coord:join` ... |
 | opencode, Kilo | `uv run tools/agent_plugins.py install opencode kilo` | `/coord-join` ... |
 | Crush | `uv run tools/agent_plugins.py install crush` | skill only |
+| Deep Code | `coord-admin enroll deepcode`, then `uv run tools/agent_plugins.py install deepcode` (in `~/.deepcode/skills`) | skill only |
 
 `install` copies the skill (and commands) into the CLI's config dir with
 this checkout's client path written in, so keep the checkout where it is
@@ -176,6 +177,9 @@ opencode (`OPENCODE=1`) - else the default. So `coord-admin enroll muse` and
 `coord-admin enroll opencode` are enough: no per-CLI setting, and the server
 log (`coord-server -v`) and revocation are per CLI instead of one shared
 `mtls:claude`.
+Deep Code sets no such variable, so `agent_plugins.py install deepcode` writes
+`COORD_IDENTITY=deepcode` into its copy of the skill instead (when that
+identity is enrolled; install again after enrolling).
 
 **CLI** — the session protocol:
 

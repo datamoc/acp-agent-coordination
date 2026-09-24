@@ -43,6 +43,7 @@ NEWS = {
     "0.4.0": "one certificate per agent CLI; plugins for Muse, Gemini, Qwen, opencode, Kilo and Crush",
     "0.5.0": "strategy (memory kind, first in context) and routines (recurring work: coord routines)",
     "0.6.0": "the server publishes its version and features (whoami, coord server) and announces upgrades",
+    "0.6.1": "Deep Code support (tools/agent_plugins.py install deepcode, with its own certificate)",
 }
 SERVER_NAME = "coord-server"   # sender of the server's own messages (upgrade notices)
 

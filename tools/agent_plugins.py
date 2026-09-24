@@ -11,8 +11,12 @@ CLIs without a plugin format get the skill and commands copied into their
 config dir, pointing at this checkout's client (keep the checkout in place):
 
     uv run tools/agent_plugins.py gen [--check]      # commands/coord/*.toml from claude-commands/*.md
-    uv run tools/agent_plugins.py install opencode kilo crush [--dry-run]
-    uv run tools/agent_plugins.py uninstall opencode kilo crush
+    uv run tools/agent_plugins.py install opencode kilo crush deepcode [--dry-run]
+    uv run tools/agent_plugins.py uninstall opencode kilo crush deepcode
+
+A CLI the client cannot recognise from its environment (no marker variable, unlike Muse and
+opencode) gets its enrolled identity written into the copied commands: `coord-admin enroll deepcode`
+before `install deepcode` makes it run as `COORD_IDENTITY=deepcode node .../cli.js`.
 """
 
 import argparse
@@ -85,20 +89,35 @@ def targets(cli: str) -> tuple[Path, Path | None]:
         return root / "skills", root / "commands"
     if cli == "crush":                        # ~/.config/crush on Windows too (`crush dirs`)
         return Path(os.environ.get("CRUSH_SKILLS_DIR") or _config_home() / "crush" / "skills"), None
-    raise SystemExit(f"unknown CLI {cli!r}: opencode, kilo, crush "
+    if cli == "deepcode":                     # Deep Code CLI (@vegamo/deepcode-cli): skills only, in ~/.deepcode
+        return Path.home() / ".deepcode" / "skills", None
+    raise SystemExit(f"unknown CLI {cli!r}: opencode, kilo, crush, deepcode "
                      "(Gemini, Qwen, Muse: install plugins/coord as an extension/plugin, see the README)")
 
 
+NO_HOST_MARKER = ("deepcode",)   # CLIs the client's hostIdentity() cannot detect (clients/ts/src/config.ts)
+SKILL_PATH_FIRST = "`coord` if it is on PATH, else\n"
+
+
+def identity_prefix(cli: str) -> str:
+    """`COORD_IDENTITY=<cli> ` when this CLI cannot be detected but has an enrolled identity."""
+    home = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "coord"
+    return f"COORD_IDENTITY={cli} " if cli in NO_HOST_MARKER and (home / cli / "env").exists() else ""
+
+
 def installed(cli: str) -> dict[Path, str]:
+    prefix = identity_prefix(cli)
     client = CLIENT.as_posix()
     skill = SKILL.read_text(encoding="utf-8")
-    assert SKILL_CLIENT in skill, "SKILL.md's client sentence changed, update SKILL_CLIENT"
+    assert SKILL_CLIENT in skill and SKILL_PATH_FIRST in skill, "SKILL.md's client sentence changed, update SKILL_CLIENT"
+    if prefix:   # a bare `coord` on PATH would run as the default identity: always use the prefixed form
+        skill = skill.replace(SKILL_PATH_FIRST + SKILL_CLIENT, f'`{prefix}node "{client}"` (this CLI\'s own identity)')
     files = {Path("coord") / "SKILL.md": skill.replace(SKILL_CLIENT, f'`node "{client}"`')}
     skills, cmds = targets(cli)
     out = {skills / rel: text for rel, text in files.items()}
     if cmds is not None:
         for name, (desc, body) in commands().items():
-            body = RUN_LINE.sub(lambda _: f'Run coord with `node "{client}"`. ', body)
+            body = RUN_LINE.sub(lambda _: f'Run coord with `{prefix}node "{client}"`. ', body)
             body = body.replace("`/coord:join`", "`/coord-join`")
             out[cmds / f"coord-{name}.md"] = (f"---\ndescription: {desc}\n---\n\n{body}\n\n"
                                                "Arguments given: $ARGUMENTS\n")
