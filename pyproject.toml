@@ -1,6 +1,6 @@
 [project]
 name = "coord"
-version = "0.8.1"
+version = "0.8.2"
 description = "coord server and certificate management: claims, messages, tasks for concurrent agent sessions (clients: clients/ts)"
 readme = "README.md"
 requires-python = ">=3.11"
