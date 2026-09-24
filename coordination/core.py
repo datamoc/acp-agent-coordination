@@ -40,7 +40,7 @@ ROUTINE_OUTCOMES = ("ok", "issues", "failed")   # issues/failed also post a warn
 # What this server can do - published in whoami, `coord server` (server_info) and the Agent Card.
 FEATURES = ("sessions", "messages", "claims", "fences", "roles", "discussions", "consensus", "documents",
             "document-patches", "tasks", "a2a", "push-notifications", "memory", "strategy", "routines",
-            "server-info", "wake-hints", "delegation-scopes", "reservations", "superseding")
+            "server-info", "wake-hints", "delegation-scopes", "reservations", "superseding", "event-stream", "ui")
 # What each release brought agents: announced to every project when the server starts on a newer version.
 NEWS = {
     "0.4.0": "one certificate per agent CLI; plugins for Muse, Gemini, Qwen, opencode, Kilo and Crush",
@@ -49,6 +49,8 @@ NEWS = {
     "0.6.1": "Deep Code support (tools/agent_plugins.py install deepcode, with its own certificate)",
     "0.7.0": "wake hints in poll/context (when to look again); support-with-reservation; objections need a "
              "reason; propose --supersedes; delegate a sub-scope; coord-db export/prune/vacuum",
+    "0.8.0": "coord-server --ui: a window for humans to follow and join the work; live events over SSE "
+             "(GET /events/stream, coord events --follow)",
 }
 SERVER_NAME = "coord-server"   # sender of the server's own messages (upgrade notices)
 

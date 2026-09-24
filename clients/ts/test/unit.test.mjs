@@ -157,3 +157,17 @@ test("whoami warns when the server and this client are on different versions", (
   assert.match(versionSkew("0.4.0", "0.5.0"), /server 0\.4\.0 is older than this client 0\.5\.0: .*bad_op/);
   assert.match(versionSkew("0.10.0", "0.9.9"), /newer/);                     // numeric, not string, order
 });
+
+test("pollEvents: in order, resumes after the last id, stops on abort", async () => {
+  const { pollEvents } = await import("../dist/transport.js");
+  const { fmtEvent } = await import("../dist/format.js");
+  const log = [{ event: 5, kind: "claim.acquired", entity: "claim", id: "3", payload: { scope: "src/" }, at: "t" },
+               { event: 6, kind: "message.posted", entity: "message", id: "9", payload: {}, at: "t" }];
+  const asked = [];
+  const fake = { async send(op, args) { asked.push(args.after); return { ok: true, result: log.filter((e) => e.event > args.after) }; } };
+  const stop = new AbortController(), seen = [];
+  await pollEvents(fake, "p", 4, (e) => { seen.push(e.event); if (seen.length === 2) stop.abort(); }, stop.signal, 5);
+  assert.deepEqual(seen, [5, 6]);
+  assert.equal(asked[0], 4);
+  assert.equal(fmtEvent(log[0]), '#5 t claim.acquired claim 3 {"scope":"src/"}');
+});

@@ -14,7 +14,8 @@ import { CoordClient, tokenSource, transportFromEnv } from "./client.js";
 import { ConfigError, loadConfig } from "./config.js";
 import { CoordError } from "./errors.js";
 import { unifiedDiff } from "./diff.js";
-import { human } from "./format.js";
+import { fmtEvent, human } from "./format.js";
+import { type CoordEvent, pollEvents } from "./transport.js";
 import { detectProject, git, rel, repoRoot } from "./git.js";
 import { CLIENT_VERSION, ENUMS } from "./ops.generated.js";
 import { TokenProvider } from "./oidc.js";
@@ -130,7 +131,8 @@ const COMMANDS: Record<string, Cmd> = {
   "agent-card": { help: "the server's A2A Agent Card (skills, security schemes, endpoint)" },
   projects: {},
   status: { opts: [s("--project")] },
-  events: { opts: [i("--after", { default: 0 })] },
+  events: { help: "the project's event log; --follow streams it live (server-sent events) until Ctrl-C",
+            opts: [i("--after", { default: 0 }), b("--follow"), s("--project")] },
 };
 
 const dest = (o: Opt) => o.dest ?? o.flag.replace(/^--/, "").replace(/-/g, "_");
@@ -390,7 +392,17 @@ export async function run(path: string[], a: NS, c: CoordClient): Promise<[strin
     case "agent-card": return [cmd, await c.agentCard(), 0];
     case "projects": return [cmd, await call("projects", {}), 0];
     case "status": return [cmd, await call("status", { project: a.project }), 0];
-    case "events": return [cmd, await call("events", { after: a.after, project: detectProject() }), 0];
+    case "events": {
+      const project = a.project || detectProject();
+      if (!a.follow) return [cmd, await call("events", { after: a.after, project }), 0];
+      const stop = new AbortController();
+      process.once("SIGINT", () => stop.abort());
+      const t = c.transport;
+      const follow = t.follow ? t.follow.bind(t) : (p: string | null, af: number, on: (e: CoordEvent) => void, s: AbortSignal) =>
+        pollEvents(t, p, af, on, s);
+      await follow(project, a.after, (e) => process.stdout.write((process.argv.includes("--json") ? JSON.stringify(e) : fmtEvent(e)) + "\n"), stop.signal);
+      return ["events-followed", null, 0];
+    }
   }
   throw new UsageError(`unhandled command ${cmd}`);
 }
@@ -427,6 +439,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     else process.stderr.write(`error (${e.code}): ${e.message}\n`);
     return 1;
   }
+  if (cmd === "events-followed") return code;
   if (json) process.stdout.write(JSON.stringify(r, null, 2) + "\n");
   else {
     if (cmd === "whoami") process.stdout.write(`you are ${r.name} (gen ${r.generation}, project ${r.project})\nexport COORD_SESSION=${r.session_id}\n`);

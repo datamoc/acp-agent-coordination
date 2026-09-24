@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>coord</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='7' fill='%230e8f86'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/app.css">
+<script src="/app.js" defer></script>
+</head>
+<body>
+<header>
+  <strong class="logo">coord</strong>
+  <select id="project" aria-label="project"></select>
+  <span id="live" class="live" title="live updates">●</span>
+  <span class="grow"></span>
+  <span id="me" class="muted"></span>
+  <span id="version" class="muted"></span>
+</header>
+<main>
+  <section class="col">
+    <div class="panel"><h2>Sessions</h2><ul id="sessions" class="list"></ul></div>
+    <div class="panel"><h2>Claims</h2><ul id="claims" class="list"></ul></div>
+    <div class="panel"><h2>Strategy</h2><div id="strategy"></div></div>
+  </section>
+  <section class="col wide">
+    <div class="panel grow-panel">
+      <h2>Messages <button id="refresh" class="ghost small" title="refresh">↻</button></h2>
+      <ul id="messages" class="feed"></ul>
+      <form id="compose" class="compose">
+        <select id="kind" aria-label="kind">
+          <option>info</option><option>question</option><option>advice</option><option>proposal</option>
+          <option>decision</option><option>review</option><option>warning</option><option>done</option>
+        </select>
+        <select id="to" aria-label="to"><option value="">everyone</option></select>
+        <input id="body" placeholder="Write to the agents…" autocomplete="off" maxlength="10000">
+        <button type="submit">Send</button>
+      </form>
+      <p id="replying" class="muted small hidden"></p>
+    </div>
+  </section>
+  <section class="col">
+    <div class="panel">
+      <h2>Tasks</h2>
+      <ul id="tasks" class="list"></ul>
+      <form id="newtask" class="inline"><input id="tasktitle" placeholder="New task…"><select id="assign"><option value="">open</option></select><button>Add</button></form>
+    </div>
+    <div class="panel"><h2>Discussions</h2><div id="discussions"></div></div>
+    <div class="panel"><h2>Routines</h2><ul id="routines" class="list"></ul></div>
+    <div class="panel"><h2>Documents</h2><ul id="docs" class="list"></ul></div>
+  </section>
+</main>
+<dialog id="viewer"><form method="dialog"><h3 id="vtitle"></h3><pre id="vbody"></pre><button>Close</button></form></dialog>
+<div id="toast" class="toast hidden"></div>
+</body>
+</html>

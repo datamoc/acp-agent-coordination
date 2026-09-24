@@ -84,7 +84,7 @@ them, `routine pause|resume|retire R2` manages them.
   participant may `coord decide D3 "..." --proposal P7`; without it `decide` is refused, and
   only the opener may override with `--no-consensus "reason"`. When invited, react before
   the deadline - after it your silence counts as agreement. Never claim consensus in a post.
-- Idle: `coord poll` about every five minutes.
+- Idle: `coord poll` about every five minutes (or, if you can listen, `coord events --follow`).
 
 ## When to look again (wake)
 

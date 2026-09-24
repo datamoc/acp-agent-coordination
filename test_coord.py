@@ -732,6 +732,83 @@ def _serve(httpd):
 
 
 @check
+def ui_guards_and_calls():
+    """coord-server --ui: token -> cookie, loopback Host only, writes only from the UI's Origin,
+    ops run in-process as the human's own session (principal ui:<name>)."""
+    from coordination.ui import start_ui
+    c = Coord(TMP / "ui.db")
+    agent = c.whoami("claude", project="p")["session_id"]
+    c.post(agent, "<img src=x onerror=alert(1)> hello")
+    gui = start_ui(c, 0, "Michel W", "none")
+    port, token = gui["port"], gui["token"]
+    base = f"http://127.0.0.1:{port}"
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
+
+    def req(path, method="GET", body=None, **headers):
+        r = urllib.request.Request(base + path, method=method, data=body, headers=headers)
+        try:
+            with opener.open(r, timeout=10) as res:
+                return res.status, dict(res.headers), res.read()
+        except urllib.error.HTTPError as e:
+            return e.code, dict(e.headers), e.read()
+    assert req("/")[0] == 403                                            # no token, no cookie
+    assert req("/?t=wrong")[0] == 403
+    code, headers, _ = req(f"/?t={token}")
+    assert code == 303 and "HttpOnly" in headers["Set-Cookie"] and "SameSite=Strict" in headers["Set-Cookie"]
+    cookie = headers["Set-Cookie"].split(";")[0]
+    code, headers, page = req("/", Cookie=cookie)
+    assert code == 200 and b"/app.js" in page and "script-src 'self'" in headers["Content-Security-Policy"]
+    assert req("/", Cookie=cookie, Host=f"evil.example:{port}")[0] == 403    # DNS rebinding
+    call = json.dumps({"op": "post", "args": {"body": "from the UI"}, "project": "p"}).encode()
+    ctype = "application/json"
+    assert req("/api/call", "POST", call, Cookie=cookie, **{"Content-Type": ctype})[0] == 403   # no Origin
+    assert req("/api/call", "POST", call, Cookie=cookie, Origin="http://evil.example", **{"Content-Type": ctype})[0] == 403
+    code, _, out = req("/api/call", "POST", call, Cookie=cookie, Origin=base, **{"Content-Type": ctype})
+    assert code == 200 and json.loads(out)["ok"], out
+    last = c.inbox(project="p", limit=None)[-1]
+    assert last["body"] == "from the UI" and last["from"] == "Michel-W-01"
+    bad = json.dumps({"op": "whoami", "args": {"family": "x"}}).encode()          # the UI never picks identities
+    assert json.loads(req("/api/call", "POST", bad, Cookie=cookie, Origin=base, **{"Content-Type": ctype})[2])["error"] == "bad_op"
+    state = json.loads(req("/api/state", Cookie=cookie)[2])["result"]
+    assert state["me"]["principal"] == "ui:Michel-W" and state["last_event"] > 0
+    gui["humans"].end_all()
+    gui["httpd"].shutdown()
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k):
+        return None
+
+
+@check
+def event_stream_over_sse():
+    """GET /events/stream: events arrive as server-sent events; Last-Event-ID resumes after it."""
+    from coordination import server as srv
+    c = Coord(TMP / "sse.db")
+    a = c.whoami("claude", project="p")["session_id"]
+    old = srv.STREAM_MAX_SECONDS, srv.STREAM_POLL_SECONDS
+    srv.STREAM_MAX_SECONDS, srv.STREAM_POLL_SECONDS = 1.5, 0.1
+    try:
+        port = _serve(build_server(c, "127.0.0.1", 0))
+        c.post(a, "hello stream")
+
+        def read(headers=None):
+            req = urllib.request.Request(f"http://127.0.0.1:{port}/events/stream?project=p", headers=headers or {})
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            with opener.open(req, timeout=10) as r:
+                assert r.headers["Content-Type"] == "text/event-stream"
+                return r.read().decode()
+        body = read()
+        ids = [int(line[4:]) for line in body.splitlines() if line.startswith("id: ")]
+        kinds = [json.loads(line[6:])["kind"] for line in body.splitlines() if line.startswith("data: ")]
+        assert "session.started" in kinds and "message.posted" in kinds, kinds
+        resumed = read({"Last-Event-ID": str(ids[0])})
+        assert [int(line[4:]) for line in resumed.splitlines() if line.startswith("id: ")] == ids[1:]
+    finally:
+        srv.STREAM_MAX_SECONDS, srv.STREAM_POLL_SECONDS = old
+
+
+@check
 def http_loopback():
     c, _ = fresh()
     httpd = build_server(c, "127.0.0.1", 0)

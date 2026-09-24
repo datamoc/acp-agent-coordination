@@ -11,6 +11,12 @@ export function fmtMsg(m: any): string {
 
 const every = (s: number) => (s % 86400 === 0 ? `${s / 86400}d` : s % 3600 === 0 ? `${s / 3600}h` : `${Math.round(s / 60)}m`);
 
+/** One event-log line: "#1203 2026-09-24T10:00:00+00:00 claim.acquired claim 42 {scope}". */
+export function fmtEvent(e: any): string {
+  const p = e.payload && Object.keys(e.payload).length ? " " + JSON.stringify(e.payload) : "";
+  return `#${e.event} ${e.at} ${e.kind}${e.entity ? ` ${e.entity} ${e.id}` : ""}${p}`;
+}
+
 /** When to look again: "wake: now - R2 due: ..." or "wake: in 12 min (10:42Z) - renew or release C12". */
 export function fmtWake(w: any): string {
   const s = w.in_seconds;

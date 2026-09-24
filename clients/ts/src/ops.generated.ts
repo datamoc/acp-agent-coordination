@@ -2,7 +2,7 @@
 
 export const ENUMS = {"message_kinds":["info","question","advice","proposal","decision","review","warning","done"],"roles":["advisor","reviewer","coeditor","delegate"],"stances":["support","support-with-reservation","object","abstain","need-more-info"],"doc_kinds":["note","diagnosis","plan","proposal","decision","review","adr"],"memory_kinds":["strategy","overview","convention","architecture","decision","pitfall","glossary"],"consensus_rules":["unanimous","majority","no-objection"],"routine_statuses":["active","paused","retired"],"routine_outcomes":["ok","issues","failed"]} as const;
 
-export const CLIENT_VERSION = "0.7.0";   // package.json: compared with the server's in whoami
+export const CLIENT_VERSION = "0.8.0";   // package.json: compared with the server's in whoami
 
 export interface OpArgs {
   ask: { session: string; claim: string; to: string; body: string; role?: string; kind?: string; client_id?: string | null; };

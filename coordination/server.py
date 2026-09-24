@@ -41,6 +41,8 @@ from .service import READ_OPS, WRITE_OPS, Coord, CoordError, server_version
 
 PROJECT_ROLES = {"viewer": 0, "contributor": 1, "admin": 2}
 VERBOSE = 15   # -v: one line per request, between INFO (default) and DEBUG (-vv)
+STREAM_POLL_SECONDS = 1.0     # /events/stream checks the event log this often
+STREAM_MAX_SECONDS = 3600     # then closes; clients reconnect with Last-Event-ID
 logging.addLevelName(VERBOSE, "VERBOSE")
 log = logging.getLogger("coord-server")
 
@@ -166,7 +168,48 @@ def make_handler(coord, oidc: OIDCIntrospector | None, mtls: bool, authority=Non
                 oidc_url = oidc.url.split("/protocol/openid-connect/")[0] + "/.well-known/openid-configuration" \
                     if oidc else None
                 return self._send(200, a2a.agent_card(self._base_url(), mtls, oidc_url, version))
+            if self.path.split("?")[0] == "/events/stream":
+                return self._stream()
             self._send(404, {"ok": False, "error": "not_found"})
+
+        def _stream(self):
+            """Server-sent events: GET /events/stream?project=P&after=N (or Last-Event-ID). Wakes up
+            clients that can listen; `poll` stays the guarantee - after a reconnect, resume from the
+            last id and nothing is lost. Same identity checks as /call (viewer role with OIDC)."""
+            q = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            project = (q.get("project") or [None])[0]
+            try:
+                after = int(self.headers.get("Last-Event-ID") or (q.get("after") or ["0"])[0])
+                principal, info = self._identity()
+                if info is not None and oidc.project_role(info, project or "default") < PROJECT_ROLES["viewer"]:
+                    raise CoordError("forbidden", f"no viewer role on project {project or 'default'}")
+            except ValueError:
+                return self._send(400, {"ok": False, "error": "bad_args", "message": "after must be an event id"})
+            except CoordError as e:
+                return self._send(401 if e.code == "unauthenticated" else 403,
+                                  {"ok": False, "error": e.code, "message": str(e)})
+            self._op = "events/stream"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            self.close_connection = True
+            started, last_beat = time.monotonic(), time.monotonic()
+            try:
+                self.wfile.write(b": coord event stream\n\n")
+                while time.monotonic() - started < STREAM_MAX_SECONDS:     # the client reconnects after
+                    for e in coord.events(after=after, project=project, limit=200):
+                        self.wfile.write(f"id: {e['event']}\nevent: coord\ndata: {json.dumps(e)}\n\n".encode())
+                        after = e["event"]
+                    if time.monotonic() - last_beat >= 15:
+                        self.wfile.write(b": keep-alive\n\n")
+                        last_beat = time.monotonic()
+                    self.wfile.flush()
+                    time.sleep(STREAM_POLL_SECONDS)
+            except (BrokenPipeError, ConnectionResetError, ssl.SSLError, OSError):
+                pass                                                         # the client went away
+            log.log(VERBOSE, "%s GET /events/stream closed after %.0fs, last event %s %s",
+                    self.client_address[0], time.monotonic() - started, after, principal or "-")
 
         def _run_op(self, op: str, args: dict, principal, info):
             """One coord op with the caller's identity checks - shared by /call and /a2a."""
@@ -341,6 +384,12 @@ def main(argv=None) -> int:
     p.add_argument("--oidc-client-secret")
     p.add_argument("--oidc-cache-seconds", type=int, default=60,
                    help="how long a token's introspection result is reused (a revoked token may work that long)")
+    ui = p.add_argument_group("graphical interface", "a local window to follow and join the agents' work")
+    ui.add_argument("--ui", action="store_true", help="serve the coord UI on 127.0.0.1 and open it")
+    ui.add_argument("--ui-port", type=int, default=0, help="its port (default: any free one - the link carries a token)")
+    ui.add_argument("--ui-as", help="your name at the UI (default: your OS user); you act as ui:<name>")
+    ui.add_argument("--ui-open", choices=("auto", "app", "browser", "none"), default="auto",
+                    help="auto: an app window (Edge/Chrome --app), else the browser; none: just print the link")
     a = p.parse_args(argv)
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(logging.Formatter(("%(asctime)s " if a.verbose else "") + "coord-server: %(message)s"))
@@ -395,10 +444,18 @@ def main(argv=None) -> int:
     mode = ", ".join(x for x in ("mTLS" if a.client_ca else "", "OIDC" if oidc else "",
                                  f"server cert: {source_kind}" if cert_source else "") if x)
     print(f"coord-server on {scheme}://{a.listen}:{a.port}" + (f" ({mode})" if mode else ""), flush=True)
+    gui = None
+    if a.ui:
+        from .ui import start_ui          # only the UI mode loads the UI code
+        gui = start_ui(coord, a.ui_port, a.ui_as, a.ui_open)
+        print(f"coord UI on {gui['url']} (as ui:{gui['humans'].family}, opened: {gui['opened']})", flush=True)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         pass
+    finally:
+        if gui:
+            gui["humans"].end_all()
     return 0
 
 

@@ -50,6 +50,7 @@
   footer a { color: var(--muted); }
   .btn { display: inline-block; background: var(--accent); color: var(--accent-ink); padding: 9px 16px;
          border-radius: 8px; text-decoration: none; font-weight: 600; margin-right: 10px; }
+  img.shot { width: 100%; height: auto; border: 1px solid var(--line); border-radius: 12px; }
   .btn.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
 </style>
 </head>
@@ -72,6 +73,14 @@
 
   <a class="btn" href="architecture.html">See the architecture</a>
   <a class="btn ghost" href="https://github.com/datamoc/coord#quick-start-one-machine-mtls">Quick start</a>
+
+  <h2>For humans: the window</h2>
+  <p class="lead" style="margin-top:0"><code>coord-server --ui</code> opens a local window on the agents' work -
+  sessions, claims, messages, tasks, discussions, routines, strategy - live, and you take part in it.</p>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="img/coord-ui-dark.png">
+    <img class="shot" alt="The coord UI on a demo project: sessions and claims, the message feed, tasks, a discussion with a reservation, routines and documents" src="img/coord-ui-light.png" width="1440" height="900">
+  </picture>
 
   <h2>Diagrams</h2>
   <div class="grid">

@@ -227,6 +227,37 @@ and recurring work done without being asked):
   and the lease - it never runs anything: a routine waits for an agent to
   poll, like everything else here.
 
+### Graphical interface (for humans)
+
+```sh
+coord-server --pki pki --ui            # + a window to follow and join the agents' work
+```
+
+`--ui` serves a small page on **127.0.0.1** only and opens it as an app window (Edge / Chrome
+`--app`, else your browser): sessions, claims, the message feed (write, reply, resolve), tasks
+(create, assign), discussions (react, decide), routines, the strategy and documents, updated
+live. You take part as `ui:<your name>` (`--ui-as alex`), one session per project; nothing to
+install, no certificate in the browser.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/coord-ui-dark.png">
+  <img alt="The coord UI: sessions and claims, the message feed, tasks, a discussion with a reservation, routines and documents" src="docs/img/coord-ui-light.png">
+</picture>
+
+*A demo project (`uv run tools/demo_ui.py demo.db`), not real work.*
+
+The link carries a per-launch token (`…/?t=…`) that becomes an HttpOnly, SameSite=Strict
+cookie; requests need that cookie and a loopback `Host` (no DNS rebinding), writes also the
+UI's own `Origin` (no CSRF); the page runs under a strict CSP and shows everything agents write
+as text only. `--ui-port` fixes the port, `--ui-open none` only prints the link.
+
+### Live events
+
+`GET /events/stream?project=P` streams the event log as server-sent events (same
+authentication as `/call`; `Last-Event-ID` resumes). `coord events --follow` prints it live -
+for agents and scripts that can listen. `poll` stays the guarantee: after a drop, resume from
+the last id and nothing is lost.
+
 ### Waking up and database upkeep
 
 - **Wake hints**: `poll` and `context` return `wake: {next_at, in_seconds, reason}` - when this

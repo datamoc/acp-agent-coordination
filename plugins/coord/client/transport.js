@@ -182,6 +182,30 @@ export class RemoteTransport {
         }
         return (await this.post(this.url, { op, args })).body;
     }
+    /** GET /events/stream (server-sent events), reconnecting with Last-Event-ID; a server older than
+     *  0.8 (404) is followed by polling the `events` op instead. */
+    async follow(project, after, onEvent, signal) {
+        let last = after, backoff = 1000;
+        while (!signal.aborted) {
+            const url = new URL(`/events/stream${project ? `?project=${encodeURIComponent(project)}` : ""}`, this.url);
+            const headers = { Accept: "text/event-stream", "Last-Event-ID": String(last) };
+            const b = await this.bearer();
+            if (b)
+                headers.Authorization = `Bearer ${b}`;
+            const status = await sseRequest(url, headers, { ca: this.caPem, cert: this.certPem, key: this.keyPem,
+                insecure: this.o.insecure, env: this.o.env }, signal, (e) => {
+                last = e.event;
+                backoff = 1000;
+                onEvent(e);
+            }).catch(() => 0);
+            if (status === 404)
+                return pollEvents(this, project, last, onEvent, signal);
+            if (status === 401 && this.o.token && typeof this.o.token !== "string")
+                await this.o.token.invalidate();
+            await sleep(backoff, signal);
+            backoff = Math.min(backoff * 2, 30_000);
+        }
+    }
     /** Replace our cert atomically with the renewed one - only if it fits our private key. */
     installRenewal(pem) {
         const log = this.o.log ?? ((m) => process.stderr.write(m + "\n"));
@@ -210,6 +234,69 @@ export class RemoteTransport {
         }
     }
 }
+const sleep = (ms, signal) => new Promise((ok) => {
+    const t = setTimeout(ok, ms);
+    signal.addEventListener("abort", () => { clearTimeout(t); ok(); }, { once: true });
+});
+/** Poll the `events` op every `everyMs` - for local mode and servers without /events/stream. */
+export async function pollEvents(t, project, after, onEvent, signal, everyMs = 2000) {
+    let last = after;
+    while (!signal.aborted) {
+        const r = await t.send("events", { after: last, project, limit: 200 }).catch(() => null);
+        for (const e of (r?.ok ? r.result : [])) {
+            last = e.event;
+            onEvent(e);
+        }
+        await sleep(everyMs, signal);
+    }
+}
+/** One server-sent-events GET: parses `id:`/`data:` blocks until the stream ends; resolves the HTTP status. */
+export async function sseRequest(url, headers, opts, signal, onEvent) {
+    const secure = url.protocol === "https:";
+    const port = Number(url.port || (secure ? 443 : 80));
+    const tlsOpts = {
+        ca: opts.ca, cert: opts.cert, key: opts.key, servername: net.isIP(url.hostname) ? undefined : url.hostname,
+        rejectUnauthorized: !opts.insecure,
+    };
+    const proxy = proxyFor(url, opts.env);
+    let socket;
+    if (proxy && secure)
+        socket = await tunnel(proxy, url.hostname, port);
+    return new Promise((ok, fail) => {
+        const common = { method: "GET", headers, signal };
+        const req = secure
+            ? https.request({ ...common, host: url.hostname, port, path: url.pathname + url.search, agent: false, ...tlsOpts,
+                ...(socket ? { createConnection: () => tls.connect({ ...tlsOpts, socket }) } : {}) })
+            : http.request({ ...common, host: url.hostname, port, path: url.pathname + url.search, agent: false });
+        req.on("response", (res) => {
+            if (res.statusCode !== 200) {
+                res.resume();
+                return ok(res.statusCode ?? 0);
+            }
+            let buf = "";
+            res.setEncoding("utf8");
+            res.on("data", (chunk) => {
+                buf += chunk;
+                let cut;
+                while ((cut = buf.indexOf("\n\n")) >= 0) {
+                    const block = buf.slice(0, cut);
+                    buf = buf.slice(cut + 2);
+                    const data = block.split("\n").filter((l) => l.startsWith("data: ")).map((l) => l.slice(6)).join("\n");
+                    if (data) {
+                        try {
+                            onEvent(JSON.parse(data));
+                        }
+                        catch { /* not an event */ }
+                    }
+                }
+            });
+            res.on("end", () => ok(200));
+            res.on("error", () => ok(200));
+        });
+        req.on("error", (e) => (signal.aborted ? ok(0) : fail(e)));
+        req.end();
+    });
+}
 /** Local mode: no server - one op per `coord-local` run against a SQLite db (Python package). */
 export class LocalTransport {
     db;
@@ -233,5 +320,8 @@ export class LocalTransport {
         catch {
             throw new CoordError("local_failed", `${this.command} failed: ${(p.stderr || p.stdout).trim().slice(0, 500)}`);
         }
+    }
+    follow(project, after, onEvent, signal) {
+        return pollEvents(this, project, after, onEvent, signal);
     }
 }
