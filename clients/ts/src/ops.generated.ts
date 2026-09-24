@@ -2,7 +2,7 @@
 
 export const ENUMS = {"message_kinds":["info","question","advice","proposal","decision","review","warning","done"],"roles":["advisor","reviewer","coeditor","delegate"],"stances":["support","support-with-reservation","object","abstain","need-more-info"],"doc_kinds":["note","diagnosis","plan","proposal","decision","review","adr"],"memory_kinds":["strategy","overview","convention","architecture","decision","pitfall","glossary"],"consensus_rules":["unanimous","majority","no-objection"],"routine_statuses":["active","paused","retired"],"routine_outcomes":["ok","issues","failed"]} as const;
 
-export const CLIENT_VERSION = "0.9.0";   // package.json: compared with the server's in whoami
+export const CLIENT_VERSION = "0.10.0";   // package.json: compared with the server's in whoami
 
 export interface OpArgs {
   ask: { session: string; claim: string; to: string; body: string; role?: string; kind?: string; client_id?: string | null; };
@@ -56,10 +56,11 @@ export interface OpArgs {
   suggest: { project?: string | null; category?: string | null; capability?: string[] | null; reasoning_level?: string | null; exclude_session?: string | null; };
   task_accept: { session: string; task: string; };
   task_cancel: { session: string; task: string; note?: string; };
-  task_create: { session: string; title: string; description?: string; priority?: number; claim?: string | null; assign?: string | null; category?: string | null; client_id?: string | null; };
+  task_create: { session: string; title: string; description?: string; priority?: number; claim?: string | null; assign?: string | null; category?: string | null; after?: string[] | null; client_id?: string | null; };
   task_decline: { session: string; task: string; reason?: string; };
   task_done: { session: string; task: string; note?: string; };
   task_get: { task: string; };
+  task_link: { session: string; task: string; after: string[]; remove?: boolean; };
   tasks: { project?: string | null; status?: string | null; assigned_session?: string | null; };
   thread: { message: number; session?: string | null; };
   whoami: { family: string; project?: string; user?: string | null; model?: string | null; client_id?: string | null; };
@@ -518,6 +519,7 @@ export const OPS: Record<OpName, { kind: "read" | "write"; params: readonly stri
    "claim",
    "assign",
    "category",
+   "after",
    "client_id"
   ]
  },
@@ -541,6 +543,15 @@ export const OPS: Record<OpName, { kind: "read" | "write"; params: readonly stri
   "kind": "read",
   "params": [
    "task"
+  ]
+ },
+ "task_link": {
+  "kind": "write",
+  "params": [
+   "session",
+   "task",
+   "after",
+   "remove"
   ]
  },
  "tasks": {

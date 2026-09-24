@@ -84,11 +84,112 @@ function renderMessages(list) {
   if (atBottom) feed.scrollTop = feed.scrollHeight;
 }
 
+const taskState = (t) => (t.status === "done" || t.status === "cancelled" ? "done" : t.blocked_by?.length ? "blocked" : t.status);
+
 function renderTasks(list) {
   const live = list.filter((t) => t.status !== "done" && t.status !== "cancelled");
   fill($("tasks"), live.map((t) => el("li", { title: t.title }, el("div", { class: "clamp" }, el("span", { class: "id" }, t.task), t.title),
-    el("span", { class: "tag" }, t.status), t.assigned ? el("span", { class: "tag" }, t.assigned) : null)), "no open task");
+    el("span", { class: `tag${t.blocked_by?.length ? " due" : ""}` }, t.blocked_by?.length ? `blocked by ${t.blocked_by.join(", ")}` : t.status),
+    t.assigned ? el("span", { class: "tag" }, t.assigned) : null,
+    !t.blocked_by?.length && t.after?.length ? el("span", { class: "tag" }, `after ${t.after.join(", ")}`) : null)), "no open task");
+  renderGraph(list.filter((t) => t.status !== "cancelled"));
 }
+
+// --- the task graph: columns by depth (longest chain of prerequisites), edges prerequisite -> task --
+const SVG = "http://www.w3.org/2000/svg";
+function svg(tag, attrs = {}, ...kids) {
+  const n = document.createElementNS(SVG, tag);
+  for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+  for (const k of kids) n.append(k instanceof Node ? k : document.createTextNode(String(k)));
+  return n;
+}
+function renderGraph(tasks) {
+  const box = $("graph");
+  const byId = new Map(tasks.map((t) => [t.task, t]));
+  if (!tasks.some((t) => (t.after || []).some((a) => byId.has(a)))) {
+    box.replaceChildren(el("p", { class: "muted small" }, tasks.length
+      ? "No dependencies yet - link tasks with coord task link T3 --after T1 (or \"after\" below)." : "No task yet."));
+    return;
+  }
+  const depth = new Map();
+  const d = (id, seen = new Set()) => {
+    if (depth.has(id)) return depth.get(id);
+    if (seen.has(id)) return 0;
+    seen.add(id);
+    const v = Math.max(0, ...(byId.get(id).after || []).filter((a) => byId.has(a)).map((a) => d(a, seen) + 1));
+    depth.set(id, v);
+    return v;
+  };
+  tasks.forEach((t) => d(t.task));
+  const cols = [];
+  for (const t of tasks) (cols[depth.get(t.task)] ??= []).push(t);
+  const row = new Map();                     // each column ordered by its prerequisites' mean row: fewer crossings
+  const hasNext = new Set(tasks.flatMap((t) => (t.after || []).filter((a) => byId.has(a))));
+  cols[0]?.sort((a, b) => Number(hasNext.has(b.task)) - Number(hasNext.has(a.task)));   // roots that lead somewhere first
+  cols.forEach((col, c) => {
+    if (c) {
+      const mean = (t) => { const r = (t.after || []).filter((a) => row.has(a)).map((a) => row.get(a));
+                            return r.length ? r.reduce((x, y) => x + y, 0) / r.length : Infinity; };
+      col.sort((a, b) => mean(a) - mean(b));
+    }
+    col.forEach((t, r) => row.set(t.task, r));
+  });
+  const W = 230, H = 46, GX = 70, GY = 18, P = 12;
+  const pos = new Map();
+  cols.forEach((col, c) => col.forEach((t, r) => pos.set(t.task, { x: P + c * (W + GX), y: P + r * (H + GY) })));
+  const width = P * 2 + cols.length * W + (cols.length - 1) * GX;
+  const height = P * 2 + Math.max(...cols.map((c) => c.length)) * (H + GY) - GY;
+  const root = svg("svg", { width, height, viewBox: `0 0 ${width} ${height}`, role: "img", "aria-label": "task dependency graph" });
+  root.append(svg("defs", {}, svg("marker", { id: "arrow", viewBox: "0 0 10 10", refX: "9", refY: "5", markerWidth: "7",
+                                               markerHeight: "7", orient: "auto-start-reverse" },
+                                  svg("path", { d: "M0,0 L10,5 L0,10 z", fill: "currentColor", class: "edge-head" }))));
+  for (const t of tasks) for (const a of t.after || []) {
+    if (!byId.has(a)) continue;
+    const s = pos.get(a), e = pos.get(t.task);
+    const x1 = s.x + W, y1 = s.y + H / 2, x2 = e.x - 2, y2 = e.y + H / 2, mx = (x1 + x2) / 2;
+    root.append(svg("path", { class: "edge", d: `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`, "marker-end": "url(#arrow)" }));
+  }
+  for (const t of tasks) {
+    const { x, y } = pos.get(t.task);
+    const title = t.title.length > 30 ? t.title.slice(0, 29) + "…" : t.title;
+    const sub = t.blocked_by?.length ? `waits for ${t.blocked_by.join(", ")}` : t.assigned ? `${t.status} · ${t.assigned}` : t.status;
+    root.append(svg("g", { class: `node ${taskState(t)}`, transform: `translate(${x},${y})` },
+      svg("title", {}, `${t.task} ${t.title} (${t.status})`),
+      svg("rect", { width: W, height: H, rx: 8 }),
+      svg("text", { x: 10, y: 19 }, svg("tspan", { class: "tid" }, t.task + " "), title),
+      svg("text", { x: 10, y: 36, class: "muted-text", opacity: ".75", "font-size": "11" }, sub)));
+  }
+  box.replaceChildren(root);
+}
+
+function renderAttention(msgs, tasks) {
+  const open = msgs.filter((m) => !m.resolved_at && (m.kind === "question" || m.kind === "warning")).slice(-8).reverse();
+  const offered = tasks.filter((t) => t.status === "offered");
+  fill($("attention"), [
+    ...open.map((m) => el("li", {}, el("span", { class: "id" }, `#${m.id}`), el("b", {}, m.from), ` ${m.kind}: `,
+      el("span", { class: "small" }, m.body.length > 110 ? m.body.slice(0, 109) + "…" : m.body))),
+    ...offered.map((t) => el("li", {}, el("span", { class: "id" }, t.task), `offered to ${t.assigned}: `, t.title)),
+  ], "nothing waiting");
+  return open.length + offered.length;
+}
+
+function renderDue(routines) {
+  const due = routines.filter((r) => r.due);
+  fill($("due"), due.map((r) => el("li", {}, el("span", { class: "id" }, r.routine), r.title, el("span", { class: "tag due" }, r.why))),
+    "nothing due");
+  return due.length;
+}
+
+const badge = (id, n) => { $(id).textContent = n ? String(n) : ""; };
+
+// --- tabs -----------------------------------------------------------------
+function showTab(name) {
+  for (const b of document.querySelectorAll("#tabs [role=tab]")) b.setAttribute("aria-selected", String(b.dataset.tab === name));
+  for (const v of document.querySelectorAll(".view")) v.classList.toggle("hidden", v.id !== `view-${name}`);
+  try { localStorage.setItem("coord.tab", name); } catch { /* private window */ }
+}
+for (const b of document.querySelectorAll("#tabs [role=tab]")) b.addEventListener("click", () => showTab(b.dataset.tab));
+showTab((() => { try { return localStorage.getItem("coord.tab") || "now"; } catch { return "now"; } })());
 
 function renderRoutines(list) {
   fill($("routines"), list.map((r) => el("li", {}, el("span", { class: "id" }, r.routine), r.title,
@@ -146,6 +247,10 @@ async function refresh() {
     renderSessions(pres); renderClaims(locks); renderStrategy(strat); renderMessages(msgs);
     renderTasks(tasks); renderRoutines(routines); renderDocs(docs);
     await renderDiscussions(discs);
+    badge("b-now", renderAttention(msgs, tasks));
+    badge("b-tasks", tasks.filter((t) => t.status === "offered" || (t.blocked_by?.length && t.status !== "done")).length);
+    badge("b-discussions", discs.length);
+    badge("b-routines", renderDue(routines));
   } catch (e) { toast(e.message); }
 }
 
@@ -183,8 +288,9 @@ $("body").addEventListener("keydown", (e) => { if (e.key === "Escape") { replyTo
 $("newtask").addEventListener("submit", act(async () => {
   const title = $("tasktitle").value.trim();
   if (!title) return;
-  await call("task_create", { title, assign: $("assign").value || null });
-  $("tasktitle").value = "";
+  const after = $("taskafter").value.split(/[\s,]+/).filter(Boolean);
+  await call("task_create", { title, assign: $("assign").value || null, after: after.length ? after : null });
+  $("tasktitle").value = ""; $("taskafter").value = "";
 }));
 $("refresh").addEventListener("click", () => refresh());
 async function enter(name) {

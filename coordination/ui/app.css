@@ -22,9 +22,6 @@ header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; back
 .hidden { display: none !important; }
 .live { color: var(--muted); font-size: 12px; }
 .live.on { color: var(--ok); }
-main { flex: 1; display: grid; grid-template-columns: minmax(230px, 1fr) minmax(380px, 2fr) minmax(260px, 1.2fr);
-       gap: 12px; padding: 12px; min-height: 0; }
-@media (max-width: 980px) { main { grid-template-columns: 1fr; } }
 .col { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow: auto; }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
 .grow-panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
@@ -73,3 +70,37 @@ a.link { color: var(--accent); cursor: pointer; text-decoration: none; }
 /* actions appear on the message you point at or tab into */
 .feed .actions { visibility: hidden; }
 .feed li:hover .actions, .feed li:focus-within .actions { visibility: visible; }
+/* tabs */
+nav[role=tablist] { display: flex; gap: 2px; margin-left: 12px; }
+nav[role=tablist] button { background: transparent; color: var(--muted); border: 0; border-bottom: 2px solid transparent;
+                           border-radius: 0; font-weight: 600; padding: 8px 10px; }
+nav[role=tablist] button[aria-selected=true] { color: var(--ink); border-bottom-color: var(--accent); }
+.badge { font-size: 11px; background: var(--accent); color: var(--accent-ink); border-radius: 99px; padding: 0 6px; margin-left: 2px; }
+.badge:empty { display: none; }
+.view { flex: 1; padding: 12px; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 12px; }
+.view.grid3 { display: grid; grid-template-columns: minmax(230px, 1fr) minmax(380px, 2fr) minmax(260px, 1.2fr); }
+.view.two { display: grid; grid-template-columns: 1fr 1fr; align-items: start; }
+@media (max-width: 980px) { .view.grid3, .view.two { grid-template-columns: 1fr; } nav[role=tablist] { flex-wrap: wrap; } }
+input.narrow { flex: 0 0 110px; }
+/* task graph */
+.graph { overflow: auto; }
+.graph svg { display: block; }
+.graph .node rect { stroke-width: 1.5; }
+.graph .node text { fill: var(--ink); font-size: 12px; }
+.graph .node .tid { fill: var(--accent); font: 600 11px ui-monospace, Consolas, monospace; }
+.graph .edge { fill: none; stroke: var(--muted); stroke-width: 1.4; opacity: .7; }
+.graph svg { color: var(--muted); }
+.graph .node.open rect { fill: var(--panel); stroke: var(--muted); }
+.graph .node.offered rect { fill: color-mix(in srgb, var(--q) 14%, var(--panel)); stroke: var(--q); }
+.graph .node.accepted rect { fill: color-mix(in srgb, var(--accent) 16%, var(--panel)); stroke: var(--accent); }
+.graph .node.blocked rect { fill: color-mix(in srgb, var(--warn) 12%, var(--panel)); stroke: var(--warn); stroke-dasharray: 4 3; }
+.graph .node.done rect { fill: color-mix(in srgb, var(--ok) 12%, var(--panel)); stroke: var(--ok); }
+.graph .node.done text { opacity: .6; }
+i.st { display: inline-block; width: 10px; height: 10px; border: 1.5px solid; border-radius: 3px; margin: 0 3px 0 10px; vertical-align: -1px; }
+.legend { text-transform: none; letter-spacing: 0; font-weight: 400; }
+i.st.open { border-color: var(--muted); background: color-mix(in srgb, var(--muted) 16%, transparent); }
+i.st.offered { border-color: var(--q); background: color-mix(in srgb, var(--q) 16%, transparent); }
+i.st.accepted { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+i.st.blocked { border-color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent); }
+i.st.done { border-color: var(--ok); background: color-mix(in srgb, var(--ok) 16%, transparent); }
+i.st.blocked { border-style: dashed; }

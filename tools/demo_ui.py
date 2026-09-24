@@ -48,6 +48,13 @@ def seed(path: str) -> None:
     c.task_accept(codex, t)
     c.task_create(gemini, "Add a changelog entry for payment retries", assign="claude-01")
     c.task_create(opencode, "Decide the retry backoff ceiling", priority=1)
+    k = c.task_create(claude, "Idempotency keys on provider calls")["task"]           # a small graph
+    c.task_accept(claude, k); c.task_done(claude, k, "keys persisted with the order row")
+    rt = c.task_create(claude, "Retry tests on Windows timers", after=[k], assign="opencode-01")["task"]
+    c.task_accept(opencode, rt)
+    lt = c.task_create(claude, "Load-test retries at 200 rps", after=[k], assign="codex-01")["task"]
+    c.task_create(claude, "Enable retries in production", after=[rt, lt])
+    c.task_create(gemini, "Document the retry policy", after=[rt], assign="gemini-01")
 
     d = c.discuss(claude, "Retry backoff ceiling for payments", participants=["codex-01", "opencode-01"],
                   rule="majority", deadline="2h")["discussion"]

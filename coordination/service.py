@@ -70,5 +70,5 @@ READ_OPS = {"inbox", "thread", "locks", "fence_check", "roles", "check", "discus
             "status", "events", "presence", "routines", "routine_get", "server_info"}
 WRITE_OPS = {"whoami", "heartbeat", "end", "post", "reply", "resolve", "poll", "claim", "renew", "release",
              "grant", "revoke", "ask", "post_commit", "discuss", "propose", "react", "decide", "doc_create",
-             "doc_edit", "doc_patch", "task_create", "task_accept", "task_done", "task_cancel", "task_decline", "role_accept", "role_decline", "memory_add", "memory_edit",
+             "doc_edit", "doc_patch", "task_create", "task_link", "task_accept", "task_done", "task_cancel", "task_decline", "role_accept", "role_decline", "memory_add", "memory_edit",
              "profile_set", "routine_create", "routine_start", "routine_done", "routine_update"}

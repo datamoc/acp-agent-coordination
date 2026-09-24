@@ -1481,6 +1481,12 @@
      "required": false
     },
     {
+     "name": "after",
+     "type": "string[]",
+     "nullable": true,
+     "required": false
+    },
+    {
      "name": "client_id",
      "type": "string",
      "nullable": true,
@@ -1542,6 +1548,35 @@
      "type": "string",
      "nullable": false,
      "required": true
+    }
+   ]
+  },
+  "task_link": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "task",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "after",
+     "type": "string[]",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "remove",
+     "type": "boolean",
+     "nullable": false,
+     "required": false
     }
    ]
   },

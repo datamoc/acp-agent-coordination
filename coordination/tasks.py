@@ -5,10 +5,74 @@ import uuid
 from .core import CoordError, iso, parse_id
 
 
+RESOLVED = ("done", "cancelled")      # a prerequisite in one of these no longer blocks
+
+
 class TasksMixin:
+    # --- the task graph: T3 after T1, T2 ---------------------------------------
+    def _deps(self, db, tid: int) -> list[int]:
+        return [r[0] for r in db.execute("SELECT after_id FROM task_deps WHERE task_id=? ORDER BY after_id", (tid,))]
+
+    def _blocked_by(self, db, tid: int) -> list[int]:
+        return [r[0] for r in db.execute("SELECT d.after_id FROM task_deps d JOIN tasks t ON t.task_id=d.after_id"
+                                         " WHERE d.task_id=? AND t.status NOT IN ('done','cancelled')"
+                                         " ORDER BY d.after_id", (tid,))]
+
+    def _link(self, db, project: str, tid: int, after: list[str]) -> list[int]:
+        """Add prerequisites to a task: same project, no self-loop, no cycle."""
+        added = []
+        for a in after:
+            aid = parse_id("task", a)
+            row = db.execute("SELECT project_id FROM tasks WHERE task_id=?", (aid,)).fetchone()
+            if row is None:
+                raise CoordError("missing", f"no task T{aid}")
+            if row["project_id"] != project:
+                raise CoordError("bad_args", f"T{aid} is in another project")
+            if aid == tid or tid in self._ancestors(db, aid):
+                raise CoordError("cycle", f"T{tid} after T{aid} would make a cycle")
+            db.execute("INSERT OR IGNORE INTO task_deps VALUES(?,?)", (tid, aid))
+            added.append(aid)
+        return added
+
+    def _ancestors(self, db, tid: int) -> set[int]:
+        seen, todo = set(), [tid]
+        while todo:
+            for dep in self._deps(db, todo.pop()):
+                if dep not in seen:
+                    seen.add(dep); todo.append(dep)
+        return seen
+
+    def _unblock_dependents(self, db, me, tid: int) -> None:
+        """T{tid} just finished: tell whoever waits on a task that now has nothing left before it."""
+        for (dep,) in db.execute("SELECT task_id FROM task_deps WHERE after_id=?", (tid,)).fetchall():
+            t = db.execute("SELECT * FROM tasks WHERE task_id=?", (dep,)).fetchone()
+            if t is None or t["status"] in RESOLVED or self._blocked_by(db, dep):
+                continue
+            target = t["assigned_to"] or (self._live_by_name(db, t["created_by"]) or {"session_id": None})["session_id"]
+            self._notify(db, me, target, f"[T{dep}] unblocked - everything before it is finished: {t['title']}",
+                         kind="info")
+            self._event(db, t["project_id"], "task.unblocked", me["session_id"], "task", dep)
+
+    def task_link(self, session: str, task: str, after: list[str], remove: bool = False) -> dict:
+        """T3 after T1, T2: T3 cannot be accepted until they are done (or cancelled)."""
+        with self._tx() as db:
+            me = self._session(db, session)
+            tid = parse_id("task", task)
+            t = db.execute("SELECT * FROM tasks WHERE task_id=?", (tid,)).fetchone()
+            if t is None:
+                raise CoordError("missing", f"no task T{tid}")
+            if remove:
+                for a in after:
+                    db.execute("DELETE FROM task_deps WHERE task_id=? AND after_id=?", (tid, parse_id("task", a)))
+            else:
+                self._link(db, t["project_id"], tid, after)
+            self._event(db, t["project_id"], "task.linked", session, "task", tid)
+            return {"task": f"T{tid}", "after": [f"T{x}" for x in self._deps(db, tid)],
+                    "blocked_by": [f"T{x}" for x in self._blocked_by(db, tid)]}
+
     def task_create(self, session: str, title: str, description: str = "", priority: int = 0,
                     claim: str | None = None, assign: str | None = None, category: str | None = None,
-                    client_id: str | None = None) -> dict:
+                    after: list[str] | None = None, client_id: str | None = None) -> dict:
         def fn(db):
             me = self._session(db, session)
             target = self._resolve_name(db, assign, me["project_id"]) if assign else None
@@ -20,6 +84,7 @@ class TasksMixin:
                               target["display_name"] if target else None, title, description,
                               "offered" if target else "open", int(priority),
                               parse_id("claim", claim) if claim else None, category, now, now)).lastrowid
+            self._link(db, me["project_id"], tid, after or [])
             if target:   # an offer, not an order: the assignee accepts or declines
                 self._notify(db, me, target["session_id"],
                              f"[T{tid}] {me['display_name']} offers you a task: {title} - "
@@ -39,10 +104,12 @@ class TasksMixin:
             if assigned_session:
                 q += " AND assigned_to=?"; a.append(assigned_session)
             rows = db.execute(q + " ORDER BY priority DESC, task_id", a).fetchall()
+            graph = {r["task_id"]: (self._deps(db, r["task_id"]), self._blocked_by(db, r["task_id"])) for r in rows}
         return [{"task": f"T{r['task_id']}", "title": r["title"], "status": r["status"],
                  "priority": r["priority"], "assigned": r["assigned_name"], "created_by": r["created_by"],
                  "claim": f"C{r['related_claim_id']}" if r["related_claim_id"] else None,
-                 "category": r["category"]} for r in rows]
+                 "category": r["category"], "after": [f"T{x}" for x in graph[r["task_id"]][0]],
+                 "blocked_by": [f"T{x}" for x in graph[r["task_id"]][1]]} for r in rows]
 
     def _task_update(self, session, task, status, note=None, require_assignee=False):
         with self._tx() as db:
@@ -56,6 +123,10 @@ class TasksMixin:
                     raise CoordError("forbidden", f"T{tid} is offered to {t['assigned_name']}, not to you")
                 if t["status"] not in ("open", "offered"):
                     raise CoordError("taken", f"T{tid} is {t['status']} ({t['assigned_name'] or '-'})")
+                waiting = self._blocked_by(db, tid)
+                if waiting:
+                    raise CoordError("blocked", f"T{tid} waits for {', '.join(f'T{x}' for x in waiting)} - "
+                                     "you are told when they are done", {"blocked_by": [f"T{x}" for x in waiting]})
             if require_assignee and t["assigned_to"] not in (None, session):
                 raise CoordError("forbidden", f"T{tid} is assigned to {t['assigned_name']}")
             if status == "accepted" and t["status"] == "offered":
@@ -66,6 +137,8 @@ class TasksMixin:
                        " assigned_name=COALESCE(assigned_name, ?), note=COALESCE(?, note), updated_at=?"
                        " WHERE task_id=?", (status, session, me["display_name"], note, self.clock(), tid))
             self._event(db, t["project_id"], f"task.{status}", session, "task", tid)
+            if status == "done":
+                self._unblock_dependents(db, me, tid)
             return {"task": f"T{tid}", "status": status}
 
     def task_decline(self, session: str, task: str, reason: str = "") -> dict:
@@ -93,9 +166,13 @@ class TasksMixin:
         tid = parse_id("task", task)
         with self._read() as db:
             r = db.execute("SELECT * FROM tasks WHERE task_id=?", (tid,)).fetchone()
-        if r is None:
-            raise CoordError("missing", f"no task T{tid}")
+            if r is None:
+                raise CoordError("missing", f"no task T{tid}")
+            after, blocked = self._deps(db, tid), self._blocked_by(db, tid)
+            before = [x[0] for x in db.execute("SELECT task_id FROM task_deps WHERE after_id=? ORDER BY task_id", (tid,))]
         return {"task": f"T{tid}", "project": r["project_id"], "title": r["title"], "description": r["description"],
+                "after": [f"T{x}" for x in after], "blocked_by": [f"T{x}" for x in blocked],
+                "before": [f"T{x}" for x in before],
                 "status": r["status"], "priority": r["priority"], "assigned": r["assigned_name"],
                 "created_by": r["created_by"], "note": r["note"], "category": r["category"],
                 "claim": f"C{r['related_claim_id']}" if r["related_claim_id"] else None,
@@ -116,6 +193,7 @@ class TasksMixin:
             db.execute("UPDATE tasks SET status='cancelled', note=COALESCE(NULLIF(?, ''), note), updated_at=?"
                        " WHERE task_id=?", (note, self.clock(), tid))
             self._event(db, t["project_id"], "task.cancelled", session, "task", tid)
+            self._unblock_dependents(db, me, tid)
             return {"task": f"T{tid}", "status": "cancelled"}
 
     # --- push notifications for tasks (A2A TaskPushNotificationConfig) ---

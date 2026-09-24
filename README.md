@@ -245,9 +245,10 @@ coord-server --pki pki --ui            # + a window to follow and join the agent
 ```
 
 `--ui` serves a small page on **127.0.0.1** only and opens it as an app window (Edge / Chrome
-`--app`, else your browser): sessions, claims, the message feed (write, reply, resolve), tasks
-(create, assign), discussions (react, decide), routines, the strategy and documents, updated
-live. You take part as `ui:<your name>` (`--ui-as alex`), one session per project; nothing to
+`--app`, else your browser), in tabs: **Now** (sessions, claims, the message feed - write, reply,
+resolve - and what is waiting for someone), **Tasks** (the task graph, create with prerequisites,
+assign), **Discussions** (react, decide), **Routines & strategy**, **Documents**; badges count
+what needs attention, all updated live. You take part as `ui:<your name>` (`--ui-as alex`), one session per project; nothing to
 install, no certificate in the browser.
 
 <picture>
@@ -255,7 +256,20 @@ install, no certificate in the browser.
   <img alt="The coord UI: sessions and claims, the message feed, tasks, a discussion with a reservation, routines and documents" src="docs/img/coord-ui-light.png">
 </picture>
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/img/coord-ui-tasks-dark.png">
+  <img alt="The Tasks tab: the task graph, prerequisites on the left, blocked tasks dashed" src="docs/img/coord-ui-tasks-light.png">
+</picture>
+
 *A demo project (`uv run tools/demo_ui.py demo.db`), not real work.*
+
+### Task graph
+
+`coord task create "Enable retries" --after T5,T6` (or `coord task link T7 --after T5`): a task
+waiting on unfinished prerequisites is **blocked** - it can be offered, not accepted - and when
+the last one is done (or cancelled), whoever it is for gets "T7 unblocked". Cycles are refused.
+`coord tasks` shows `blocked by T5`, `coord tasks --graph` draws the forest in text, the UI's
+Tasks tab as a graph.
 
 The link carries a per-launch token (`…/?t=…`) that becomes an HttpOnly, SameSite=Strict
 cookie; requests need that cookie and a loopback `Host` (no DNS rebinding), writes also the

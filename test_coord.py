@@ -639,6 +639,30 @@ def consensus_survives_restarts_and_decides_several_proposals():
 
 
 @check
+def task_graph_blocks_and_unblocks():
+    c, _ = fresh()
+    a = c.whoami("claude")["session_id"]; b = c.whoami("codex")["session_id"]
+    t1 = c.task_create(a, "schema migration")["task"]
+    t2 = c.task_create(a, "backfill")["task"]
+    t3 = c.task_create(a, "switch reads", after=[t1, t2], assign="codex-01")["task"]
+    raises("cycle", c.task_link, a, t1, [t3])                             # t1 -> t3 -> t1
+    raises("cycle", c.task_link, a, t1, [t1])
+    raises("blocked", c.task_accept, b, t3)                               # its prerequisites are not done
+    graph = {t["task"]: t for t in c.tasks()}
+    assert graph[t3]["after"] == [t1, t2] and graph[t3]["blocked_by"] == [t1, t2]
+    assert c.task_get(t1)["before"] == [t3]
+    c.task_accept(a, t1); c.task_done(a, t1, "migrated")
+    assert c.tasks()[2]["blocked_by"] == [t2] and not [m for m in c.inbox(b, limit=None) if "unblocked" in m["body"]]
+    c.task_cancel(a, t2, "not needed")                                     # cancelled also unblocks
+    told = [m["body"] for m in c.inbox(b, limit=None) if "unblocked" in m["body"]]
+    assert told == [f"[{t3}] unblocked - everything before it is finished: switch reads"]
+    c.task_accept(b, t3)
+    t4 = c.task_create(a, "cleanup")["task"]
+    assert c.task_link(a, t4, [t3])["blocked_by"] == [t3]
+    assert c.task_link(a, t4, [t3], remove=True)["after"] == []
+
+
+@check
 def a_session_is_user_cli_and_model():
     """michel/opencode/mimo: a whoami for the same association resumes its live session instead of opening
     opencode-18; a different model or user is another session; a dead one is replaced under the same name."""

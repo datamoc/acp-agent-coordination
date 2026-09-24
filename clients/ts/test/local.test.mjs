@@ -150,3 +150,23 @@ test("a session is user + CLI + model, and whoami resumes it", () => {
   assert.equal(b.resumed, true);
   assert.equal(coord(["--json", "whoami", "opencode"], { env: { ...env, COORD_MODEL: "qwen3" }, cwd: dir }).json.name, "michel/opencode/qwen3");
 });
+
+test("the task graph through the CLI: after, blocked, --graph", () => {
+  const dir = tmp();
+  const env = localEnv(join(dir, "g.db"));
+  const run = (args, session, ok = true) => {
+    const r = coord(["--json", ...args], { env: session ? { ...env, COORD_SESSION: session } : env, cwd: dir });
+    if (ok) assert.equal(r.code, 0, r.out + r.err);
+    return r.json;
+  };
+  const s = run(["whoami", "cli"]).session_id;
+  const t1 = run(["task", "create", "migrate"], s).task, t2 = run(["task", "create", "backfill"], s).task;
+  const t3 = run(["task", "create", "switch reads", "--after", `${t1},${t2}`], s).task;
+  assert.equal(run(["task", "accept", t3], s, false).error, "blocked");
+  const graph = coord(["tasks", "--graph"], { env, cwd: dir }).out;
+  assert.ok(graph.includes(`• ${t1} migrate [open]
+└─ ⏸ ${t3} switch reads [open]
+`), graph);
+  assert.ok(graph.includes(`└─ ⏸ ${t3} switch reads [open] ↑`), graph);                // shown once, then referenced
+  assert.ok(coord(["tasks"], { env, cwd: dir }).out.includes(`${t3} [open] p0 switch reads  blocked by ${t1}, ${t2}`));
+});

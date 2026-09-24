@@ -83,10 +83,12 @@ const COMMANDS = {
             history: { pos: [{ name: "document" }] },
             list: { opts: [s("--kind")] },
         } },
-    tasks: { opts: [s("--status"), s("--project")] },
+    tasks: { help: "tasks; --graph draws them under their prerequisites", opts: [s("--status"), s("--project"), b("--graph")] },
     task: { sub: {
             create: { pos: [{ name: "title" }], opts: [s("--description", { default: "" }), i("--priority", { default: 0 }), s("--claim"),
-                    s("--assign"), s("--category")] },
+                    s("--assign"), s("--category"), s("--after")] },
+            link: { help: "T3 after T1,T2: T3 cannot be accepted until they are done (--remove to unlink)",
+                pos: [{ name: "task" }], opts: [s("--after", { required: true }), b("--remove")] },
             accept: { pos: [{ name: "task" }] },
             done: { pos: [{ name: "task" }, { name: "note", nargs: "?", default: "" }] },
             decline: { pos: [{ name: "task" }, { name: "reason", nargs: "?", default: "" }] },
@@ -237,6 +239,8 @@ function readContent(a) {
     return readFileSync(0, "utf8"); // stdin
 }
 const uuid = () => randomUUID();
+/** "T1,T2" / "T1 T2" -> ["T1", "T2"]; nothing -> undefined. */
+const list = (v) => (v ? v.split(/[\s,]+/).filter(Boolean) : undefined);
 /** The user part of a session (michel/claude/sonnet): COORD_USER, else the OS user; COORD_USER="" drops it. */
 function sessionUser() {
     if (process.env.COORD_USER !== undefined)
@@ -381,11 +385,13 @@ export async function run(path, a, c) {
                 default: return ["doc", await call("docs", { project: detectProject(), kind: a.kind }), 0];
             }
         }
-        case "tasks": return [cmd, await call("tasks", { project: a.project || detectProject(), status: a.status }), 0];
+        case "tasks": return [a.graph ? "tasks-graph" : cmd, await call("tasks", { project: a.project || detectProject(), status: a.status }), 0];
         case "task": {
             switch (path[1]) {
                 case "create": return ["task", await call("task_create", { session: S(), title: a.title, description: a.description, priority: a.priority,
-                        claim: a.claim, assign: a.assign, category: a.category, client_id: uuid() }), 0];
+                        claim: a.claim, assign: a.assign, category: a.category,
+                        after: list(a.after), client_id: uuid() }), 0];
+                case "link": return ["task", await call("task_link", { session: S(), task: a.task, after: list(a.after) ?? [], remove: a.remove }), 0];
                 case "accept": return ["task", await call("task_accept", { session: S(), task: a.task }), 0];
                 case "show": return ["task", await call("task_get", { task: a.task }), 0];
                 case "decline": return ["task", await call("task_decline", { session: S(), task: a.task, reason: a.reason }), 0];

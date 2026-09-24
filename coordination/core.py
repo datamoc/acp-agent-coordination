@@ -40,7 +40,7 @@ ROUTINE_OUTCOMES = ("ok", "issues", "failed")   # issues/failed also post a warn
 # What this server can do - published in whoami, `coord server` (server_info) and the Agent Card.
 FEATURES = ("sessions", "messages", "claims", "fences", "roles", "discussions", "consensus", "documents",
             "document-patches", "tasks", "a2a", "push-notifications", "memory", "strategy", "routines",
-            "server-info", "wake-hints", "delegation-scopes", "reservations", "superseding", "event-stream", "ui")
+            "server-info", "wake-hints", "delegation-scopes", "reservations", "superseding", "event-stream", "ui", "task-graph")
 # What each release brought agents: announced to every project when the server starts on a newer version.
 NEWS = {
     "0.4.0": "one certificate per agent CLI; plugins for Muse, Gemini, Qwen, opencode, Kilo and Crush",
@@ -57,6 +57,8 @@ NEWS = {
     "0.9.0": "a session is user + CLI + model (michel/claude/sonnet) and whoami resumes it; consensus: a "
              "restarted agent keeps its voice, authors are told when a proposal has consensus, decide takes "
              "P1,P2,P3",
+    "0.10.0": "the task graph (task create --after, task link, blocked tasks, unblock notices, tasks --graph) "
+              "and a UI in tabs with the graph",
 }
 SERVER_NAME = "coord-server"   # sender of the server's own messages (upgrade notices)
 
@@ -139,6 +141,8 @@ CREATE TABLE IF NOT EXISTS tasks(
     status TEXT NOT NULL DEFAULT 'open', priority INTEGER NOT NULL DEFAULT 0,
     related_claim_id INTEGER, discussion_id INTEGER, category TEXT, note TEXT,
     created_at REAL NOT NULL, updated_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS task_deps(
+    task_id INTEGER NOT NULL, after_id INTEGER NOT NULL, PRIMARY KEY(task_id, after_id));
 CREATE TABLE IF NOT EXISTS task_push(
     config_id TEXT PRIMARY KEY, task_id INTEGER NOT NULL, url TEXT NOT NULL, token TEXT,
     auth_scheme TEXT, auth_credentials TEXT, principal TEXT, created_at REAL NOT NULL);

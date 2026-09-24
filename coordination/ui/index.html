@@ -14,15 +14,22 @@
   <img class="logo-img" src="/logo.svg" alt="" width="28" height="28"><strong class="logo">coord</strong>
   <select id="project" aria-label="project"></select>
   <span id="live" class="live" title="live updates">●</span>
+  <nav id="tabs" role="tablist">
+    <button role="tab" data-tab="now">Now <span class="badge" id="b-now"></span></button>
+    <button role="tab" data-tab="tasks">Tasks <span class="badge" id="b-tasks"></span></button>
+    <button role="tab" data-tab="discussions">Discussions <span class="badge" id="b-discussions"></span></button>
+    <button role="tab" data-tab="routines">Routines &amp; strategy <span class="badge" id="b-routines"></span></button>
+    <button role="tab" data-tab="docs">Documents</button>
+  </nav>
   <span class="grow"></span>
   <span id="me" class="muted"></span>
   <span id="version" class="muted"></span>
 </header>
-<main>
+
+<main id="view-now" class="view grid3">
   <section class="col">
     <div class="panel"><h2>Sessions</h2><ul id="sessions" class="list"></ul></div>
     <div class="panel"><h2>Claims</h2><ul id="claims" class="list"></ul></div>
-    <div class="panel"><h2>Strategy</h2><div id="strategy"></div></div>
   </section>
   <section class="col wide">
     <div class="panel grow-panel">
@@ -41,16 +48,37 @@
     </div>
   </section>
   <section class="col">
-    <div class="panel">
-      <h2>Tasks</h2>
-      <ul id="tasks" class="list"></ul>
-      <form id="newtask" class="inline"><input id="tasktitle" placeholder="New task…"><select id="assign"><option value="">open</option></select><button>Add</button></form>
-    </div>
-    <div class="panel"><h2>Discussions</h2><div id="discussions"></div></div>
-    <div class="panel"><h2>Routines</h2><ul id="routines" class="list"></ul></div>
-    <div class="panel"><h2>Documents</h2><ul id="docs" class="list"></ul></div>
+    <div class="panel"><h2>Waiting for someone</h2><ul id="attention" class="list"></ul></div>
+    <div class="panel"><h2>Routines due</h2><ul id="due" class="list"></ul></div>
   </section>
 </main>
+
+<main id="view-tasks" class="view hidden">
+  <div class="panel">
+    <h2>Task graph <span class="muted small legend"><i class="st open"></i>open <i class="st offered"></i>offered <i class="st accepted"></i>accepted <i class="st blocked"></i>blocked <i class="st done"></i>done</span></h2>
+    <div id="graph" class="graph"></div>
+  </div>
+  <div class="panel">
+    <h2>All tasks</h2>
+    <ul id="tasks" class="list"></ul>
+    <form id="newtask" class="inline">
+      <input id="tasktitle" placeholder="New task…">
+      <input id="taskafter" placeholder="after T1,T2" class="narrow">
+      <select id="assign"><option value="">open</option></select>
+      <button>Add</button>
+    </form>
+  </div>
+</main>
+
+<main id="view-discussions" class="view hidden"><div class="panel"><h2>Open discussions</h2><div id="discussions"></div></div></main>
+
+<main id="view-routines" class="view hidden two">
+  <div class="panel"><h2>Routines</h2><ul id="routines" class="list"></ul></div>
+  <div class="panel"><h2>Strategy</h2><div id="strategy"></div></div>
+</main>
+
+<main id="view-docs" class="view hidden"><div class="panel"><h2>Documents</h2><ul id="docs" class="list"></ul></div></main>
+
 <dialog id="viewer"><form method="dialog"><h3 id="vtitle"></h3><pre id="vbody"></pre><button>Close</button></form></dialog>
 <div id="toast" class="toast hidden"></div>
 </body>

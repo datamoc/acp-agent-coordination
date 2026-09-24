@@ -19,6 +19,31 @@ export function fmtWake(w) {
     const when = s <= 0 ? "now" : s < 90 ? `in ${s} s` : s < 5400 ? `in ${Math.round(s / 60)} min` : `in ${(s / 3600).toFixed(1)} h`;
     return `wake: ${when}${s > 0 ? ` (${w.next_at})` : ""} - ${w.reason}`;
 }
+/** Tasks as a forest: each one under its prerequisites (a task with several appears under each, marked ↑). */
+export function taskGraph(tasks) {
+    const byId = new Map(tasks.map((t) => [t.task, t]));
+    const children = new Map();
+    for (const t of tasks)
+        for (const p of t.after ?? [])
+            if (byId.has(p))
+                children.set(p, [...(children.get(p) ?? []), t.task]);
+    const mark = (t) => (t.status === "done" ? "✓" : t.status === "cancelled" ? "✗" : t.blocked_by?.length ? "⏸" : "•");
+    const lines = [], shown = new Set();
+    const walk = (id, prefix, last, root) => {
+        const t = byId.get(id);
+        const again = shown.has(id);
+        lines.push(`${prefix}${root ? "" : last ? "└─ " : "├─ "}${mark(t)} ${t.task} ${t.title} [${t.status}]${t.assigned ? ` (${t.assigned})` : ""}`
+            + (again ? " ↑" : ""));
+        if (again)
+            return;
+        shown.add(id);
+        const kids = children.get(id) ?? [];
+        kids.forEach((k, i) => walk(k, root ? "" : prefix + (last ? "   " : "│  "), i === kids.length - 1, false));
+    };
+    const roots = tasks.filter((t) => !(t.after ?? []).some((p) => byId.has(p)));
+    roots.forEach((t) => walk(t.task, "", true, true));
+    return lines.join("\n") || "(no tasks)";
+}
 export function fmtRoutine(x) {
     const when = [x.every ? `every ${every(x.every)}` : "",
         x.on_commit ? `on commit${x.paths.length ? ` (${x.paths.join(", ")})` : ""}` : ""].filter(Boolean).join(" + ");
@@ -66,8 +91,11 @@ export function human(cmd, r) {
     if (cmd === "doc-show")
         return `${r.document} r${r.revision}/${r.latest_revision} [${r.kind}/${r.status}] ${r.title}\n\n${r.content}`;
     if (cmd === "tasks") {
-        return r.map((t) => `${t.task} [${t.status}] p${t.priority} ${t.title}` + (t.assigned ? ` (${t.assigned})` : "")).join("\n") || "(no tasks)";
+        return r.map((t) => `${t.task} [${t.status}] p${t.priority} ${t.title}` + (t.assigned ? ` (${t.assigned})` : "")
+            + (t.blocked_by?.length ? `  blocked by ${t.blocked_by.join(", ")}` : t.after?.length ? `  after ${t.after.join(", ")}` : "")).join("\n") || "(no tasks)";
     }
+    if (cmd === "tasks-graph")
+        return taskGraph(r);
     if (cmd === "discussion") {
         const who = r.participants ? r.participants.join(", ") : "open (opener + whoever reacts)";
         const lines = [`${r.discussion} [${r.status}] ${r.topic} (by ${r.created_by})`,
