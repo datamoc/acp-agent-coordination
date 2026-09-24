@@ -50,8 +50,7 @@ class ClaimsMixin(CoordBase):
         stype, path = self._norm(scope, tree)
 
         def fn(db):
-            me = self._session(db, session)
-            project = me["project_id"]
+            me, project = self._access(db, session, None, "participate")
             self._reap(db)
             for c in self._active_claims(db, project):
                 if not scopes.overlaps(stype, path, c["scope_type"], c["scope"]):
@@ -93,7 +92,7 @@ class ClaimsMixin(CoordBase):
 
     def renew(self, session: str, claim: str, ttl: int = CLAIM_TTL) -> dict:
         with self._tx() as db:
-            me = self._session(db, session)
+            me, _ = self._access(db, session, None, "participate")
             row = self._owned(db, session, claim)
             if row["expires_at"] <= self.clock():
                 raise CoordError("expired", f"C{row['claim_id']} expired; claim the scope again "
@@ -106,7 +105,7 @@ class ClaimsMixin(CoordBase):
 
     def release(self, session: str, claim: str | None = None, all: bool = False) -> dict:
         with self._tx() as db:
-            me = self._session(db, session)
+            me, _ = self._access(db, session, None, "participate")
             now = self.clock()
             if all:
                 ids = [r[0] for r in db.execute(
@@ -123,11 +122,15 @@ class ClaimsMixin(CoordBase):
             return {"released": [f"C{i}" for i in ids]}
 
     def locks(self, project: str | None = None, all: bool = False,
-              owner_session: str | None = None) -> list[dict]:
+              owner_session: str | None = None, session: str | None = None) -> list[dict]:
         with self._read() as db:
             q, args = "SELECT * FROM claims WHERE 1=1", []
             if project:
+                self._view(db, project, session)
                 q += " AND project_id=?"; args.append(project)
+            else:
+                f, fargs = self._view_filter(db, session)
+                q += f" AND {f}"; args += list(fargs)
             if not all:
                 q += " AND released_at IS NULL AND expires_at>?" + self._LIVE_OWNER
                 args += [self.clock(), self.clock() - SESSION_TTL]
@@ -136,13 +139,14 @@ class ClaimsMixin(CoordBase):
             rows = db.execute(q + " ORDER BY claim_id", args).fetchall()
         return [self._claim_dict(r) for r in rows]
 
-    def fence_check(self, claim: str, fence: int) -> dict:
+    def fence_check(self, claim: str, fence: int, session: str | None = None) -> dict:
         """Guard a write with the fence you got at claim time: stale leases fail."""
         cid = parse_id("claim", claim)
         with self._read() as db:
             row = db.execute("SELECT * FROM claims WHERE claim_id=?", (cid,)).fetchone()
-        if row is None or row["released_at"] is not None or row["expires_at"] <= self.clock():
-            raise CoordError("stale_fence", f"C{cid} is no longer active")
+            if row is None or row["released_at"] is not None or row["expires_at"] <= self.clock():
+                raise CoordError("stale_fence", f"C{cid} is no longer active")
+            self._view(db, row["project_id"], session)
         if int(fence) != row["fence"]:
             raise CoordError("stale_fence", f"fence {fence} is stale for C{cid} (current {row['fence']})")
         return {"ok": True, "claim": f"C{cid}", "fence": row["fence"]}
@@ -155,7 +159,7 @@ class ClaimsMixin(CoordBase):
         if scope is not None and role != "delegate":
             raise CoordError("bad_args", "--scope only narrows a delegate role")
         with self._tx() as db:
-            me = self._session(db, session)
+            me, _ = self._access(db, session, None, "participate")
             row = self._owned(db, session, claim)
             target = self._resolve_name(db, to, me["project_id"])
             sub: tuple[str, str] | None = self._norm(scope, None) if scope is not None else None
@@ -188,7 +192,7 @@ class ClaimsMixin(CoordBase):
 
     def _role_answer(self, session: str, claim: str, role: str, accept: bool, reason: str = "") -> dict:
         with self._tx() as db:
-            me = self._session(db, session)
+            me, _ = self._access(db, session, None, "participate")
             cid = parse_id("claim", claim)
             r = db.execute("SELECT * FROM claim_roles WHERE claim_id=? AND session_id=? AND role=?",
                            (cid, session, role)).fetchone()
@@ -217,16 +221,19 @@ class ClaimsMixin(CoordBase):
 
     def revoke(self, session: str, claim: str, to: str, role: str) -> dict:
         with self._tx() as db:
-            me = self._session(db, session)
+            me, _ = self._access(db, session, None, "participate")
             row = self._owned(db, session, claim)
             target = self._resolve_name(db, to, me["project_id"])
             db.execute("DELETE FROM claim_roles WHERE claim_id=? AND session_id=? AND role=?",
                        (row["claim_id"], target["session_id"], role))
             return {"claim": f"C{row['claim_id']}", "to": target["display_name"], "revoked": role}
 
-    def roles(self, claim: str) -> list[dict]:
+    def roles(self, claim: str, session: str | None = None) -> list[dict]:
         cid = parse_id("claim", claim)
         with self._read() as db:
+            c = db.execute("SELECT project_id FROM claims WHERE claim_id=?", (cid,)).fetchone()
+            if c is not None:
+                self._view(db, c["project_id"], session)
             rows = db.execute("SELECT r.role, r.accepted, r.scope_type, r.scope, s.display_name FROM claim_roles r"
                               " JOIN sessions s ON s.session_id=r.session_id WHERE claim_id=?", (cid,)).fetchall()
         return [{"session": r["display_name"], "role": r["role"], "status": "granted" if r["accepted"] else "offered",
@@ -251,7 +258,7 @@ class ClaimsMixin(CoordBase):
     def check(self, session: str, files: list[str]) -> dict:
         """Pre-commit: files claimed by someone else (owner/delegate only may write)."""
         with self._read() as db:
-            me = self._session(db, session)
+            me, _ = self._access(db, session, None, "view")
             active = self._active_claims(db, me["project_id"])
             conflicts = []
             for f in files:
@@ -272,7 +279,7 @@ class ClaimsMixin(CoordBase):
 
     def post_commit(self, session: str, sha: str, files: list[str]) -> dict:
         with self._tx() as db:
-            me = self._session(db, session)
+            me, _ = self._access(db, session, None, "participate")
             paths = set()
             for f in files:
                 with contextlib.suppress(CoordError):

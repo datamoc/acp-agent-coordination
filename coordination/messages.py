@@ -29,8 +29,7 @@ class MessagesMixin(CoordBase):
             raise CoordError("bad_kind", f"kind must be one of {', '.join(MESSAGE_KINDS)}")
 
         def fn(db):
-            me = self._session(db, session)
-            project = me["project_id"]
+            me, project = self._access(db, session, None, "participate")
             to_row = self._resolve_name(db, to, project) if to else None
             thread = None
             if reply_to is not None:
@@ -87,7 +86,11 @@ class MessagesMixin(CoordBase):
             where.append(vis)
             args += vargs
             if project:
+                self._view(db, project, session)
                 where.append("project_id=?"); args.append(project)
+            else:                                   # across projects: only the ones this caller may view
+                f, fargs = self._view_filter(db, session)
+                where.append(f); args += fargs
             if after is not None:
                 where.append("id>?"); args.append(int(after))
             if to_me and session:
@@ -106,9 +109,10 @@ class MessagesMixin(CoordBase):
 
     def thread(self, message: int, session: str | None = None) -> list[dict]:
         with self._read() as db:
-            m = db.execute("SELECT thread_id FROM messages WHERE id=?", (int(message),)).fetchone()
+            m = db.execute("SELECT thread_id, project_id FROM messages WHERE id=?", (int(message),)).fetchone()
             if m is None:
                 raise CoordError("missing", f"no message #{message}")
+            self._view(db, m["project_id"], session)
             vis, vargs = self._visible(session)
             rows = db.execute(f"SELECT * FROM messages WHERE thread_id=? AND {vis} ORDER BY id",
                               (m["thread_id"], *vargs)).fetchall()
@@ -117,22 +121,22 @@ class MessagesMixin(CoordBase):
     def resolve(self, session: str, message: int, resolution: str = "",
                 client_id: str | None = None) -> dict:
         def fn(db):
-            me = self._session(db, session)
             m = db.execute("SELECT * FROM messages WHERE id=?", (int(message),)).fetchone()
             if m is None:
                 raise CoordError("missing", f"no message #{message}")
+            me, project = self._access(db, session, m["project_id"], "participate")
             if m["resolved_at"]:
                 return {"id": m["id"], "outcome": "already", "resolved_by": m["resolved_by"]}
             db.execute("UPDATE messages SET resolved_at=?, resolved_by=?, resolution=? WHERE id=?",
                        (self.clock(), me["display_name"], resolution, m["id"]))
-            self._event(db, me["project_id"], "message.resolved", session, "message", m["id"])
+            self._event(db, project, "message.resolved", session, "message", m["id"])
             return {"id": m["id"], "outcome": "ok", "resolved_by": me["display_name"]}
         return self._mutate("resolve", client_id, fn)
 
     def poll(self, session: str) -> dict:
         """Everything new since this session's cursor (by message id, never time)."""
         with self._tx() as db:
-            me = self._session(db, session)
+            me, _ = self._access(db, session, None, "view")
             vis, vargs = self._visible(session)
             rows = db.execute(f"SELECT * FROM messages WHERE id>? AND project_id=? AND {vis}"
                               " ORDER BY id", (me["cursor"], me["project_id"], *vargs)).fetchall()
@@ -141,10 +145,10 @@ class MessagesMixin(CoordBase):
             db.execute("UPDATE sessions SET heartbeat_at=? WHERE session_id=?", (self.clock(), session))
             project = me["project_id"]
         return {"messages": [self._msg_dict(r) for r in rows],
-                "my_claims": self.locks(project=project, owner_session=session),
-                "tasks": [t for t in self.tasks(project=project, status="open")]
-                + self.tasks(project=project, status="offered", assigned_session=session)
-                + self.tasks(project=project, status="accepted", assigned_session=session),
-                "discussions": self.discussions(project=project),
-                "routines": self.routines(project=project, due=True),
+                "my_claims": self.locks(project=project, owner_session=session, session=session),
+                "tasks": [t for t in self.tasks(project=project, status="open", session=session)]
+                + self.tasks(project=project, status="offered", assigned_session=session, session=session)
+                + self.tasks(project=project, status="accepted", assigned_session=session, session=session),
+                "discussions": self.discussions(project=project, session=session),
+                "routines": self.routines(project=project, due=True, session=session),
                 "wake": self.wake(session)}

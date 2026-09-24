@@ -31,6 +31,7 @@ from .core import (  # noqa: F401
     MSG_RECOMMENDED,
     NEWS,
     PREFIX,
+    PROJECT_ROLES,
     ROLES,
     ROUTINE_OUTCOMES,
     ROUTINE_STATUSES,
@@ -47,6 +48,7 @@ from .core import (  # noqa: F401
     version_key,
 )
 from .documents import DocumentsMixin
+from .members import MembersMixin
 from .memory import MemoryMixin
 from .messages import MessagesMixin
 from .routines import MIN_EVERY, RUN_LEASE, RoutinesMixin
@@ -56,7 +58,7 @@ from .tasks import TasksMixin
 
 
 class Coord(SessionsMixin, MessagesMixin, ClaimsMixin, ConsensusMixin, DocumentsMixin, TasksMixin, MemoryMixin, RoutinesMixin,
-            RoutingMixin, CoordBase):
+            RoutingMixin, MembersMixin, CoordBase):
     """The coordination service: one SQLite file, every mutation under BEGIN IMMEDIATE."""
 
     def server_info(self) -> dict:
@@ -91,8 +93,9 @@ class Coord(SessionsMixin, MessagesMixin, ClaimsMixin, ConsensusMixin, Documents
 
 READ_OPS = {"inbox", "thread", "locks", "fence_check", "roles", "check", "discussion", "discussions", "task_get",
             "doc_show", "doc_history", "docs", "tasks", "memory", "suggest", "context", "projects",
-            "status", "events", "presence", "routines", "routine_get", "server_info"}
+            "status", "events", "presence", "routines", "routine_get", "server_info", "members"}
 WRITE_OPS = {"whoami", "heartbeat", "end", "post", "reply", "resolve", "poll", "claim", "renew", "release",
              "grant", "revoke", "ask", "post_commit", "discuss", "propose", "react", "decide", "doc_create",
              "doc_edit", "doc_patch", "task_create", "task_link", "task_accept", "task_done", "task_cancel", "task_decline", "role_accept", "role_decline", "memory_add", "memory_edit",
-             "profile_set", "routine_create", "routine_start", "routine_done", "routine_update"}
+             "profile_set", "routine_create", "routine_start", "routine_done", "routine_update",
+             "member_set", "member_remove"}

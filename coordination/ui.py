@@ -182,6 +182,11 @@ def make_ui_handler(coord, token: str, humans: HumanSessions, port_ref: dict):
         def _events(self, q):
             project = (q.get("project") or [None])[0]
             after = int(self.headers.get("Last-Event-ID") or (q.get("after") or ["0"])[0] or 0)
+            session = humans.session(project) if project else None   # the human's session: restricted projects need it
+            try:
+                coord.events(after=after, project=project, limit=1, session=session)   # view right up front
+            except CoordError as e:
+                return self._json(403, {"ok": False, "error": e.code, "message": str(e)})
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-store")
@@ -191,7 +196,7 @@ def make_ui_handler(coord, token: str, humans: HumanSessions, port_ref: dict):
             try:
                 self.wfile.write(b": coord ui events\n\n")
                 while True:
-                    for e in coord.events(after=after, project=project, limit=200):
+                    for e in coord.events(after=after, project=project, limit=200, session=session):
                         self.wfile.write(f"id: {e['event']}\ndata: {json.dumps(e)}\n\n".encode())
                         after = e["event"]
                     if time.monotonic() - beat > 15:
@@ -199,7 +204,7 @@ def make_ui_handler(coord, token: str, humans: HumanSessions, port_ref: dict):
                         beat = time.monotonic()
                     self.wfile.flush()
                     time.sleep(1)
-            except (BrokenPipeError, ConnectionResetError, OSError):
+            except (BrokenPipeError, ConnectionResetError, OSError, CoordError):
                 pass
 
     return UIHandler

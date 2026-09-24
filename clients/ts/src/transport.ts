@@ -24,8 +24,10 @@ export interface CoordEvent { event: number; kind: string; entity: string | null
 
 export interface Transport {
   send(op: string, args: Record<string, unknown>): Promise<Envelope>;
-  /** Follow the event log from `after`: calls onEvent for each one, resumes after drops, until `signal` aborts. */
-  follow?(project: string | null, after: number, onEvent: (e: CoordEvent) => void, signal: AbortSignal): Promise<void>;
+  /** Follow the event log from `after`: calls onEvent for each one, resumes after drops, until `signal` aborts.
+   *  `session` (when the caller has one) proves membership of a restricted project. */
+  follow?(project: string | null, after: number, onEvent: (e: CoordEvent) => void, signal: AbortSignal,
+          session?: string | null): Promise<void>;
   /** A raw A2A JSON-RPC call (GetTask, CreateTaskPushNotificationConfig, ...), where supported. */
   a2a?(method: string, params: Record<string, unknown>): Promise<unknown>;
 }
@@ -224,10 +226,13 @@ export class RemoteTransport implements Transport {
 
   /** GET /events/stream (server-sent events), reconnecting with Last-Event-ID; a server older than
    *  0.8 (404) is followed by polling the `events` op instead. */
-  async follow(project: string | null, after: number, onEvent: (e: CoordEvent) => void, signal: AbortSignal): Promise<void> {
+  async follow(project: string | null, after: number, onEvent: (e: CoordEvent) => void, signal: AbortSignal,
+               session?: string | null): Promise<void> {
     let last = after, backoff = 1000;
     while (!signal.aborted) {
-      const url = new URL(`/events/stream${project ? `?project=${encodeURIComponent(project)}` : ""}`, this.url);
+      const qs = [project ? `project=${encodeURIComponent(project)}` : "",
+                  session ? `session=${encodeURIComponent(session)}` : ""].filter(Boolean).join("&");
+      const url = new URL(`/events/stream${qs ? `?${qs}` : ""}`, this.url);
       const headers: Record<string, string> = { Accept: "text/event-stream", "Last-Event-ID": String(last) };
       const b = await this.bearer();
       if (b) headers.Authorization = `Bearer ${b}`;
@@ -235,7 +240,7 @@ export class RemoteTransport implements Transport {
                                                       insecure: this.o.insecure, env: this.o.env }, signal, (e) => {
         last = e.event; backoff = 1000; onEvent(e);
       }).catch(() => 0);
-      if (status === 404) return pollEvents(this, project, last, onEvent, signal);
+      if (status === 404) return pollEvents(this, project, last, onEvent, signal, 2000, session);
       if (status === 401 && this.o.token && typeof this.o.token !== "string") await this.o.token.invalidate();
       await sleep(backoff, signal);
       backoff = Math.min(backoff * 2, 30_000);
@@ -273,10 +278,10 @@ const sleep = (ms: number, signal: AbortSignal) => new Promise<void>((ok) => {
 
 /** Poll the `events` op every `everyMs` - for local mode and servers without /events/stream. */
 export async function pollEvents(t: Transport, project: string | null, after: number, onEvent: (e: CoordEvent) => void,
-                                 signal: AbortSignal, everyMs = 2000): Promise<void> {
+                                 signal: AbortSignal, everyMs = 2000, session: string | null = null): Promise<void> {
   let last = after;
   while (!signal.aborted) {
-    const r = await t.send("events", { after: last, project, limit: 200 }).catch(() => null);
+    const r = await t.send("events", { after: last, project, limit: 200, session }).catch(() => null);
     for (const e of (r?.ok ? (r.result as CoordEvent[]) : [])) { last = e.event; onEvent(e); }
     await sleep(everyMs, signal);
   }
@@ -341,7 +346,8 @@ export class LocalTransport implements Transport {
     }
   }
 
-  follow(project: string | null, after: number, onEvent: (e: CoordEvent) => void, signal: AbortSignal): Promise<void> {
-    return pollEvents(this, project, after, onEvent, signal);
+  follow(project: string | null, after: number, onEvent: (e: CoordEvent) => void, signal: AbortSignal,
+         session?: string | null): Promise<void> {
+    return pollEvents(this, project, after, onEvent, signal, 2000, session ?? null);
   }
 }

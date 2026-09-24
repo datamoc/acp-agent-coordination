@@ -266,6 +266,74 @@ def projects_isolated():
     assert c.status("github.com/o/one")["active_claims"] == 1
 
 
+@check
+def project_permissions():
+    """A roster row restricts a project: viewer < contributor < decider < admin; open unchanged."""
+    c, _ = fresh()
+    own = c.whoami("own", project="perm")
+    out = c.whoami("out", project="perm")
+    s_o, s_x, n_o, n_x = own["session_id"], out["session_id"], own["name"], out["name"]
+
+    # open project: no roster, everything works as before
+    assert c.members(session=s_o) == {"project": "perm", "restricted": False, "members": []}
+    c.post(s_o, "openly")
+    assert c.members(project="perm")["restricted"] is False       # an open roster needs no session
+
+    # bootstrap: the first member of an open project can only be the session itself
+    raises("forbidden", c.member_set, s_o, n_x, "admin")
+    raises("bad_role", c.member_set, s_o, n_o, "boss")
+    assert c.member_set(s_o, n_o, "admin")["restricted"] is True
+
+    doc = c.doc_create(s_o, "secret")
+
+    # a non-member can neither write nor read the restricted project...
+    raises("forbidden", c.post, s_x, "nope")
+    raises("forbidden", c.poll, s_x)
+    raises("forbidden", c.doc_create, s_x, "no")
+    raises("forbidden", c.tasks, "perm", session=s_x)
+    raises("forbidden", c.events, project="perm")
+    raises("forbidden", c.member_set, s_x, n_x, "admin")
+    raises("forbidden", c.doc_show, doc["document"])               # no session on a restricted project
+    raises("forbidden", c.members, project="perm")
+    assert c.tasks(session=s_x) == []                              # other projects stay listable
+    assert "perm" not in {p["project"] for p in c.projects(session=s_x)}
+
+    # viewer: reads yes, writes no
+    v = c.whoami("view", project="perm")
+    c.member_set(s_o, v["name"], "viewer")
+    assert c.doc_show(doc["document"], session=v["session_id"])["title"] == "secret"
+    raises("forbidden", c.post, v["session_id"], "cannot")
+    raises("forbidden", c.member_set, v["session_id"], v["name"], "admin")
+
+    # contributor: participates, does not decide, does not administer
+    g = c.whoami("part", project="perm")
+    c.member_set(s_o, g["name"], "contributor")
+    c.post(g["session_id"], "yo")
+    raises("forbidden", c.member_set, g["session_id"], n_x, "viewer")
+    raises("forbidden", c.member_remove, g["session_id"], v["name"])
+
+    # decide needs the project right (decider) *and* the discussion's own rules
+    d = c.discuss(s_o, "ship it?")
+    p1 = c.propose(s_o, d["discussion"], "ship")
+    c.react(s_o, p1["proposal"], "support")
+    raises("forbidden", c.decide, g["session_id"], d["discussion"], "ship", proposal=p1["proposal"])
+    dec = c.whoami("dec", project="perm")
+    c.member_set(s_o, dec["name"], "decider")
+    e = raises("forbidden", c.decide, dec["session_id"], d["discussion"], "ship", proposal=p1["proposal"])
+    assert "participant" in str(e)                                # right held; the discussion says no
+    c.react(dec["session_id"], p1["proposal"], "support")         # now a participant
+    assert len(c.members(session=s_o)["members"]) == 4
+    assert c.decide(dec["session_id"], d["discussion"], "ship it",
+                    proposal=p1["proposal"])["consensus"] is True
+
+    # removing every member reopens the project
+    for nm in (v["name"], g["name"], dec["name"], n_o):
+        c.member_remove(s_o, nm)
+    assert c.members(session=s_o)["restricted"] is False
+    raises("missing", c.member_remove, s_o, n_o)                   # nothing to remove: it is open
+    c.post(s_x, "free again")
+
+
 # --- consensus & documents ---------------------------------------------
 @check
 def consensus():

@@ -118,6 +118,7 @@ test("every CLI command sends a known op with only known params and all required
     ["routine", "pause", "R1"], ["routine", "resume", "R1"], ["routine", "retire", "R1"], ["server"],
     ["delegate", "C1", "--to", "b-01", "--scope", "src/x/"], ["grant", "C1", "b-01", "delegate", "--scope", "src/x/"],
     ["propose", "D1", "better idea", "--supersedes", "P1"], ["react", "P1", "support-with-reservation", "small doubt"],
+    ["members"], ["member", "set", "b-01", "--role", "viewer"], ["member", "remove", "b-01"],
   ];
   process.env.COORD_SESSION = "s";
   process.env.COORD_PROJECT = "p";

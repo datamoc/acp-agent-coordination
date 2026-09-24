@@ -10,7 +10,7 @@ class MemoryMixin(CoordBase):
             raise CoordError("bad_kind", f"memory kind must be one of {', '.join(MEMORY_KINDS)}")
 
         def fn(db):
-            me = self._session(db, session)
+            me, _ = self._access(db, session, None, "participate")
             now = self.clock()
             mid = db.execute("INSERT INTO project_memory(project_id, kind, title, content, source,"
                              " created_by, updated_by, revision, created_at, updated_at)"
@@ -26,11 +26,11 @@ class MemoryMixin(CoordBase):
     def memory_edit(self, session: str, memory: str, base_revision: int, content: str,
                     status: str | None = None) -> dict:
         with self._tx() as db:
-            me = self._session(db, session)
             mid = parse_id("memory", memory)
             m = db.execute("SELECT * FROM project_memory WHERE memory_id=?", (mid,)).fetchone()
             if m is None:
                 raise CoordError("missing", f"no memory M{mid}")
+            me, _ = self._access(db, session, m["project_id"], "participate")
             if m["revision"] != int(base_revision):
                 raise CoordError("revision_conflict", f"M{mid} is at revision {m['revision']}",
                                  {"current_revision": m["revision"], "current_content": m["content"]})
@@ -42,11 +42,15 @@ class MemoryMixin(CoordBase):
             return {"memory": f"M{mid}", "revision": rev}
 
     def memory(self, project: str | None = None, kind: str | None = None, query: str | None = None,
-               include_archived: bool = False) -> list[dict]:
+               include_archived: bool = False, session: str | None = None) -> list[dict]:
         with self._read() as db:
             q, a = "SELECT * FROM project_memory WHERE 1=1", []
             if project:
+                self._view(db, project, session)
                 q += " AND project_id=?"; a.append(project)
+            else:
+                f, fargs = self._view_filter(db, session)
+                q += f" AND {f}"; a += list(fargs)
             if kind:
                 q += " AND kind=?"; a.append(kind)
             if not include_archived:

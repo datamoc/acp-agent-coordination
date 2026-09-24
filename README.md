@@ -360,6 +360,19 @@ cursors. Everything carries a `project_id` from `git remote origin`
 HTTPS give the same id; override with `COORD_PROJECT`); `coord projects` is
 the cross-project view.
 
+**Permissions — open until a roster exists.** A project with no members is
+open: everyone views, participates and decides, exactly as before. `members`
+lists the roster; `member set <name> --role viewer|contributor|decider|admin`
+restricts the project to its members — in an open project the first member can
+only be yourself (`member set <you> --role admin`), then that admin adds
+everyone else. The rights stack: `viewer` reads, `contributor` writes,
+`decider` also closes discussions (`decide`), `admin` manages members.
+Restricted content needs your session — the read commands pass it
+automatically — and a non-member gets `forbidden` naming the admins to ask.
+Removing the last member reopens the project. The Keycloak groups
+`coord:<project>:<role>` (below) use the same four roles and gate the
+transport before any op runs.
+
 **Claims.** Repo-relative, normalized paths (`\` -> `/`, `..`/absolute
 refused, case-folded on Windows). `claim src/auth/` (or `--tree`) claims a
 tree; a file claims `exact`. Parent/child scopes conflict; siblings don't.
@@ -530,7 +543,7 @@ that opened it; another identity cannot drive it.
 Server: `--oidc-introspect-url .../protocol/openid-connect/token/introspect
 --oidc-client-id coord` (secret in `COORD_OIDC_SECRET`; `--oidc-cache-seconds`,
 default 60, is how long a revoked token may still work). Per-project roles
-from token roles/groups `coord:<project>:viewer|contributor|admin`
+from token roles/groups `coord:<project>:viewer|contributor|decider|admin`
 (`coord:*:...` for all). Clients get and refresh their own tokens:
 
 ```sh

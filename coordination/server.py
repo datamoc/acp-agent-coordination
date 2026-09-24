@@ -38,12 +38,15 @@ from typing import cast
 
 from . import a2a, state_home
 from .net import is_loopback
-from .service import READ_OPS, WRITE_OPS, Coord, CoordError, server_version
+from .service import PROJECT_ROLES, READ_OPS, WRITE_OPS, Coord, CoordError, server_version
 
-PROJECT_ROLES = {"viewer": 0, "contributor": 1, "admin": 2}
 VERBOSE = 15   # -v: one line per request, between INFO (default) and DEBUG (-vv)
 STREAM_POLL_SECONDS = 1.0     # /events/stream checks the event log this often
 STREAM_MAX_SECONDS = 3600     # then closes; clients reconnect with Last-Event-ID
+# The transport gate for OIDC principals, above the service's own roster checks: which role a
+# `coord:<project>:<role>` group must carry for each op (PROJECT_ROLES ranks them in core.py).
+ADMIN_OPS = {"member_set", "member_remove"}    # these grant and withdraw rights themselves
+DECIDE_OPS = {"decide"}                        # closing a discussion is the decider right
 logging.addLevelName(VERBOSE, "VERBOSE")
 log = logging.getLogger("coord-server")
 
@@ -182,11 +185,13 @@ def make_handler(coord, oidc: OIDCIntrospector | None, mtls: bool, authority=Non
             last id and nothing is lost. Same identity checks as /call (viewer role with OIDC)."""
             q = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
             project = (q.get("project") or [None])[0]
+            session = (q.get("session") or [None])[0]    # a member's session: restricted projects need it
             try:
                 after = int(self.headers.get("Last-Event-ID") or (q.get("after") or ["0"])[0])
                 principal, info = self._identity()
                 if info is not None and oidc and oidc.project_role(info, project or "default") < PROJECT_ROLES["viewer"]:
                     raise CoordError("forbidden", f"no viewer role on project {project or 'default'}")
+                coord.events(after=after, project=project, limit=1, session=session)   # view right up front
             except ValueError:
                 return self._send(400, {"ok": False, "error": "bad_args", "message": "after must be an event id"})
             except CoordError as e:
@@ -202,7 +207,7 @@ def make_handler(coord, oidc: OIDCIntrospector | None, mtls: bool, authority=Non
             try:
                 self.wfile.write(b": coord event stream\n\n")
                 while time.monotonic() - started < STREAM_MAX_SECONDS:     # the client reconnects after
-                    for e in coord.events(after=after, project=project, limit=200):
+                    for e in coord.events(after=after, project=project, limit=200, session=session):
                         self.wfile.write(f"id: {e['event']}\nevent: coord\ndata: {json.dumps(e)}\n\n".encode())
                         after = e["event"]
                     if time.monotonic() - last_beat >= 15:
@@ -210,8 +215,8 @@ def make_handler(coord, oidc: OIDCIntrospector | None, mtls: bool, authority=Non
                         last_beat = time.monotonic()
                     self.wfile.flush()
                     time.sleep(STREAM_POLL_SECONDS)
-            except (BrokenPipeError, ConnectionResetError, ssl.SSLError, OSError):
-                pass                                                         # the client went away
+            except (BrokenPipeError, ConnectionResetError, ssl.SSLError, OSError, CoordError):
+                pass                                                         # the client went away, or lost its right
             log.log(VERBOSE, "%s GET /events/stream closed after %.0fs, last event %s %s",
                     self.client_address[0], time.monotonic() - started, after, principal or "-")
 
@@ -233,7 +238,9 @@ def make_handler(coord, oidc: OIDCIntrospector | None, mtls: bool, authority=Non
                         coord.session_project(args["session"]) if args.get("session") else None) or (
                         coord.task_get(args["task"])["project"] if args.get("task") and op.startswith("task_") else None
                     ) or "default"
-                    need = PROJECT_ROLES["contributor"] if op in WRITE_OPS else PROJECT_ROLES["viewer"]
+                    need = (PROJECT_ROLES["admin"] if op in ADMIN_OPS else
+                            PROJECT_ROLES["decider"] if op in DECIDE_OPS else
+                            PROJECT_ROLES["contributor"] if op in WRITE_OPS else PROJECT_ROLES["viewer"])
                     log.debug("oidc: %s needs role %d on project %s, has %d", principal, need, project,
                               oidc.project_role(info, project))
                     if oidc.project_role(info, project) < need:

@@ -23,10 +23,18 @@ class RoutingMixin(CoordBase):
 
     def suggest(self, project: str | None = None, category: str | None = None,
                 capability: list[str] | None = None, reasoning_level: str | None = None,
-                exclude_session: str | None = None) -> list[dict]:
+                exclude_session: str | None = None, session: str | None = None) -> list[dict]:
         """Rank live sessions by declared profile. Hints only: a human/agent chooses."""
         need = set(capability or [])
         with self._read() as db:
+            if project:
+                self._view(db, project, session)
+            restricted = {x[0] for x in db.execute("SELECT DISTINCT project_id FROM project_members")}
+            mine: set[str] = set()
+            if session and restricted:
+                me = self._session(db, session)
+                mine = {x[0] for x in db.execute("SELECT project_id FROM project_members WHERE name=?",
+                                                 (me["display_name"],))}
             rows = db.execute("SELECT s.*, p.provider, p.model_id, p.category, p.reasoning_level,"
                               " p.capabilities_json FROM sessions s LEFT JOIN agent_profiles p"
                               " ON p.session_id=s.session_id").fetchall()
@@ -36,6 +44,8 @@ class RoutingMixin(CoordBase):
                 continue
             if project and r["project_id"] != project:
                 continue
+            if r["project_id"] in restricted and r["project_id"] not in mine:
+                continue                                  # a restricted project is not a talent pool
             caps = set(json.loads(r["capabilities_json"] or "[]"))
             score = (2 if category and r["category"] == category else 0) + len(need & caps) \
                 + (1 if reasoning_level and r["reasoning_level"] == reasoning_level else 0)
@@ -53,8 +63,7 @@ class RoutingMixin(CoordBase):
         reset) use `next_at`; the keep-alive default stays under the session TTL."""
         now = self.clock()
         with self._read() as db:
-            me = self._session(db, session)
-            project = me["project_id"]
+            me, project = self._access(db, session, None, "view")
             hints = [(me["heartbeat_at"] + WAKE_KEEPALIVE, "keep the session alive (poll)")]
             offered = db.execute("SELECT task_id, title FROM tasks WHERE assigned_to=? AND status='offered'",
                                  (session,)).fetchall()
@@ -75,7 +84,7 @@ class RoutingMixin(CoordBase):
                                 " WHERE message_id=messages.id)",
                                 (project, session, now - WAKE_UNANSWERED)).fetchall():
                 hints.append((now, f"M{q['id']} unresolved {q['kind']} from {q['from_name']}: reply or `coord resolve {q['id']}`"))
-        for r in self.routines(project=project):
+        for r in self.routines(project=project, session=session):
             if r["status"] != "active" or r["running"]:
                 continue
             if r["due"]:
@@ -90,49 +99,67 @@ class RoutingMixin(CoordBase):
 
     def context(self, session: str) -> dict:
         with self._read() as db:
-            me = self._session(db, session)
+            me, project = self._access(db, session, None, "view")
             unread = db.execute("SELECT COUNT(*) FROM messages WHERE id>? AND project_id=? AND"
                                 " (to_session_id IS NULL OR to_session_id=?)",
                                 (me["cursor"], me["project_id"], session)).fetchone()[0]
-        project = me["project_id"]
-        mem = self.memory(project=project)
+        mem = self.memory(project=project, session=session)
         return {"me": {"name": me["display_name"], "generation": me["generation"], "project": project},
                 "strategy": [m for m in mem if m["kind"] == "strategy"],   # in full: every agent follows it
                 "overview": [m for m in mem if m["kind"] == "overview"],
                 "memory": [{"memory": m["memory"], "kind": m["kind"], "title": m["title"]}
                            for m in mem if m["kind"] not in ("strategy", "overview")][:10],
-                "routines": self.routines(project=project, due=True),
+                "routines": self.routines(project=project, due=True, session=session),
                 "wake": self.wake(session),
-                "open_tasks": self.tasks(project=project, status="open")[:10],
-                "my_tasks": self.tasks(project=project, status="offered", assigned_session=session)
-                + self.tasks(project=project, status="accepted", assigned_session=session),
-                "discussions": self.discussions(project=project),
-                "my_claims": self.locks(project=project, owner_session=session),
+                "open_tasks": self.tasks(project=project, status="open", session=session)[:10],
+                "my_tasks": self.tasks(project=project, status="offered", assigned_session=session, session=session)
+                + self.tasks(project=project, status="accepted", assigned_session=session, session=session),
+                "discussions": self.discussions(project=project, session=session),
+                "my_claims": self.locks(project=project, owner_session=session, session=session),
                 "unread": unread}
 
-    def projects(self) -> list[dict]:
+    def projects(self, session: str | None = None) -> list[dict]:
+        """Every project this caller may see: open ones, plus the restricted ones it belongs to."""
         with self._read() as db:
             names = [r[0] for r in db.execute(
                 "SELECT project_id FROM repos UNION SELECT project_id FROM sessions ORDER BY 1")]
-        return [self.status(p) for p in names]
+            restricted = {x[0] for x in db.execute("SELECT DISTINCT project_id FROM project_members")}
+            mine: set[str] = set()
+            if session and restricted:
+                me = self._session(db, session)
+                mine = {x[0] for x in db.execute("SELECT project_id FROM project_members WHERE name=?",
+                                                 (me["display_name"],))}
+        return [self.status(p, session=session) for p in names
+                if p not in restricted or p in mine]
 
-    def status(self, project: str | None = None) -> dict:
+    def status(self, project: str | None = None, session: str | None = None) -> dict:
         with self._read() as db:
-            f, a = (" WHERE project_id=?", (project,)) if project else ("", ())
+            if project:
+                self._view(db, project, session)
+                f, a = (" WHERE project_id=?", (project,))
+            else:                       # an aggregate: only the projects this caller may view
+                filt, fargs = self._view_filter(db, session)
+                f, a = (f" WHERE {filt}", list(fargs))
             msgs = db.execute("SELECT COUNT(*), COALESCE(SUM(resolved_at IS NULL AND kind IN"
                               " ('question','warning')),0) FROM messages" + f, a).fetchone()
         return {"project": project or "(all)", "messages": msgs[0], "open_questions": msgs[1],
-                "live_sessions": len(self.presence(project)), "active_claims": len(self.locks(project)),
-                "open_tasks": len(self.tasks(project, "open")),
-                "open_discussions": len(self.discussions(project)),
-                "due_routines": len(self.routines(project, due=True))}
+                "live_sessions": len(self.presence(project, session=session)),
+                "active_claims": len(self.locks(project, session=session)),
+                "open_tasks": len(self.tasks(project, "open", session=session)),
+                "open_discussions": len(self.discussions(project, session=session)),
+                "due_routines": len(self.routines(project, due=True, session=session))}
 
-    def events(self, after: int = 0, project: str | None = None, limit: int = 100) -> list[dict]:
+    def events(self, after: int = 0, project: str | None = None, limit: int = 100,
+               session: str | None = None) -> list[dict]:
         with self._read() as db:
             q: str = "SELECT * FROM events WHERE event_id>?"
             a: list = [int(after)]
             if project:
+                self._view(db, project, session)
                 q += " AND project_id=?"; a.append(project)
+            else:
+                f, fargs = self._view_filter(db, session)
+                q += f" AND {f}"; a += list(fargs)
             rows = db.execute(q + f" ORDER BY event_id LIMIT {int(limit)}", a).fetchall()
         return [{"event": r["event_id"], "kind": r["kind"], "entity": r["entity_type"], "id": r["entity_id"],
                  "payload": json.loads(r["payload_json"]), "at": iso(r["created_at"])} for r in rows]

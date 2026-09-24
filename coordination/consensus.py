@@ -36,7 +36,7 @@ class ConsensusMixin(CoordBase):
             raise CoordError("bad_quorum", "quorum must be at least 1")
 
         def fn(db):
-            me = self._session(db, session)
+            me, _ = self._access(db, session, None, "participate")
             cid = parse_id("claim", claim) if claim else None
             invited = []
             for name in dict.fromkeys(n.strip() for n in (participants or []) if n and n.strip()):
@@ -162,11 +162,11 @@ class ConsensusMixin(CoordBase):
         """A proposal; `supersedes` replaces one of yours (or, as the opener, anyone's) in the same
         discussion - the old one can no longer be reacted to or decided, its stances do not carry over."""
         def fn(db):
-            me = self._session(db, session)
             did = parse_id("discussion", discussion)
             d = db.execute("SELECT * FROM discussions WHERE id=?", (did,)).fetchone()
             if d is None:
                 raise CoordError("missing", f"no discussion D{did}")
+            me, _ = self._access(db, session, d["project_id"], "participate")
             if d["status"] != "open":
                 raise CoordError("closed", f"D{did} is {d['status']}")
             old = None
@@ -203,12 +203,12 @@ class ConsensusMixin(CoordBase):
         if stance == "object" and not comment.strip():
             raise CoordError("comment_required", "an objection needs its reason: react P.. object \"why\"")
         with self._tx() as db:
-            me = self._session(db, session)
             pid = parse_id("proposal", proposal)
             p = db.execute("SELECT p.*, d.status AS dstatus, d.project_id FROM proposals p JOIN"
                            " discussions d ON d.id=p.discussion_id WHERE p.id=?", (pid,)).fetchone()
             if p is None:
                 raise CoordError("missing", f"no proposal P{pid}")
+            me, _ = self._access(db, session, p["project_id"], "participate")
             if p["dstatus"] != "open":
                 raise CoordError("closed", "discussion is closed")
             if p["status"] == "superseded":
@@ -227,12 +227,13 @@ class ConsensusMixin(CoordBase):
                     self._notify(db, me, target, note, kind="decision")
             return {"proposal": f"P{pid}", "stance": stance}
 
-    def discussion(self, discussion: str) -> dict:
+    def discussion(self, discussion: str, session: str | None = None) -> dict:
         did = parse_id("discussion", discussion)
         with self._read() as db:
             d = db.execute("SELECT * FROM discussions WHERE id=?", (did,)).fetchone()
             if d is None:
                 raise CoordError("missing", f"no discussion D{did}")
+            self._view(db, d["project_id"], session)
             props = []
             for p in db.execute("SELECT * FROM proposals WHERE discussion_id=? ORDER BY id", (did,)):
                 rs = db.execute("SELECT * FROM reactions WHERE proposal_id=? ORDER BY created_at",
@@ -258,11 +259,16 @@ class ConsensusMixin(CoordBase):
                 "decided_by": d["decided_by"], "decided_at": iso(d["decided_at"]),
                 "decision_document": f"DOC{d['decision_document_id']}" if d["decision_document_id"] else None}
 
-    def discussions(self, project: str | None = None, status: str = "open") -> list[dict]:
+    def discussions(self, project: str | None = None, status: str = "open",
+                    session: str | None = None) -> list[dict]:
         with self._read() as db:
             q, a = "SELECT * FROM discussions WHERE status=?", [status]
             if project:
+                self._view(db, project, session)
                 q += " AND project_id=?"; a.append(project)
+            else:
+                f, fargs = self._view_filter(db, session)
+                q += f" AND {f}"; a += list(fargs)
             rows = db.execute(q + " ORDER BY id", a).fetchall()
         return [{"discussion": f"D{r['id']}", "topic": r["topic"], "by": r["created_by_name"]} for r in rows]
 
@@ -276,11 +282,11 @@ class ConsensusMixin(CoordBase):
         - consensus=False always needs a reason and can only lower the record.
         Every participant gets a direct message with the outcome."""
         with self._tx() as db:
-            me = self._session(db, session)
             did = parse_id("discussion", discussion)
             d = db.execute("SELECT * FROM discussions WHERE id=?", (did,)).fetchone()
             if d is None:
                 raise CoordError("missing", f"no discussion D{did}")
+            me, _ = self._access(db, session, d["project_id"], "decide")
             if d["status"] != "open":
                 raise CoordError("closed", f"D{did} is already {d['status']}")
             pids = [parse_id("proposal", x) for x in str(proposal).split(",") if x.strip()] if proposal else []

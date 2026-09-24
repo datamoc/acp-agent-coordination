@@ -27,6 +27,15 @@ INBOX_DEFAULT = 20
 
 MESSAGE_KINDS = ("info", "question", "advice", "proposal", "decision", "review", "warning", "done")
 ROLES = ("advisor", "reviewer", "coeditor", "delegate")
+# Project permissions: a roster row makes a project restricted; each role carries the rights
+# below (view < participate < decide < admin). Without a roster the project is open and keeps
+# the behaviour it always had: everyone may view, participate and decide. The Keycloak mapping
+# (`coord:<project>:<role>` groups) and the project_members table share this vocabulary.
+PROJECT_ROLES = {"viewer": 0, "contributor": 1, "decider": 2, "admin": 3}
+ROLE_RIGHTS = {"viewer": ("view",),
+               "contributor": ("view", "participate"),
+               "decider": ("view", "participate", "decide"),
+               "admin": ("view", "participate", "decide", "admin")}
 STANCES = ("support", "support-with-reservation", "object", "abstain", "need-more-info")
 SUPPORTING = ("support", "support-with-reservation")   # both count for consensus; reservations are listed
 CONSENSUS_RULES = ("unanimous", "majority", "no-objection")
@@ -41,7 +50,8 @@ ROUTINE_OUTCOMES = ("ok", "issues", "failed")   # issues/failed also post a warn
 # What this server can do - published in whoami, `coord server` (server_info) and the Agent Card.
 FEATURES = ("sessions", "messages", "claims", "fences", "roles", "discussions", "consensus", "documents",
             "document-patches", "tasks", "a2a", "push-notifications", "memory", "strategy", "routines",
-            "server-info", "wake-hints", "delegation-scopes", "reservations", "superseding", "event-stream", "ui", "task-graph")
+            "server-info", "wake-hints", "delegation-scopes", "reservations", "superseding", "event-stream", "ui", "task-graph",
+            "project-permissions")
 # What each release brought agents: announced to every project when the server starts on a newer version.
 NEWS = {
     "0.4.0": "one certificate per agent CLI; plugins for Muse, Gemini, Qwen, opencode, Kilo and Crush",
@@ -63,6 +73,9 @@ NEWS = {
     "0.10.1": "orphaned tasks are reclaimable: when a task's creator and assignee are both gone, any live "
               "session may decline, do or cancel it (with the reason recorded) instead of blocking its "
               "dependents forever",
+    "0.11.0": "project permissions: a roster makes a project restricted - coord members, coord member set "
+              "<name> --role viewer|contributor|decider|admin (view, participate, decide, administer); "
+              "a project with no members stays open exactly as before, and the Keycloak mapping gains decider",
 }
 SERVER_NAME = "coord-server"   # sender of the server's own messages (upgrade notices)
 
@@ -70,6 +83,9 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS repos(
     project_id TEXT PRIMARY KEY, provider TEXT, created_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS project_members(
+    project_id TEXT NOT NULL, name TEXT NOT NULL, role TEXT NOT NULL,
+    granted_by TEXT, created_at REAL NOT NULL, PRIMARY KEY(project_id, name));
 CREATE TABLE IF NOT EXISTS sessions(
     session_id TEXT PRIMARY KEY, display_name TEXT NOT NULL, family TEXT NOT NULL,
     generation INTEGER NOT NULL, project_id TEXT NOT NULL, principal TEXT,
@@ -314,6 +330,55 @@ class CoordBase:
                              f"session {row['display_name']} (gen {row['generation']}) has "
                              "ended or expired; run `coord whoami` again")
         return row
+
+    # --- project permissions: view / participate / decide / admin -------------------------
+    def _roster(self, db, project) -> list[sqlite3.Row]:
+        """The membership rows that restrict `project`: empty means open (the historic behaviour)."""
+        return db.execute("SELECT name, role FROM project_members WHERE project_id=?"
+                          " ORDER BY created_at, name", (project,)).fetchall()
+
+    def _access(self, db, session_id, project, right: str | None = None):
+        """(me, project) after enforcing `right` for this caller; `project` defaults to the
+        caller's own. `right=None` just resolves the pair. An open project (no roster) allows
+        everything, exactly as before the roster existed."""
+        me = self._session(db, session_id)
+        project = project or me["project_id"]
+        if right is None:
+            return me, project
+        roster = self._roster(db, project)
+        if not roster:
+            return me, project
+        role = next((r["role"] for r in roster if r["name"] == me["display_name"]), None)
+        if role is None:
+            admins = [r["name"] for r in roster if r["role"] == "admin"]
+            raise CoordError("forbidden",
+                             f"project '{project}' is restricted and {me['display_name']} is not a "
+                             f"member; ask an admin ({', '.join(admins) or 'none'}) to add you",
+                             {"project": project, "required": right})
+        if right not in ROLE_RIGHTS[role]:
+            raise CoordError("forbidden", f"role '{role}' may not {right} in project '{project}'",
+                             {"project": project, "role": role, "required": right})
+        return me, project
+
+    def _view(self, db, project, session) -> None:
+        """Read gate for an explicit project: an open one reads without any session (as before),
+        a restricted one only through a live roster session (every role carries view)."""
+        if not self._roster(db, project):
+            return
+        if not session:
+            raise CoordError("forbidden", f"project '{project}' is restricted: pass your session "
+                             "to read it", {"project": project, "required": "view"})
+        self._access(db, session, project, "view")
+
+    def _view_filter(self, db, session) -> tuple[str, tuple]:
+        """SQL predicate for list reads that span projects: open projects always, a restricted
+        one only when `session` is on its roster (no session = open projects only)."""
+        if session:
+            me = self._session(db, session)
+            return ("(project_id NOT IN (SELECT project_id FROM project_members) OR"
+                    " project_id IN (SELECT project_id FROM project_members WHERE name=?))",
+                    (me["display_name"],))
+        return ("project_id NOT IN (SELECT project_id FROM project_members)", ())
 
     # Columns added after a table first shipped: (table, column, DDL). Existing databases get them
     # on open; CREATE TABLE above already has them for new ones.

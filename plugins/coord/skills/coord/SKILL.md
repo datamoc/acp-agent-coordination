@@ -63,6 +63,11 @@ humans want done even when nobody asks - run the due ones, and report even
 
 - `coord locks`, then `coord claim <path>` for a file or `coord claim <dir>/`
   for a tree (`--note "why"`). Keep the claim id (`C12`).
+- **Permissions**: a project with no roster is open (everyone as before);
+  once someone runs `coord member set <name> --role viewer|contributor|decider|admin`
+  it is restricted to its members — `coord members` shows who is on it, the
+  first member of an open project can only be themselves, and a non-member is
+  refused with the admins to ask. Reads pass your session automatically.
 - `conflict` = someone else holds it: do not edit. Ask its owner instead:
   `coord post --to <owner> --kind question --claim <their C..> "..."`; they
   answer at their next poll. (`coord ask --claim C12 --to <session>` is for

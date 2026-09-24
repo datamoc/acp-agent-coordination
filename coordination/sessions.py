@@ -101,10 +101,16 @@ class SessionsMixin(CoordBase):
             self._event(db, me["project_id"], "session.ended", session, "session", session)
             return {"name": me["display_name"], "released_claims": n}
 
-    def presence(self, project: str | None = None, include_dead: bool = False) -> list[dict]:
+    def presence(self, project: str | None = None, include_dead: bool = False,
+                 session: str | None = None) -> list[dict]:
         with self._read() as db:
-            rows = db.execute("SELECT * FROM sessions" + (" WHERE project_id=?" if project else "")
-                              + " ORDER BY heartbeat_at DESC", (project,) if project else ()).fetchall()
+            if project:
+                self._view(db, project, session)
+                f, a = " WHERE project_id=?", (project,)
+            else:
+                filt, fargs = self._view_filter(db, session)
+                f, a = f" WHERE {filt}", fargs
+            rows = db.execute("SELECT * FROM sessions" + f + " ORDER BY heartbeat_at DESC", a).fetchall()
             return [{"name": r["display_name"], "generation": r["generation"], "status": r["status"],
                      "project": r["project_id"], "live": self._live(r), "seen": iso(r["heartbeat_at"]),
                      "user": r["user"], "family": r["family"], "model": r["model"]}

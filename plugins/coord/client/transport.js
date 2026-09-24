@@ -184,10 +184,12 @@ export class RemoteTransport {
     }
     /** GET /events/stream (server-sent events), reconnecting with Last-Event-ID; a server older than
      *  0.8 (404) is followed by polling the `events` op instead. */
-    async follow(project, after, onEvent, signal) {
+    async follow(project, after, onEvent, signal, session) {
         let last = after, backoff = 1000;
         while (!signal.aborted) {
-            const url = new URL(`/events/stream${project ? `?project=${encodeURIComponent(project)}` : ""}`, this.url);
+            const qs = [project ? `project=${encodeURIComponent(project)}` : "",
+                session ? `session=${encodeURIComponent(session)}` : ""].filter(Boolean).join("&");
+            const url = new URL(`/events/stream${qs ? `?${qs}` : ""}`, this.url);
             const headers = { Accept: "text/event-stream", "Last-Event-ID": String(last) };
             const b = await this.bearer();
             if (b)
@@ -199,7 +201,7 @@ export class RemoteTransport {
                 onEvent(e);
             }).catch(() => 0);
             if (status === 404)
-                return pollEvents(this, project, last, onEvent, signal);
+                return pollEvents(this, project, last, onEvent, signal, 2000, session);
             if (status === 401 && this.o.token && typeof this.o.token !== "string")
                 await this.o.token.invalidate();
             await sleep(backoff, signal);
@@ -239,10 +241,10 @@ const sleep = (ms, signal) => new Promise((ok) => {
     signal.addEventListener("abort", () => { clearTimeout(t); ok(); }, { once: true });
 });
 /** Poll the `events` op every `everyMs` - for local mode and servers without /events/stream. */
-export async function pollEvents(t, project, after, onEvent, signal, everyMs = 2000) {
+export async function pollEvents(t, project, after, onEvent, signal, everyMs = 2000, session = null) {
     let last = after;
     while (!signal.aborted) {
-        const r = await t.send("events", { after: last, project, limit: 200 }).catch(() => null);
+        const r = await t.send("events", { after: last, project, limit: 200, session }).catch(() => null);
         for (const e of (r?.ok ? r.result : [])) {
             last = e.event;
             onEvent(e);
@@ -321,7 +323,7 @@ export class LocalTransport {
             throw new CoordError("local_failed", `${this.command} failed: ${(p.stderr || p.stdout).trim().slice(0, 500)}`);
         }
     }
-    follow(project, after, onEvent, signal) {
-        return pollEvents(this, project, after, onEvent, signal);
+    follow(project, after, onEvent, signal, session) {
+        return pollEvents(this, project, after, onEvent, signal, 2000, session ?? null);
     }
 }

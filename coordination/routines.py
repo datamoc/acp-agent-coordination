@@ -33,7 +33,7 @@ class RoutinesMixin(CoordBase):
         watched = sorted({self._norm(p, None)[1] for p in paths or []})
 
         def fn(db):
-            me = self._session(db, session)
+            me, _ = self._access(db, session, None, "participate")
             now = self.clock()
             rid = db.execute("INSERT INTO routines(project_id, title, instructions, every, on_commit, paths,"
                              " created_by, pending, pending_reason, created_at, updated_at)"
@@ -70,20 +70,26 @@ class RoutinesMixin(CoordBase):
                 "last_run_at": iso(r["last_run_at"]), "last_run_by": r["last_run_by"],
                 "last_outcome": r["last_outcome"], "last_result": r["last_result"], "created_by": r["created_by"]}
 
-    def routines(self, project: str | None = None, due: bool = False, include_retired: bool = False) -> list[dict]:
+    def routines(self, project: str | None = None, due: bool = False, include_retired: bool = False,
+                 session: str | None = None) -> list[dict]:
         with self._read() as db:
             q, a = "SELECT * FROM routines WHERE 1=1", []
             if project:
+                self._view(db, project, session)
                 q += " AND project_id=?"; a.append(project)
+            else:
+                f, fargs = self._view_filter(db, session)
+                q += f" AND {f}"; a += list(fargs)
             if not include_retired:
                 q += " AND status!='retired'"
             out = [self._routine_dict(db, r) for r in db.execute(q + " ORDER BY routine_id", a).fetchall()]
         return [r for r in out if r["due"]] if due else out
 
-    def routine_get(self, routine: str) -> dict:
+    def routine_get(self, routine: str, session: str | None = None) -> dict:
         """One routine in full: its instructions and its last runs."""
         with self._read() as db:
             r = self._routine_row(db, routine)
+            self._view(db, r["project_id"], session)
             out = self._routine_dict(db, r) | {"instructions": r["instructions"], "project": r["project_id"]}
             out["runs"] = [{"run": x["run"], "by": x["name"], "trigger": x["trigger"], "outcome": x["outcome"],
                             "result": x["result"], "started_at": iso(x["started_at"]),
@@ -95,8 +101,8 @@ class RoutinesMixin(CoordBase):
     def routine_start(self, session: str, routine: str) -> dict:
         """Take this run (due or not - a manual run is fine); refused while another live session runs it."""
         with self._tx() as db:
-            me = self._session(db, session)
             r = self._routine_row(db, routine)
+            me, _ = self._access(db, session, r["project_id"], "participate")
             if r["status"] != "active":
                 raise CoordError("not_active", f"R{r['routine_id']} is {r['status']}")
             if self._running(db, r) and r["runner_session_id"] != session:
@@ -121,8 +127,8 @@ class RoutinesMixin(CoordBase):
         if outcome not in ROUTINE_OUTCOMES:
             raise CoordError("bad_outcome", f"outcome must be one of {', '.join(ROUTINE_OUTCOMES)}")
         with self._tx() as db:
-            me = self._session(db, session)
             r = self._routine_row(db, routine)
+            me, _ = self._access(db, session, r["project_id"], "participate")
             if r["runner_session_id"] != session:
                 raise CoordError("forbidden", f"R{r['routine_id']} is not being run by you - routine start first")
             now = self.clock()
@@ -151,8 +157,8 @@ class RoutinesMixin(CoordBase):
             raise CoordError("bad_status", f"status must be one of {', '.join(ROUTINE_STATUSES)}")
         interval = parse_every(every) if every else None
         with self._tx() as db:
-            self._session(db, session)
             r = self._routine_row(db, routine)
+            self._access(db, session, r["project_id"], "participate")
             watched = json.dumps(sorted({self._norm(p, None)[1] for p in paths})) if paths is not None else None
             if (on_commit is False or (on_commit is None and not r["on_commit"])) and not (interval or r["every"]):
                 raise CoordError("bad_args", "a routine needs --every and/or --on-commit")

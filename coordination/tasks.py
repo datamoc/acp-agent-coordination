@@ -65,11 +65,11 @@ class TasksMixin(CoordBase):
     def task_link(self, session: str, task: str, after: list[str], remove: bool = False) -> dict:
         """T3 after T1, T2: T3 cannot be accepted until they are done (or cancelled)."""
         with self._tx() as db:
-            self._session(db, session)
             tid = parse_id("task", task)
             t = db.execute("SELECT * FROM tasks WHERE task_id=?", (tid,)).fetchone()
             if t is None:
                 raise CoordError("missing", f"no task T{tid}")
+            self._access(db, session, t["project_id"], "participate")
             if remove:
                 for a in after:
                     db.execute("DELETE FROM task_deps WHERE task_id=? AND after_id=?", (tid, parse_id("task", a)))
@@ -83,7 +83,7 @@ class TasksMixin(CoordBase):
                     claim: str | None = None, assign: str | None = None, category: str | None = None,
                     after: list[str] | None = None, client_id: str | None = None) -> dict:
         def fn(db):
-            me = self._session(db, session)
+            me, _ = self._access(db, session, None, "participate")
             target = self._resolve_name(db, assign, me["project_id"]) if assign else None
             now = self.clock()
             tid = db.execute("INSERT INTO tasks(project_id, created_by, assigned_to, assigned_name, title,"
@@ -103,11 +103,15 @@ class TasksMixin(CoordBase):
         return self._mutate("task_create", client_id, fn)
 
     def tasks(self, project: str | None = None, status: str | None = None,
-              assigned_session: str | None = None) -> list[dict]:
+              assigned_session: str | None = None, session: str | None = None) -> list[dict]:
         with self._read() as db:
             q, a = "SELECT * FROM tasks WHERE 1=1", []
             if project:
+                self._view(db, project, session)
                 q += " AND project_id=?"; a.append(project)
+            else:
+                f, fargs = self._view_filter(db, session)
+                q += f" AND {f}"; a += list(fargs)
             if status:
                 q += " AND status=?"; a.append(status)
             if assigned_session:
@@ -122,11 +126,11 @@ class TasksMixin(CoordBase):
 
     def _task_update(self, session, task, status, note=None, require_assignee=False):
         with self._tx() as db:
-            me = self._session(db, session)
             tid = parse_id("task", task)
             t = db.execute("SELECT * FROM tasks WHERE task_id=?", (tid,)).fetchone()
             if t is None:
                 raise CoordError("missing", f"no task T{tid}")
+            me, _ = self._access(db, session, t["project_id"], "participate")
             if status == "accepted":
                 if t["status"] == "offered" and t["assigned_to"] != session:
                     raise CoordError("forbidden", f"T{tid} is offered to {t['assigned_name']}, not to you")
@@ -179,13 +183,14 @@ class TasksMixin(CoordBase):
             self._event(db, t["project_id"], "task.declined", session, "task", tid)
             return {"task": f"T{tid}", "status": "open", "declined_by": me["display_name"]}
 
-    def task_get(self, task: str) -> dict:
+    def task_get(self, task: str, session: str | None = None) -> dict:
         """One task in full (the A2A GetTask view of it)."""
         tid = parse_id("task", task)
         with self._read() as db:
             r = db.execute("SELECT * FROM tasks WHERE task_id=?", (tid,)).fetchone()
             if r is None:
                 raise CoordError("missing", f"no task T{tid}")
+            self._view(db, r["project_id"], session)
             after, blocked = self._deps(db, tid), self._blocked_by(db, tid)
             before = [x[0] for x in db.execute("SELECT task_id FROM task_deps WHERE after_id=? ORDER BY task_id", (tid,))]
         return {"task": f"T{tid}", "project": r["project_id"], "title": r["title"], "description": r["description"],
@@ -199,11 +204,11 @@ class TasksMixin(CoordBase):
     def task_cancel(self, session: str, task: str, note: str = "") -> dict:
         """The creator or the assignee withdraws a task that is not done yet."""
         with self._tx() as db:
-            me = self._session(db, session)
             tid = parse_id("task", task)
             t = db.execute("SELECT * FROM tasks WHERE task_id=?", (tid,)).fetchone()
             if t is None:
                 raise CoordError("missing", f"no task T{tid}")
+            me, _ = self._access(db, session, t["project_id"], "participate")
             if t["status"] in ("done", "cancelled"):
                 raise CoordError("not_cancelable", f"T{tid} is already {t['status']}")
             mine = me["display_name"] == t["created_by"] or t["assigned_to"] == session

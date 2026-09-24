@@ -18,6 +18,12 @@
    "coeditor",
    "delegate"
   ],
+  "project_roles": [
+   "viewer",
+   "contributor",
+   "decider",
+   "admin"
+  ],
   "stances": [
    "support",
    "support-with-reservation",
@@ -284,6 +290,12 @@
      "type": "string",
      "nullable": false,
      "required": true
+    },
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": true,
+     "required": false
     }
    ]
   },
@@ -300,6 +312,12 @@
      "name": "status",
      "type": "string",
      "nullable": false,
+     "required": false
+    },
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": true,
      "required": false
     }
    ]
@@ -388,6 +406,12 @@
      "type": "string",
      "nullable": false,
      "required": true
+    },
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": true,
+     "required": false
     }
    ]
   },
@@ -446,6 +470,12 @@
      "type": "integer",
      "nullable": true,
      "required": false
+    },
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": true,
+     "required": false
     }
    ]
   },
@@ -460,6 +490,12 @@
     },
     {
      "name": "kind",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "session",
      "type": "string",
      "nullable": true,
      "required": false
@@ -497,6 +533,12 @@
      "type": "integer",
      "nullable": false,
      "required": false
+    },
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": true,
+     "required": false
     }
    ]
   },
@@ -514,6 +556,12 @@
      "type": "integer",
      "nullable": false,
      "required": true
+    },
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": true,
+     "required": false
     }
    ]
   },
@@ -642,6 +690,93 @@
      "type": "string",
      "nullable": true,
      "required": false
+    },
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "member_remove": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "name",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "project",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "client_id",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "member_set": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "name",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "role",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "project",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "client_id",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
+  "members": {
+   "kind": "read",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "project",
+     "type": "string",
+     "nullable": true,
+     "required": false
     }
    ]
   },
@@ -670,6 +805,12 @@
      "name": "include_archived",
      "type": "boolean",
      "nullable": false,
+     "required": false
+    },
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": true,
      "required": false
     }
    ]
@@ -845,6 +986,12 @@
      "type": "boolean",
      "nullable": false,
      "required": false
+    },
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": true,
+     "required": false
     }
    ]
   },
@@ -897,7 +1044,14 @@
   },
   "projects": {
    "kind": "read",
-   "params": []
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
   },
   "propose": {
    "kind": "write",
@@ -1162,6 +1316,12 @@
      "type": "string",
      "nullable": false,
      "required": true
+    },
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": true,
+     "required": false
     }
    ]
   },
@@ -1249,6 +1409,12 @@
      "type": "string",
      "nullable": false,
      "required": true
+    },
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": true,
+     "required": false
     }
    ]
   },
@@ -1342,6 +1508,12 @@
      "type": "boolean",
      "nullable": false,
      "required": false
+    },
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": true,
+     "required": false
     }
    ]
   },
@@ -1354,6 +1526,12 @@
    "params": [
     {
      "name": "project",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "session",
      "type": "string",
      "nullable": true,
      "required": false
@@ -1389,6 +1567,12 @@
     },
     {
      "name": "exclude_session",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "session",
      "type": "string",
      "nullable": true,
      "required": false
@@ -1548,6 +1732,12 @@
      "type": "string",
      "nullable": false,
      "required": true
+    },
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": true,
+     "required": false
     }
    ]
   },
@@ -1597,6 +1787,12 @@
     },
     {
      "name": "assigned_session",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "session",
      "type": "string",
      "nullable": true,
      "required": false

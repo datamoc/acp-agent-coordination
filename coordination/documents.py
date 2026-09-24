@@ -21,17 +21,18 @@ class DocumentsMixin(CoordBase):
             raise CoordError("bad_kind", f"document kind must be one of {', '.join(DOC_KINDS)}")
 
         def fn(db):
-            me = self._session(db, session)
+            me, _ = self._access(db, session, None, "participate")
             did = self._doc_insert(db, me, title, kind, content)
             return {"document": f"DOC{did}", "id": did, "revision": 1}
         return self._mutate("doc_create", client_id, fn)
 
-    def doc_show(self, document: str, revision: int | None = None) -> dict:
+    def doc_show(self, document: str, revision: int | None = None, session: str | None = None) -> dict:
         did = parse_id("document", document)
         with self._read() as db:
             d = db.execute("SELECT * FROM documents WHERE id=?", (did,)).fetchone()
             if d is None:
                 raise CoordError("missing", f"no document DOC{did}")
+            self._view(db, d["project_id"], session)
             content, rev = d["content"], d["revision"]
             if revision is not None:
                 r = db.execute("SELECT * FROM document_revisions WHERE document_id=? AND revision=?",
@@ -47,8 +48,8 @@ class DocumentsMixin(CoordBase):
                  message: str = "", client_id: str | None = None) -> dict:
         """Optimistic concurrency: succeeds only if nobody edited since base_revision."""
         def fn(db):
-            me = self._session(db, session)
             d = self._doc_editable(db, document)
+            me, _ = self._access(db, session, d["project_id"], "participate")
             did = d["id"]
             if d["revision"] != int(base_revision):
                 raise CoordError("revision_conflict",
@@ -87,8 +88,8 @@ class DocumentsMixin(CoordBase):
         context: edits that don't overlap merge (`merged`: true); overlapping ones are refused with
         `revision_conflict`, naming the hunks and carrying the current content."""
         def fn(db):
-            me = self._session(db, session)
             d = self._doc_editable(db, document)
+            me, _ = self._access(db, session, d["project_id"], "participate")
             did, base = d["id"], int(base_revision)
             b = db.execute("SELECT content FROM document_revisions WHERE document_id=? AND revision=?",
                            (did, base)).fetchone()
@@ -123,9 +124,13 @@ class DocumentsMixin(CoordBase):
                     "hunks": len(hunks), "offsets": offsets}
         return self._mutate("doc_patch", client_id, fn)
 
-    def doc_history(self, document: str) -> list[dict]:
+    def doc_history(self, document: str, session: str | None = None) -> list[dict]:
         did = parse_id("document", document)
         with self._read() as db:
+            d = db.execute("SELECT project_id FROM documents WHERE id=?", (did,)).fetchone()
+            if d is None:
+                raise CoordError("missing", f"no document DOC{did}")
+            self._view(db, d["project_id"], session)
             rows = db.execute("SELECT * FROM document_revisions WHERE document_id=? ORDER BY revision",
                               (did,)).fetchall()
         if not rows:
@@ -133,11 +138,16 @@ class DocumentsMixin(CoordBase):
         return [{"revision": r["revision"], "author": r["author_name"], "message": r["message"],
                  "at": iso(r["created_at"]), "chars": len(r["content"])} for r in rows]
 
-    def docs(self, project: str | None = None, kind: str | None = None) -> list[dict]:
+    def docs(self, project: str | None = None, kind: str | None = None,
+             session: str | None = None) -> list[dict]:
         with self._read() as db:
             q, a = "SELECT * FROM documents WHERE 1=1", []
             if project:
+                self._view(db, project, session)
                 q += " AND project_id=?"; a.append(project)
+            else:
+                f, fargs = self._view_filter(db, session)
+                q += f" AND {f}"; a += list(fargs)
             if kind:
                 q += " AND kind=?"; a.append(kind)
             rows = db.execute(q + " ORDER BY id", a).fetchall()

@@ -59,6 +59,13 @@ const COMMANDS = {
         } },
     ask: { pos: [{ name: "body" }], opts: [s("--claim", { required: true }), s("--to", { required: true }),
             s("--role", { default: "advisor", choices: K.roles }), kind("question")] },
+    members: { help: "who may view, participate, decide or administer a project (a roster makes it restricted)",
+        opts: [s("--project")] },
+    member: { help: "grant or remove a project role; in an open project the first member is yourself", sub: {
+            set: { pos: [{ name: "name" }], opts: [s("--role", { required: true, choices: K.project_roles }),
+                    s("--project"), s("--client-id")] },
+            remove: { pos: [{ name: "name" }], opts: [s("--project"), s("--client-id")] },
+        } },
     check: { pos: [{ name: "files", nargs: "*" }], opts: [s("--mode", { choices: ["fail", "warn"] })] },
     "post-commit": { opts: [s("--sha")] },
     "install-hooks": { help: "git pre-commit (coord check) and post-commit hooks",
@@ -269,6 +276,13 @@ export function versionSkew(server, client = CLIENT_VERSION) {
 const gitLines = (...args) => git(...args).split("\n").filter(Boolean);
 export async function run(path, a, c) {
     const S = loadSession;
+    /** Reads go further with a session (a restricted project needs one) but must keep working before whoami. */
+    const maybeS = () => { try {
+        return S();
+    }
+    catch {
+        return null;
+    } };
     const call = (op, args) => c.call(op, args);
     const cmd = path[0];
     switch (cmd) {
@@ -305,7 +319,7 @@ export async function run(path, a, c) {
         }
         case "heartbeat": return [cmd, await call("heartbeat", { session: S(), status: a.status }), 0];
         case "end": return [cmd, await call("end", { session: S() }), 0];
-        case "presence": return [cmd, await call("presence", { project: a.project, include_dead: a.all }), 0];
+        case "presence": return [cmd, await call("presence", { project: a.project, include_dead: a.all, session: maybeS() }), 0];
         case "post": return [cmd, await call("post", { session: S(), body: a.body, kind: a.kind, to: a.to, claim: a.claim, client_id: a.client_id || uuid() }), 0];
         case "reply": return [cmd, await call("reply", { session: S(), message: a.message, body: a.body, kind: a.kind, client_id: a.client_id || uuid() }), 0];
         case "inbox": return [cmd, await call("inbox", { session: S(), after: a.after, to_me: a.to_me, sender: a.sender, kind: a.kind,
@@ -317,14 +331,14 @@ export async function run(path, a, c) {
                 release_on_commit: a.release_on_commit, client_id: a.client_id || uuid() }), 0];
         case "renew": return [cmd, await call("renew", { session: S(), claim: a.claim, ttl: a.ttl }), 0];
         case "release": return [cmd, await call("release", { session: S(), claim: a.claim, all: a.all }), 0];
-        case "locks": return [cmd, await call("locks", { project: a.project || detectProject(), all: a.all }), 0];
-        case "fence-check": return [cmd, await call("fence_check", { claim: a.claim, fence: a.fence }), 0];
+        case "locks": return [cmd, await call("locks", { project: a.project || detectProject(), all: a.all, session: maybeS() }), 0];
+        case "fence-check": return [cmd, await call("fence_check", { claim: a.claim, fence: a.fence, session: maybeS() }), 0];
         case "grant": return [cmd, await call("grant", { session: S(), claim: a.claim, to: a.to, role: a.role,
                 ...(a.scope ? { scope: rel(a.scope) } : {}) }), 0];
         case "delegate": return ["grant", await call("grant", { session: S(), claim: a.claim, to: a.to, role: "delegate",
                 ...(a.scope ? { scope: rel(a.scope) } : {}) }), 0];
         case "revoke": return [cmd, await call(cmd, { session: S(), claim: a.claim, to: a.to, role: a.role }), 0];
-        case "roles": return [cmd, await call("roles", { claim: a.claim }), 0];
+        case "roles": return [cmd, await call("roles", { claim: a.claim, session: maybeS() }), 0];
         case "role": return [cmd, path[1] === "accept" ? await call("role_accept", { session: S(), claim: a.claim, role: a.role })
                 : await call("role_decline", { session: S(), claim: a.claim, role: a.role, reason: a.reason }), 0];
         case "ask": return [cmd, await call("ask", { session: S(), claim: a.claim, to: a.to, body: a.body, role: a.role, kind: a.kind, client_id: uuid() }), 0];
@@ -354,6 +368,10 @@ export async function run(path, a, c) {
             }
             return [cmd, { installed: [join(hooks, "pre-commit"), join(hooks, "post-commit")] }, 0];
         }
+        case "members": return [cmd, await call("members", { session: maybeS(), project: a.project || detectProject() }), 0];
+        case "member": return [cmd, path[1] === "remove"
+                ? await call("member_remove", { session: S(), name: a.name, project: a.project, client_id: a.client_id || uuid() })
+                : await call("member_set", { session: S(), name: a.name, role: a.role, project: a.project, client_id: a.client_id || uuid() }), 0];
         case "discuss": return [cmd, await call("discuss", { session: S(), topic: a.topic, claim: a.claim, rule: a.rule, quorum: a.quorum,
                 deadline: a.deadline,
                 participants: a.with_ ? String(a.with_).split(",").map((x) => x.trim()).filter(Boolean) : null,
@@ -361,20 +379,20 @@ export async function run(path, a, c) {
         case "propose": return [cmd, await call("propose", { session: S(), discussion: a.discussion, body: a.body,
                 supersedes: a.supersedes, client_id: uuid() }), 0];
         case "react": return [cmd, await call("react", { session: S(), proposal: a.proposal, stance: a.stance, comment: a.comment }), 0];
-        case "discussion": return [cmd, await call("discussion", { discussion: a.discussion }), 0];
-        case "discussions": return [cmd, await call("discussions", { project: a.project || detectProject() }), 0];
+        case "discussion": return [cmd, await call("discussion", { discussion: a.discussion, session: maybeS() }), 0];
+        case "discussions": return [cmd, await call("discussions", { project: a.project || detectProject(), session: maybeS() }), 0];
         case "decide": return [cmd, await call("decide", { session: S(), discussion: a.discussion, decision: a.decision, proposal: a.proposal,
                 consensus: a.no_consensus === null,
                 reason: a.no_consensus ?? a.reason }), 0];
         case "doc": {
             switch (path[1]) {
                 case "create": return ["doc", await call("doc_create", { session: S(), title: a.title, kind: a.kind, content: a.file ? readContent(a) : a.content, client_id: uuid() }), 0];
-                case "show": return ["doc-show", await call("doc_show", { document: a.document, revision: a.revision }), 0];
+                case "show": return ["doc-show", await call("doc_show", { document: a.document, revision: a.revision, session: maybeS() }), 0];
                 case "edit": return ["doc", await call("doc_edit", { session: S(), document: a.document, base_revision: a.base_revision, content: readContent(a), message: a.message, client_id: uuid() }), 0];
                 case "patch": { // --from: diff the edited file against that revision here, send only the diff
                     let patch;
                     if (a.from) {
-                        const base = await call("doc_show", { document: a.document, revision: a.base_revision });
+                        const base = await call("doc_show", { document: a.document, revision: a.base_revision, session: maybeS() });
                         patch = unifiedDiff(base.content, readFileSync(a.from, "utf8"), 3, [`${a.document}@r${a.base_revision}`, a.from]);
                         if (!patch)
                             throw new CoordError("no_change", `${a.from} is identical to ${a.document} revision ${a.base_revision}`);
@@ -385,11 +403,11 @@ export async function run(path, a, c) {
                     return ["doc", await call("doc_patch", { session: S(), document: a.document, base_revision: a.base_revision,
                             patch, message: a.message, client_id: uuid() }), 0];
                 }
-                case "history": return ["doc", await call("doc_history", { document: a.document }), 0];
-                default: return ["doc", await call("docs", { project: detectProject(), kind: a.kind }), 0];
+                case "history": return ["doc", await call("doc_history", { document: a.document, session: maybeS() }), 0];
+                default: return ["doc", await call("docs", { project: detectProject(), kind: a.kind, session: maybeS() }), 0];
             }
         }
-        case "tasks": return [a.graph ? "tasks-graph" : cmd, await call("tasks", { project: a.project || detectProject(), status: a.status }), 0];
+        case "tasks": return [a.graph ? "tasks-graph" : cmd, await call("tasks", { project: a.project || detectProject(), status: a.status, session: maybeS() }), 0];
         case "task": {
             switch (path[1]) {
                 case "create": return ["task", await call("task_create", { session: S(), title: a.title, description: a.description, priority: a.priority,
@@ -397,7 +415,7 @@ export async function run(path, a, c) {
                         after: list(a.after), client_id: uuid() }), 0];
                 case "link": return ["task", await call("task_link", { session: S(), task: a.task, after: list(a.after) ?? [], remove: a.remove }), 0];
                 case "accept": return ["task", await call("task_accept", { session: S(), task: a.task }), 0];
-                case "show": return ["task", await call("task_get", { task: a.task }), 0];
+                case "show": return ["task", await call("task_get", { task: a.task, session: maybeS() }), 0];
                 case "decline": return ["task", await call("task_decline", { session: S(), task: a.task, reason: a.reason }), 0];
                 case "cancel": return ["task", await call("task_cancel", { session: S(), task: a.task, note: a.note }), 0];
                 case "notify": { // A2A push notifications: the server POSTs status updates to --url
@@ -409,16 +427,16 @@ export async function run(path, a, c) {
         }
         case "memory": {
             switch (path[1]) {
-                case "show": return ["memory", await call("memory", { project: detectProject(), kind: a.kind }), 0];
-                case "search": return ["memory", await call("memory", { project: detectProject(), query: a.query }), 0];
+                case "show": return ["memory", await call("memory", { project: detectProject(), kind: a.kind, session: maybeS() }), 0];
+                case "search": return ["memory", await call("memory", { project: detectProject(), query: a.query, session: maybeS() }), 0];
                 case "add": return ["memory-add", await call("memory_add", { session: S(), kind: a.kind, title: a.title, content: readContent(a), source: a.source, client_id: uuid() }), 0];
                 default: return ["memory-edit", await call("memory_edit", { session: S(), memory: a.memory, base_revision: a.base_revision, content: readContent(a),
                         status: a.archive ? "archived" : null }), 0];
             }
         }
-        case "strategy": return ["memory", await call("memory", { project: detectProject(), kind: "strategy" }), 0];
+        case "strategy": return ["memory", await call("memory", { project: detectProject(), kind: "strategy", session: maybeS() }), 0];
         case "routines": {
-            const r = await call("routines", { project: detectProject(), due: a.due, include_retired: a.all });
+            const r = await call("routines", { project: detectProject(), due: a.due, include_retired: a.all, session: maybeS() });
             return [cmd, r, 0];
         }
         case "routine": {
@@ -426,7 +444,7 @@ export async function run(path, a, c) {
             switch (path[1]) {
                 case "create": return ["routine-new", await call("routine_create", { session: S(), title: a.title, instructions: text() ?? "",
                         every: a.every, on_commit: a.on_commit, paths: a.paths, client_id: uuid() }), 0];
-                case "show": return ["routine", await call("routine_get", { routine: a.routine }), 0];
+                case "show": return ["routine", await call("routine_get", { routine: a.routine, session: maybeS() }), 0];
                 case "start": return ["routine-start", await call("routine_start", { session: S(), routine: a.routine }), 0];
                 case "done": return ["routine-done", await call("routine_done", { session: S(), routine: a.routine, result: a.result, outcome: a.outcome }), 0];
                 case "edit": return ["routine", await call("routine_update", { session: S(), routine: a.routine, title: a.title, every: a.every,
@@ -442,19 +460,19 @@ export async function run(path, a, c) {
         case "profile": return [cmd, await call("profile_set", { session: S(), provider: a.provider, model_id: a.model, model_family: a.family,
                 category: a.category, reasoning_level: a.reasoning, capabilities: a.capability }), 0];
         case "suggest": return [cmd, await call("suggest", { project: detectProject(), category: a.prefer_category, capability: a.capability,
-                reasoning_level: a.reasoning, exclude_session: S() }), 0];
+                reasoning_level: a.reasoning, exclude_session: S(), session: maybeS() }), 0];
         case "agent-card": return [cmd, await c.agentCard(), 0];
-        case "projects": return [cmd, await call("projects", {}), 0];
-        case "status": return [cmd, await call("status", { project: a.project }), 0];
+        case "projects": return [cmd, await call("projects", { session: maybeS() }), 0];
+        case "status": return [cmd, await call("status", { project: a.project, session: maybeS() }), 0];
         case "events": {
             const project = a.project || detectProject();
             if (!a.follow)
-                return [cmd, await call("events", { after: a.after, project }), 0];
+                return [cmd, await call("events", { after: a.after, project, session: maybeS() }), 0];
             const stop = new AbortController();
             process.once("SIGINT", () => stop.abort());
             const t = c.transport;
-            const follow = t.follow ? t.follow.bind(t) : (p, af, on, s) => pollEvents(t, p, af, on, s);
-            await follow(project, a.after, (e) => process.stdout.write((process.argv.includes("--json") ? JSON.stringify(e) : fmtEvent(e)) + "\n"), stop.signal);
+            const follow = t.follow ? t.follow.bind(t) : (p, af, on, s) => pollEvents(t, p, af, on, s, 2000, maybeS());
+            await follow(project, a.after, (e) => process.stdout.write((process.argv.includes("--json") ? JSON.stringify(e) : fmtEvent(e)) + "\n"), stop.signal, maybeS());
             return ["events-followed", null, 0];
         }
     }
