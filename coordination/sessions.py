@@ -3,10 +3,10 @@
 import re
 import uuid
 
-from .core import FEATURES, SESSION_TTL, CoordError, iso, server_version
+from .core import FEATURES, SESSION_TTL, CoordBase, CoordError, iso, server_version
 
 
-class SessionsMixin:
+class SessionsMixin(CoordBase):
     def whoami(self, family: str, project: str = "default", principal: str | None = None,
                user: str | None = None, model: str | None = None, client_id: str | None = None) -> dict:
         """Take a session. With `user` and/or `model` the session is the association user + CLI + model,
@@ -21,7 +21,8 @@ class SessionsMixin:
             raise CoordError("bad_family", f"{family!r} looks like a session name: join with your agent's family "
                              f"({base!r}), whoami gives you a new name", {"family": base})
         project = project or "default"
-        tidy = lambda v, n: re.sub(r"[^a-z0-9_.-]", "-", v.strip().lower())[:n].strip("-") or None if v else None
+        def tidy(v, n):
+            return re.sub(r"[^a-z0-9_.-]", "-", v.strip().lower())[:n].strip("-") or None if v else None
         user, model = tidy(user, 32), tidy(model, 40)
 
         def fn(db):

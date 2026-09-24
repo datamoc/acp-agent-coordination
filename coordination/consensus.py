@@ -1,11 +1,23 @@
 """Discussions and consensus: propose, react, computed decisions."""
 
 import json
+from typing import NotRequired, TypedDict
 
-from .core import CONSENSUS_RULES, DEFAULT_QUORUM, STANCES, SUPPORTING, CoordError, iso, parse_id, parse_when
+from .core import CONSENSUS_RULES, DEFAULT_QUORUM, STANCES, SUPPORTING, CoordBase, CoordError, iso, parse_id, parse_when
 
 
-class ConsensusMixin:
+class ConsensusDetail(TypedDict):
+    rule: str
+    quorum: int
+    met: bool
+    why: list[str]
+    deadline: str | None
+    participants: list[dict]
+    reservations: NotRequired[list[dict]]
+    open: NotRequired[bool]
+
+
+class ConsensusMixin(CoordBase):
     def discuss(self, session: str, topic: str, claim: str | None = None, participants: list[str] | None = None,
                 rule: str = "unanimous", quorum: int | None = None, deadline: str | None = None,
                 client_id: str | None = None) -> dict:
@@ -77,7 +89,7 @@ class ConsensusMixin:
                     break
         return out
 
-    def _consensus(self, db, d, proposal_id: int | None, deciding: bool) -> dict:
+    def _consensus(self, db, d, proposal_id: int | None, deciding: bool) -> ConsensusDetail:
         """Evaluate the discussion's rule on one proposal. Stances: a participant's own reaction; else
         the proposal's author supports it and, when `deciding`, so does the decider (both `implied`)."""
         rule, quorum = d["rule"] or "unanimous", d["quorum"] or DEFAULT_QUORUM
@@ -112,9 +124,12 @@ class ConsensusMixin:
                 out.append({"name": name, "stance": "support", "implied": True, "silent_past_deadline": True})
             else:
                 out.append({"name": name, "stance": None, "implied": False})
-        count = lambda st: sum(1 for x in out if x["stance"] == st)
+        def count(st):
+            return sum(1 for x in out if x["stance"] == st)
         supporting = sum(1 for x in out if x["stance"] in SUPPORTING)
-        who = lambda *st: ", ".join(x["name"] for x in out if x["stance"] in st)
+
+        def who(*st):
+            return ", ".join(x["name"] for x in out if x["stance"] in st)
         why, n = [], len(out)
         responded = sum(1 for x in out if x["stance"] is not None)
         if responded < quorum:
@@ -132,8 +147,13 @@ class ConsensusMixin:
         else:   # no-objection: silence is consent
             if count("object") or count("need-more-info"):
                 why.append(f"objection from {who('object', 'need-more-info')}")
-        reservations = [{"name": x["name"], "comment": (reacted.get(sid) or later.get(sid))["comment"]}
-                        for (sid, _), x in zip(people, out) if x["stance"] == "support-with-reservation"]
+        reservations = []
+        for (sid, _), x in zip(people, out, strict=True):
+            if x["stance"] != "support-with-reservation":
+                continue
+            entry = reacted.get(sid) or later.get(sid)
+            assert entry is not None   # `out`'s loop above only sets this stance from reacted/later
+            reservations.append({"name": x["name"], "comment": entry["comment"]})
         return {"rule": rule, "quorum": quorum, "met": not why, "why": why, "participants": out,
                 "reservations": reservations, "open": not fixed, "deadline": iso(d["deadline"])}
 
@@ -270,12 +290,11 @@ class ConsensusMixin:
                     raise CoordError("missing", f"P{q} is not part of D{did}")
                 if row["status"] == "superseded":
                     raise CoordError("superseded", f"P{q} was superseded - decide on its replacement")
-            pid = pids[0] if pids else None
             details = {q: self._consensus(db, d, q, deciding=d["created_by"] == session) for q in pids}
-            detail = self._consensus(db, d, pid, deciding=d["created_by"] == session) if not pids else details[pid]
+            detail = self._consensus(db, d, None, deciding=d["created_by"] == session) if not pids else details[pids[0]]
             if len(pids) > 1:   # every accepted proposal needs its own consensus
                 lacking = [f"P{q}: {'; '.join(x['why'])}" for q, x in details.items() if not x["met"]]
-                detail = dict(detail, met=not lacking, why=lacking)
+                detail = {**detail, "met": not lacking, "why": lacking}
             opener = d["created_by"] == session or self._identity(db, session) == self._identity(db, d["created_by"])
             participant = any(x["name"] == me["display_name"] or x.get("by") == me["display_name"]
                               for x in detail["participants"])
@@ -289,7 +308,7 @@ class ConsensusMixin:
                                      "can decide", {"why": detail["why"]})
             if consensus and not detail["met"]:
                 raise CoordError("no_consensus", f"D{did} has no consensus: {'; '.join(detail['why'])} - wait for the "
-                                 "stances, or decide explicitly with --no-consensus \"reason\"", detail)
+                                 "stances, or decide explicitly with --no-consensus \"reason\"", dict(detail))
             if pids:
                 marks = ",".join("?" * len(pids))
                 db.execute(f"UPDATE proposals SET status=CASE WHEN id IN ({marks}) THEN 'accepted' ELSE 'rejected' END"
@@ -298,7 +317,8 @@ class ConsensusMixin:
             reached = detail["met"] and bool(consensus)
             if detail["met"] and not consensus:
                 detail["why"] = ["the decider recorded no consensus"]
-            stance = lambda x: (x["stance"] or "no stance") + (" (implied)" if x["implied"] else "")
+            def stance(x):
+                return (x["stance"] or "no stance") + (" (implied)" if x["implied"] else "")
             content = (f"# Decision: {d['topic']}\n\n{decision}\n\n"
                        f"- discussion: D{did}\n- accepted proposal{'s' if len(pids) > 1 else ''}: "
                        f"{', '.join(f'P{q}' for q in pids) or 'none'}\n"

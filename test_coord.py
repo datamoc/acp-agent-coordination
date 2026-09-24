@@ -433,6 +433,33 @@ def tasks_and_roles_are_mutual():
     assert c.role_accept(b, cl, "delegate")["status"] == "granted"
     assert c.grant(a, cl, "b-01", "delegate")["status"] == "granted"      # re-granting keeps it
 
+
+@check
+def orphaned_tasks_can_be_closed_by_anyone_once_nobody_is_around():
+    """A task's creator and assignee normally have exclusive standing over it; but once both
+    sessions are gone for good (past SESSION_TTL, not just briefly offline), it would otherwise
+    block its dependents forever - so decline/done/cancel open up to any live session."""
+    from coordination.core import SESSION_TTL
+    c, clock = fresh()
+    a, b, x = (c.whoami(n)["session_id"] for n in ("a", "b", "x"))
+    t1 = c.task_create(a, "Stale work", assign="b-01")["task"]
+    t2 = c.task_create(a, "More stale work", assign="b-01")["task"]
+    t3 = c.task_create(a, "Yet more stale work", assign="b-01")["task"]
+    raises("forbidden", c.task_decline, x, t1)                            # a and b are both live: not x's to touch
+    raises("forbidden", c.task_cancel, x, t1)
+    clock.t += SESSION_TTL - 100                                          # a and b's sessions are about to lapse...
+    c.heartbeat(x, "still here")                                          # ... x's own heartbeat stays fresh
+    clock.t += 200                                                        # now a and b are past SESSION_TTL, x is not
+    r = c.task_decline(x, t1, "superseded")
+    assert r["status"] == "open" and "orphaned" in c.task_get(t1)["note"] and "superseded" in c.task_get(t1)["note"]
+    clock.t += 200; c.heartbeat(x, "still here")
+    r = c.task_done(x, t2, "done elsewhere")
+    assert r["status"] == "done" and "orphaned" in c.task_get(t2)["note"]
+    clock.t += 200; c.heartbeat(x, "still here")
+    r = c.task_cancel(x, t3)
+    assert r["status"] == "cancelled" and "orphaned" in c.task_get(t3)["note"]
+
+
 @check
 def old_database_is_migrated():
     """A coord2.db from 0.2.x (no rule/quorum columns) opens and gets the defaults."""

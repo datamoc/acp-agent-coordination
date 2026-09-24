@@ -1,18 +1,18 @@
 """Claims: scopes, fences, roles (ask/grant), git checks."""
 
+import contextlib
 import sqlite3
-import time
 
 from . import scopes
-from .core import CLAIM_TTL, ROLES, ROLES_BY_CONSENT, SESSION_TTL, CoordError, iso, parse_id
+from .core import CLAIM_TTL, ROLES, ROLES_BY_CONSENT, SESSION_TTL, CoordBase, CoordError, iso, parse_id
 
 
-class ClaimsMixin:
+class ClaimsMixin(CoordBase):
     def _norm(self, raw: str, tree: bool | None) -> tuple[str, str]:
         try:
             path, is_dir = scopes.normalize(raw, self.case_insensitive)
         except scopes.ScopeError as e:
-            raise CoordError("bad_scope", str(e))
+            raise CoordError("bad_scope", str(e)) from e
         return ("tree" if (tree or is_dir) else "exact"), path
 
     def _active_claims(self, db, project):
@@ -158,25 +158,26 @@ class ClaimsMixin:
             me = self._session(db, session)
             row = self._owned(db, session, claim)
             target = self._resolve_name(db, to, me["project_id"])
-            sub = self._norm(scope, None) if scope is not None else (None, None)
-            if scope is not None and not scopes.contains(row["scope_type"], row["scope"], *sub):
+            sub: tuple[str, str] | None = self._norm(scope, None) if scope is not None else None
+            if sub is not None and not scopes.contains(row["scope_type"], row["scope"], *sub):
                 raise CoordError("bad_scope", f"{scopes.display(*sub)} is not inside C{row['claim_id']} "
                                  f"({scopes.display(row['scope_type'], row['scope'])})")
             consent = role in ROLES_BY_CONSENT        # write duties: an offer the grantee accepts or declines
             cid = row["claim_id"]
             existing = db.execute("SELECT accepted FROM claim_roles WHERE claim_id=? AND session_id=? AND role=?",
                                   (cid, target["session_id"], role)).fetchone()
-            where = scopes.display(*sub) if scope is not None else row["scope"]
+            where = scopes.display(*sub) if sub is not None else row["scope"]
             if existing is None:
                 db.execute("INSERT INTO claim_roles(claim_id, session_id, role, granted_by, granted_at, accepted,"
                            " scope_type, scope) VALUES(?,?,?,?,?,?,?,?)",
-                           (cid, target["session_id"], role, session, self.clock(), 0 if consent else 1, *sub))
+                           (cid, target["session_id"], role, session, self.clock(), 0 if consent else 1,
+                            *(sub or (None, None))))
                 if consent:
                     self._notify(db, me, target["session_id"],
                                  f"[C{cid} {where}] {me['display_name']} offers you the {role} role - "
                                  f"coord role accept C{cid} {role} / coord role decline C{cid} {role} \"why\"",
                                  kind="question", claim_id=cid)
-            elif scope is not None:   # re-delegating to the same session: the new sub-scope replaces the old
+            elif sub is not None:   # re-delegating to the same session: the new sub-scope replaces the old
                 db.execute("UPDATE claim_roles SET scope_type=?, scope=? WHERE claim_id=? AND session_id=? AND role=?",
                            (*sub, cid, target["session_id"], role))
             status = "granted" if existing is not None and existing["accepted"] or not consent else "offered"
@@ -274,10 +275,8 @@ class ClaimsMixin:
             me = self._session(db, session)
             paths = set()
             for f in files:
-                try:
+                with contextlib.suppress(CoordError):
                     paths.add(self._norm(f, False)[1])
-                except CoordError:
-                    pass
             released = []
             # Exact-scope claims are how you protect a file while you edit it; the commit is that
             # file's natural release point, so every exact claim on a committed file goes - not only

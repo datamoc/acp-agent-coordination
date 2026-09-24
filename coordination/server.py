@@ -31,11 +31,12 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import cast
 
-from . import state_home
-from . import a2a
+from . import a2a, state_home
 from .net import is_loopback
 from .service import READ_OPS, WRITE_OPS, Coord, CoordError, server_version
 
@@ -109,8 +110,9 @@ def make_handler(coord, oidc: OIDCIntrospector | None, mtls: bool, authority=Non
             self.send_response(code)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
-            if getattr(self, "_renewal", None) and not renewal_in_body:
-                self.send_header("Coord-Certificate", a2a.certificate_header(self._renewal))
+            renewal = getattr(self, "_renewal", None)
+            if renewal and not renewal_in_body:
+                self.send_header("Coord-Certificate", a2a.certificate_header(renewal))
             self.end_headers()
             self.wfile.write(body)
             if log.isEnabledFor(VERBOSE):
@@ -158,7 +160,9 @@ def make_handler(coord, oidc: OIDCIntrospector | None, mtls: bool, authority=Non
             if public_url:
                 return public_url
             scheme = "https" if isinstance(self.connection, ssl.SSLSocket) else "http"
-            return f"{scheme}://{self.headers.get('Host') or '%s:%s' % self.server.server_address[:2]}"
+            addr = cast(tuple[str, int], self.server.server_address)   # AF_INET(6): typeshed's generic
+            host, port = addr[0], addr[1]                              # socket address is broader
+            return f"{scheme}://{self.headers.get('Host') or f'{host}:{port}'}"
 
         def do_GET(self):
             self._start()
@@ -181,7 +185,7 @@ def make_handler(coord, oidc: OIDCIntrospector | None, mtls: bool, authority=Non
             try:
                 after = int(self.headers.get("Last-Event-ID") or (q.get("after") or ["0"])[0])
                 principal, info = self._identity()
-                if info is not None and oidc.project_role(info, project or "default") < PROJECT_ROLES["viewer"]:
+                if info is not None and oidc and oidc.project_role(info, project or "default") < PROJECT_ROLES["viewer"]:
                     raise CoordError("forbidden", f"no viewer role on project {project or 'default'}")
             except ValueError:
                 return self._send(400, {"ok": False, "error": "bad_args", "message": "after must be an event id"})
@@ -224,7 +228,7 @@ def make_handler(coord, oidc: OIDCIntrospector | None, mtls: bool, authority=Non
                     args["principal"] = principal
                 elif args.get("session"):
                     coord.check_principal(args["session"], principal)
-                if info is not None:
+                if info is not None and oidc:
                     project = args.get("project") or (
                         coord.session_project(args["session"]) if args.get("session") else None) or (
                         coord.task_get(args["task"])["project"] if args.get("task") and op.startswith("task_") else None
@@ -238,7 +242,7 @@ def make_handler(coord, oidc: OIDCIntrospector | None, mtls: bool, authority=Non
             try:
                 result = getattr(coord, op)(**args)
             except TypeError as e:
-                raise CoordError("bad_args", str(e))
+                raise CoordError("bad_args", str(e)) from e
             if pusher is not None and op in a2a.TASK_OPS:
                 log.debug("push: notifying webhooks of task %s", result["task"])
                 pusher.notify(result["task"])                # webhooks: accepted / done / cancelled
@@ -267,7 +271,8 @@ def make_handler(coord, oidc: OIDCIntrospector | None, mtls: bool, authority=Non
                 self._send(500, {"ok": False, "error": "internal", "message": repr(e)})
 
         def _a2a(self):
-            send = lambda code, payload: self._send(code, payload, renewal_in_body=False)
+            def send(code, payload):
+                self._send(code, payload, renewal_in_body=False)
             try:
                 rpc = self._body()
             except ValueError as e:
@@ -296,6 +301,8 @@ def _version() -> str:
 
 class _Server(ThreadingHTTPServer):
     daemon_threads = True
+    pusher: "a2a.Pusher"
+    refresh_server_cert: Callable[[], bool]
 
     def handle_error(self, request, client_address):
         if isinstance(sys.exc_info()[1], (BrokenPipeError, ConnectionResetError, ssl.SSLError)):
@@ -306,7 +313,7 @@ class _Server(ThreadingHTTPServer):
 def build_server(coord, host="127.0.0.1", port=1337, tls_cert=None, tls_key=None, client_ca=None,
                  crl=None, oidc: OIDCIntrospector | None = None,
                  authority=None, cert_source=None, push_allow: list[str] | None = None,
-                 public_url: str | None = None) -> ThreadingHTTPServer:
+                 public_url: str | None = None) -> _Server:
     """`authority`: a pki.Authority (mTLS with our management) or None - local and OIDC
     modes never load the PKI code. `cert_source` (certsource.py) renews the server's own
     certificate; with an authority it defaults to the local one."""
@@ -399,7 +406,7 @@ def main(argv=None) -> int:
     authority = None
     source_kind = a.cert_source or ("local" if a.pki else "none")
     if a.pki:
-        from .pki import RENEW_AFTER_DAYS, Authority   # only mTLS with management needs the PKI code
+        from .pki import RENEW_AFTER_DAYS, Authority  # only mTLS with management needs the PKI code
         d = a.pki.resolve()
         authority = Authority(d, a.renew_after_days or RENEW_AFTER_DAYS)
         a.client_ca = a.client_ca or str(d / "ca.crt")
@@ -446,7 +453,7 @@ def main(argv=None) -> int:
     print(f"coord-server on {scheme}://{a.listen}:{a.port}" + (f" ({mode})" if mode else ""), flush=True)
     gui = None
     if a.ui:
-        from .ui import start_ui          # only the UI mode loads the UI code
+        from .ui import start_ui  # only the UI mode loads the UI code
         gui = start_ui(coord, a.ui_port, a.ui_as, a.ui_open)
         print(f"coord UI on {gui['url']} (as ui:{gui['humans'].family}, opened: {gui['opened']})", flush=True)
     try:

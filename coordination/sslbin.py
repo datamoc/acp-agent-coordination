@@ -9,7 +9,7 @@ find its openssl.cnf and some crash outright. Otherwise the one on PATH.
 import os
 import shutil
 import sys
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
 
 
@@ -32,7 +32,7 @@ def _git_openssl() -> Path | None:
     return None
 
 
-@lru_cache(maxsize=None)
+@cache
 def openssl() -> str:
     if os.environ.get("COORD_OPENSSL"):
         return os.environ["COORD_OPENSSL"]

@@ -2,13 +2,12 @@
 
 import uuid
 
-from .core import CoordError, iso, parse_id
-
+from .core import CoordBase, CoordError, iso, parse_id
 
 RESOLVED = ("done", "cancelled")      # a prerequisite in one of these no longer blocks
 
 
-class TasksMixin:
+class TasksMixin(CoordBase):
     # --- the task graph: T3 after T1, T2 ---------------------------------------
     def _deps(self, db, tid: int) -> list[int]:
         return [r[0] for r in db.execute("SELECT after_id FROM task_deps WHERE task_id=? ORDER BY after_id", (tid,))]
@@ -42,6 +41,16 @@ class TasksMixin:
                     seen.add(dep); todo.append(dep)
         return seen
 
+    def _task_orphaned(self, db, t) -> bool:
+        """Neither the assignee nor the creator has a live session - nobody with standing over T{id}
+        is around to close it themselves, so any live session may (a stale/superseded task would
+        otherwise block its dependents forever)."""
+        if t["assigned_to"]:
+            row = db.execute("SELECT * FROM sessions WHERE session_id=?", (t["assigned_to"],)).fetchone()
+            if row is not None and self._live(row):
+                return False
+        return self._live_by_name(db, t["created_by"]) is None
+
     def _unblock_dependents(self, db, me, tid: int) -> None:
         """T{tid} just finished: tell whoever waits on a task that now has nothing left before it."""
         for (dep,) in db.execute("SELECT task_id FROM task_deps WHERE after_id=?", (tid,)).fetchall():
@@ -56,7 +65,7 @@ class TasksMixin:
     def task_link(self, session: str, task: str, after: list[str], remove: bool = False) -> dict:
         """T3 after T1, T2: T3 cannot be accepted until they are done (or cancelled)."""
         with self._tx() as db:
-            me = self._session(db, session)
+            self._session(db, session)
             tid = parse_id("task", task)
             t = db.execute("SELECT * FROM tasks WHERE task_id=?", (tid,)).fetchone()
             if t is None:
@@ -127,12 +136,17 @@ class TasksMixin:
                 if waiting:
                     raise CoordError("blocked", f"T{tid} waits for {', '.join(f'T{x}' for x in waiting)} - "
                                      "you are told when they are done", {"blocked_by": [f"T{x}" for x in waiting]})
+            orphaned = False
             if require_assignee and t["assigned_to"] not in (None, session):
-                raise CoordError("forbidden", f"T{tid} is assigned to {t['assigned_name']}")
+                orphaned = self._task_orphaned(db, t)
+                if not orphaned:
+                    raise CoordError("forbidden", f"T{tid} is assigned to {t['assigned_name']}")
             if status == "accepted" and t["status"] == "offered":
                 creator = self._live_by_name(db, t["created_by"])
                 self._notify(db, me, creator["session_id"] if creator else None,
                              f"[T{tid}] {me['display_name']} accepted: {t['title']}")
+            if orphaned:
+                note = (note or "") + f" (orphaned: {t['assigned_name']} and {t['created_by']} are gone)"
             db.execute("UPDATE tasks SET status=?, assigned_to=COALESCE(assigned_to, ?),"
                        " assigned_name=COALESCE(assigned_name, ?), note=COALESCE(?, note), updated_at=?"
                        " WHERE task_id=?", (status, session, me["display_name"], note, self.clock(), tid))
@@ -149,11 +163,15 @@ class TasksMixin:
             t = db.execute("SELECT * FROM tasks WHERE task_id=?", (tid,)).fetchone()
             if t is None:
                 raise CoordError("missing", f"no task T{tid}")
-            if t["assigned_to"] != session or t["status"] not in ("offered", "accepted"):
+            if t["status"] not in ("offered", "accepted"):
                 raise CoordError("forbidden", f"T{tid} is not offered to or accepted by you ({t['status']})")
+            orphaned = t["assigned_to"] != session and self._task_orphaned(db, t)
+            if t["assigned_to"] != session and not orphaned:
+                raise CoordError("forbidden", f"T{tid} is not offered to or accepted by you ({t['status']})")
+            note = f"declined by {me['display_name']}" + (f" (orphaned: {t['assigned_name']} gone)" if orphaned else "") \
+                + (f": {reason}" if reason else "")
             db.execute("UPDATE tasks SET status='open', assigned_to=NULL, assigned_name=NULL,"
-                       " note=?, updated_at=? WHERE task_id=?",
-                       (f"declined by {me['display_name']}" + (f": {reason}" if reason else ""), self.clock(), tid))
+                       " note=?, updated_at=? WHERE task_id=?", (note, self.clock(), tid))
             creator = self._live_by_name(db, t["created_by"])
             self._notify(db, me, creator["session_id"] if creator else None,
                          f"[T{tid}] {me['display_name']} declined: {t['title']}" + (f" - {reason}" if reason else ""),
@@ -188,8 +206,11 @@ class TasksMixin:
                 raise CoordError("missing", f"no task T{tid}")
             if t["status"] in ("done", "cancelled"):
                 raise CoordError("not_cancelable", f"T{tid} is already {t['status']}")
-            if me["display_name"] != t["created_by"] and t["assigned_to"] != session:
+            mine = me["display_name"] == t["created_by"] or t["assigned_to"] == session
+            if not mine and not self._task_orphaned(db, t):
                 raise CoordError("forbidden", f"only {t['created_by']} or the assignee can cancel T{tid}")
+            if not mine:
+                note = (note or "") + f" (orphaned: {t['assigned_name'] or '-'} and {t['created_by']} are gone)"
             db.execute("UPDATE tasks SET status='cancelled', note=COALESCE(NULLIF(?, ''), note), updated_at=?"
                        " WHERE task_id=?", (note, self.clock(), tid))
             self._event(db, t["project_id"], "task.cancelled", session, "task", tid)

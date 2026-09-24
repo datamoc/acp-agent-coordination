@@ -1,9 +1,9 @@
 """Project memory: versioned, attributed entries."""
 
-from .core import MEMORY_KINDS, CoordError, iso, parse_id
+from .core import MEMORY_KINDS, CoordBase, CoordError, iso, parse_id
 
 
-class MemoryMixin:
+class MemoryMixin(CoordBase):
     def memory_add(self, session: str, kind: str, title: str, content: str, source: str = "",
                    client_id: str | None = None) -> dict:
         if kind not in MEMORY_KINDS:

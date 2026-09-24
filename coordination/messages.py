@@ -1,11 +1,9 @@
 """Messages: post, reply, inbox, threads, resolution, poll."""
 
-import time
-
-from .core import MSG_RECOMMENDED, MSG_MAX, INBOX_DEFAULT, MESSAGE_KINDS, CoordError, iso, parse_id
+from .core import INBOX_DEFAULT, MESSAGE_KINDS, MSG_MAX, MSG_RECOMMENDED, CoordBase, CoordError, iso, parse_id
 
 
-class MessagesMixin:
+class MessagesMixin(CoordBase):
     @staticmethod
     def _msg_dict(r) -> dict:
         d = {"id": r["id"], "from": r["from_name"], "to": r["to_name"], "kind": r["kind"],

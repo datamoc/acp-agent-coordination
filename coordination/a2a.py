@@ -59,9 +59,9 @@ def agent_card(base_url: str, mtls: bool, oidc_url: str | None, version: str) ->
         schemes["oidc"] = {"openIdConnectSecurityScheme": {"openIdConnectUrl": oidc_url,
                                                            "description": "Keycloak bearer token"}}
         requirements.append({"schemes": {"oidc": {"list": []}}})
-    skill = lambda sid, name, desc, tags, ex: {"id": sid, "name": name, "description": desc, "tags": tags,
-                                                "examples": ex, "inputModes": ["application/json"],
-                                                "outputModes": ["application/json"]}
+    def skill(sid, name, desc, tags, ex):
+        return {"id": sid, "name": name, "description": desc, "tags": tags,
+                "examples": ex, "inputModes": ["application/json"], "outputModes": ["application/json"]}
     return {
         "name": "coord",
         "description": "Coordination for concurrent agent sessions: claims on files/dirs, messages, "

@@ -45,7 +45,7 @@ test:linux:
       if [ -n "$CORPORATE_CA_PEM" ]; then
         cp "$CORPORATE_CA_PEM" /usr/local/share/ca-certificates/corporate-ca.crt && update-ca-certificates >/dev/null
       fi
-    - uv sync --locked
+    - uv sync --locked --group dev
     - |
       if ! command -v node >/dev/null; then
         apt-get install -y -qq --no-install-recommends nodejs npm >/dev/null
@@ -53,6 +53,8 @@ test:linux:
   script:
     - uv run tools/gen_schema.py --check
     - uv run tools/agent_plugins.py gen --check
+    - uv run ruff check coordination tools
+    - uv run pyright coordination tools
     - uv run test_coord.py
     - cd clients/ts && npm ci && npm test
     - npm run bundle-plugin && git diff --exit-code -- ../../plugins/coord/client

@@ -12,9 +12,9 @@ import re
 import sqlite3
 import time
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-
+from typing import TYPE_CHECKING
 
 SESSION_TTL = 1800
 CLAIM_TTL = 7200
@@ -182,7 +182,7 @@ class CoordError(Exception):
 def iso(ts: float | None) -> str | None:
     if ts is None:
         return None
-    return datetime.fromtimestamp(ts, timezone.utc).isoformat(timespec="seconds")
+    return datetime.fromtimestamp(ts, UTC).isoformat(timespec="seconds")
 
 
 def server_version() -> str:
@@ -209,9 +209,9 @@ def parse_when(value: str, now: float) -> float:
         return now + float(m.group(1)) * {"s": 1, "m": 60, "h": 3600, "d": 86400}[m.group(2)]
     try:
         t = datetime.fromisoformat(v.replace("Z", "+00:00"))
-    except ValueError:
-        raise CoordError("bad_deadline", f"deadline {v!r}: use 90m, 48h, 3d or an ISO date like 2026-10-01T12:00Z")
-    return (t if t.tzinfo else t.replace(tzinfo=timezone.utc)).timestamp()
+    except ValueError as e:
+        raise CoordError("bad_deadline", f"deadline {v!r}: use 90m, 48h, 3d or an ISO date like 2026-10-01T12:00Z") from e
+    return (t if t.tzinfo else t.replace(tzinfo=UTC)).timestamp()
 
 
 def parse_id(kind: str, value) -> int:
@@ -380,3 +380,20 @@ class CoordBase:
 
     _LIVE_OWNER = (" AND owner_session_id IN (SELECT session_id FROM sessions WHERE ended_at IS NULL"
                    " AND heartbeat_at>=?)")
+
+    if TYPE_CHECKING:
+        # Every mixin combines into Coord (service.py) and calls one another's methods across mixin
+        # boundaries; these declarations let pyright see that surface from any single mixin file
+        # without a real cross-import. Never executed: at runtime the real implementations (defined
+        # on the mixins themselves) are what's actually called.
+        def post(self, *a, **k) -> dict: ...
+        def locks(self, *a, **k) -> list: ...
+        def tasks(self, *a, **k) -> list: ...
+        def discussions(self, *a, **k) -> list: ...
+        def routines(self, *a, **k) -> list: ...
+        def wake(self, *a, **k) -> dict: ...
+        def memory(self, *a, **k) -> list: ...
+        def presence(self, *a, **k) -> list: ...
+        def _norm(self, *a, **k) -> tuple: ...
+        def _routines_on_commit(self, *a, **k) -> list: ...
+        def _doc_insert(self, *a, **k) -> int: ...

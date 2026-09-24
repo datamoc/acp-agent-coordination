@@ -387,7 +387,11 @@ unassigned, reason kept). Creator and assignee get direct messages at each
 step; offers show in the assignee's `poll` and `context`. `task done T3
 "note"`, `task cancel T3` (creator or assignee), `task show T3`, `tasks
 --status open|offered|accepted|done|cancelled`; `task notify T3 --url
-https://...` registers an A2A push webhook (below).
+https://...` registers an A2A push webhook (below). Orphaned (both the
+creator's and the assignee's sessions gone past their TTL, not just briefly
+offline): decline/done/cancel open up to any live session, so a stale or
+superseded task does not block its dependents forever - the note records it
+was closed this way.
 
 **Consensus — computed, never declared.** `discuss "topic" [--with rev-01,ops-01]
 [--rule unanimous|majority|no-objection] [--quorum N] [--deadline 48h|<ISO date>]`
@@ -629,9 +633,13 @@ from 0.3: keep them on a branch (`git branch acp-0.2-local`), then
 ## Development
 
 ```sh
+uv sync --group dev                   # adds ruff and pyright (dev-only: the server itself stays stdlib-only)
 uv run tools/gen_schema.py            # after changing an op signature (CI checks with --check)
 uv run tools/agent_plugins.py gen     # after editing plugins/coord/claude-commands (CI checks with --check)
+uv run ruff check coordination tools  # lint (T25); pyproject.toml's [tool.ruff] has the exceptions and why
+uv run pyright coordination tools     # types (T25); [tool.pyright] checks every supported platform's stdlib
 uv run test_coord.py                  # server, PKI, renewal, OIDC, cert sources, A2A binding
-cd clients/ts && npm test             # TS client against the real Python server (+ @a2a-js/sdk interop)
+cd clients/ts && npm test             # TS client against the real Python server (+ @a2a-js/sdk interop);
+                                       # tsc --strict runs as part of the build this invokes
 npm run bundle-plugin                 # refresh plugins/coord/client (CI fails if stale)
 ```

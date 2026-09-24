@@ -6,7 +6,7 @@ Nothing runs server-side: like everything else here, it waits for an agent to po
 import json
 import re
 
-from .core import ROUTINE_OUTCOMES, ROUTINE_STATUSES, CoordError, iso, parse_id
+from .core import ROUTINE_OUTCOMES, ROUTINE_STATUSES, CoordBase, CoordError, iso, parse_id
 
 MIN_EVERY = 300          # 5 minutes: a routine is not a busy loop
 RUN_LEASE = 3600         # a run left unfinished frees itself after this
@@ -23,7 +23,7 @@ def parse_every(value: str) -> float:
     return seconds
 
 
-class RoutinesMixin:
+class RoutinesMixin(CoordBase):
     def routine_create(self, session: str, title: str, instructions: str = "", every: str | None = None,
                        on_commit: bool = False, paths: list[str] | None = None,
                        client_id: str | None = None) -> dict:

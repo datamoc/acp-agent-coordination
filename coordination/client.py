@@ -26,7 +26,7 @@ class RemoteCoord:
         self.url = url.rstrip("/") + "/call"
         self.token, self.cert, self.key = token, cert, key
         host = urllib.parse.urlsplit(self.url).hostname or ""
-        handlers = [urllib.request.ProxyHandler({})] if is_loopback(host) else []
+        handlers: list[urllib.request.BaseHandler] = [urllib.request.ProxyHandler({})] if is_loopback(host) else []
         self.ctx = None
         if self.url.startswith("https"):
             self.ctx = ssl.create_default_context(cafile=ca)
@@ -55,7 +55,8 @@ class RemoteCoord:
             Path(tmp).unlink(missing_ok=True)
             print(f"coord: could not install the renewed certificate: {e}", file=sys.stderr)
             return
-        self.ctx.load_cert_chain(self.cert, self.key)
+        if self.ctx:
+            self.ctx.load_cert_chain(self.cert, self.key)
         print(f"coord: certificate renewed by the server ({path})", file=sys.stderr)
 
     def __getattr__(self, op):

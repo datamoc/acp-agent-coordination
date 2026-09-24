@@ -18,10 +18,34 @@ Each topic lives in its own module; `Coord` combines them:
 
 from .claims import ClaimsMixin
 from .consensus import ConsensusMixin
-from .core import (CLAIM_TTL, CONSENSUS_RULES, DEFAULT_QUORUM, DOC_KINDS, INBOX_DEFAULT, MEMORY_KINDS,  # noqa: F401
-                   FEATURES, MESSAGE_KINDS, MSG_MAX, MSG_RECOMMENDED, NEWS, PREFIX, ROLES, ROUTINE_OUTCOMES,
-                   ROUTINE_STATUSES, SCHEMA, SERVER_NAME, SESSION_TTL, STANCES,
-                   TASK_STATUSES, CoordBase, CoordError, iso, parse_id, server_version, version_key)
+from .core import (  # noqa: F401
+    CLAIM_TTL,
+    CONSENSUS_RULES,
+    DEFAULT_QUORUM,
+    DOC_KINDS,
+    FEATURES,
+    INBOX_DEFAULT,
+    MEMORY_KINDS,
+    MESSAGE_KINDS,
+    MSG_MAX,
+    MSG_RECOMMENDED,
+    NEWS,
+    PREFIX,
+    ROLES,
+    ROUTINE_OUTCOMES,
+    ROUTINE_STATUSES,
+    SCHEMA,
+    SERVER_NAME,
+    SESSION_TTL,
+    STANCES,
+    TASK_STATUSES,
+    CoordBase,
+    CoordError,
+    iso,
+    parse_id,
+    server_version,
+    version_key,
+)
 from .documents import DocumentsMixin
 from .memory import MemoryMixin
 from .messages import MessagesMixin

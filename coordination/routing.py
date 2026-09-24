@@ -3,10 +3,10 @@
 import json
 from datetime import datetime
 
-from .core import CLAIM_RENEW_MARGIN, SESSION_TTL, WAKE_KEEPALIVE, WAKE_UNANSWERED, iso
+from .core import CLAIM_RENEW_MARGIN, WAKE_KEEPALIVE, WAKE_UNANSWERED, CoordBase, iso
 
 
-class RoutingMixin:
+class RoutingMixin(CoordBase):
     def profile_set(self, session: str, provider: str | None = None, model_id: str | None = None,
                     model_family: str | None = None, category: str | None = None,
                     reasoning_level: str | None = None, capabilities: list[str] | None = None) -> dict:
@@ -129,7 +129,8 @@ class RoutingMixin:
 
     def events(self, after: int = 0, project: str | None = None, limit: int = 100) -> list[dict]:
         with self._read() as db:
-            q, a = "SELECT * FROM events WHERE event_id>?", [int(after)]
+            q: str = "SELECT * FROM events WHERE event_id>?"
+            a: list = [int(after)]
             if project:
                 q += " AND project_id=?"; a.append(project)
             rows = db.execute(q + f" ORDER BY event_id LIMIT {int(limit)}", a).fetchall()

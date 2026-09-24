@@ -17,6 +17,27 @@ gitlab = [
     "python-gitlab>=8.5.0",
 ]
 
+[dependency-groups]
+dev = ["ruff>=0.8", "pyright>=1.1.390"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = [
+    "E501",    # long lines: this codebase wraps by hand, not at a fixed column
+    "E702",    # `a; b` on one line: a deliberate, pervasive style here, not an accident
+    "SIM112",  # os.environ.get("ProgramFiles(x86)") etc: the real Windows env var names, not ALL_CAPS
+]
+
+[tool.pyright]
+include = ["coordination", "tools"]
+pythonVersion = "3.11"
+pythonPlatform = "All"   # this code runs on Linux, Windows and macOS (T24): check every platform's stdlib
+typeCheckingMode = "basic"
+
 [build-system]
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"

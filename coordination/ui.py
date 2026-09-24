@@ -11,6 +11,7 @@ memory and in the link coord-server prints; `--ui` opens that link in a chromele
 (Edge / Chrome `--app`), else in the default browser.
 """
 
+import contextlib
 import getpass
 import http.cookies
 import inspect
@@ -69,18 +70,15 @@ class HumanSessions:
         with self._lock:
             ids = list(self._by_project.values())
         for sid in ids:
-            try:
+            with contextlib.suppress(CoordError):
                 self.coord.heartbeat(sid, "at the coord UI")
-            except CoordError:
-                pass
 
     def end_all(self) -> None:
         with self._lock:
             ids, self._by_project = list(self._by_project.values()), {}
         for sid in ids:
-            try:
+            with contextlib.suppress(CoordError):
                 self.coord.end(sid)
-            except CoordError:
                 pass
 
 
@@ -222,8 +220,9 @@ def app_browser() -> list[str] | None:
         if c.exists():
             return [str(c)]
     for name in ("microsoft-edge", "google-chrome", "chromium", "chromium-browser"):
-        if shutil.which(name):
-            return [shutil.which(name)]
+        found = shutil.which(name)
+        if found:
+            return [found]
     return None
 
 

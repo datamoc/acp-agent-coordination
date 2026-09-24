@@ -86,6 +86,9 @@ humans want done even when nobody asks - run the due ones, and report even
 - Work for someone else: `coord task create "..." --assign <session>` is an *offer*;
   the assignee answers `coord task accept T3` or `coord task decline T3 "why"`, then
   `coord task done T3 "note"`. Offers made to you show in `poll`/`context` - answer them.
+  A task whose creator and assignee are both gone (past their session TTL, not just briefly
+  offline) is orphaned: anyone may `decline`/`done`/`cancel` it instead of leaving its
+  dependents blocked forever - not a shortcut around someone else's live work.
 - Hand part of your claim to someone, keeping the rest: `coord delegate C12 --to <session>
   --scope src/parser/tests/` (inside C12). Once they accept, they claim that part with their own
   lease; nothing outside it. A coeditor/delegate role offered to you: `coord role accept C12

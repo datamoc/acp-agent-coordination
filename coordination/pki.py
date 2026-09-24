@@ -21,6 +21,7 @@ import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Literal, overload
 
 from . import state_home
 from .sslbin import OpensslMissing, crashed, openssl
@@ -78,7 +79,11 @@ IP.1 = 127.0.0.1
 _thread_lock = threading.Lock()
 
 
-def _run(*args, text=False) -> str | bytes:
+@overload
+def _run(*args, text: Literal[True]) -> str: ...
+@overload
+def _run(*args, text: Literal[False] = False) -> bytes: ...
+def _run(*args, text: bool = False) -> str | bytes:
     return subprocess.run([openssl(), *args], check=True, capture_output=True, text=text).stdout
 
 
@@ -90,6 +95,7 @@ def _locked(d: Path):
         if fcntl:
             fcntl.flock(f, fcntl.LOCK_EX)
         else:                                 # msvcrt.LK_LOCK gives up after ~10 s: keep waiting
+            assert msvcrt is not None         # the fcntl/msvcrt import is one or the other, never neither
             f.seek(0)
             while True:
                 try:
@@ -103,6 +109,7 @@ def _locked(d: Path):
             if fcntl:
                 fcntl.flock(f, fcntl.LOCK_UN)
             else:
+                assert msvcrt is not None
                 f.seek(0)
                 msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
 
@@ -110,7 +117,7 @@ def _locked(d: Path):
 def _ts(openssl_date: str) -> float:
     """'Sep 23 08:57:42 2026 GMT' -> epoch seconds."""
     return dt.datetime.strptime(openssl_date.strip(), "%b %d %H:%M:%S %Y %Z").replace(
-        tzinfo=dt.timezone.utc).timestamp()
+        tzinfo=dt.UTC).timestamp()
 
 
 def _index(d: Path) -> list[list[str]]:
@@ -323,7 +330,7 @@ class Authority:
             serial = info.split("serial=")[1].split()[0]
             cn = info.split("commonName")[1].split("=", 1)[1].splitlines()[0].strip()
             start = dt.datetime.strptime(info.split("notBefore=")[1].strip(), "%b %d %H:%M:%S %Y %Z") \
-                .replace(tzinfo=dt.timezone.utc)
+                .replace(tzinfo=dt.UTC)
             pub = _run("x509", "-in", str(Path(tmp) / "cur.pem"), "-noout", "-pubkey", text=True)
             if self.status(serial) != "V":
                 raise PermissionError(f"certificate {serial} of {cn} is not valid")
@@ -407,7 +414,6 @@ def default_identity() -> str | None:
             if line.startswith("COORD_IDENTITY="):
                 return line.partition("=")[2].strip()
     return None
-    return r
 
 
 def listing(d: str | Path) -> list[dict]:

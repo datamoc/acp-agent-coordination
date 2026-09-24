@@ -39,7 +39,10 @@ def commands() -> dict[str, tuple[str, str]]:
     out = {}
     for f in sorted((PLUGIN / "claude-commands").glob("*.md")):
         m = re.match(r"---\n(.*?)\n---\n\n(.*)", f.read_text(encoding="utf-8"), re.S)
-        desc = re.search(r"^description: (.*)$", m.group(1), re.M).group(1).strip()
+        assert m, f"{f.name}: expected a --- frontmatter --- block followed by the body"
+        desc_m = re.search(r"^description: (.*)$", m.group(1), re.M)
+        assert desc_m, f"{f.name}: frontmatter has no description: line"
+        desc = desc_m.group(1).strip()
         body = m.group(2).strip()
         assert RUN_LINE.search(body), f"{f.name}: the 'Run coord with ...' sentence changed, update RUN_LINE"
         out[f.stem] = (desc, body)

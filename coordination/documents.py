@@ -1,10 +1,10 @@
 """Collaborative documents with revisions and optimistic concurrency."""
 
 from . import textpatch
-from .core import DOC_KINDS, CoordError, iso, parse_id
+from .core import DOC_KINDS, CoordBase, CoordError, iso, parse_id
 
 
-class DocumentsMixin:
+class DocumentsMixin(CoordBase):
     def _doc_insert(self, db, me, title, kind, content, message="created") -> int:
         now = self.clock()
         did = db.execute("INSERT INTO documents(project_id, title, kind, created_by, revision, content,"
@@ -99,7 +99,7 @@ class DocumentsMixin:
                 intended, _ = textpatch.apply(b["content"], hunks)
             except textpatch.PatchError as e:
                 raise CoordError("patch_invalid", f"the patch does not apply to DOC{did} revision {base}: {e}",
-                                 {"failed_hunks": e.failed})
+                                 {"failed_hunks": e.failed}) from e
             merged = d["revision"] != base
             if not merged:
                 content, offsets = intended, [0] * len(hunks)
@@ -112,7 +112,7 @@ class DocumentsMixin:
                         f"DOC{did} is at revision {d['revision']}, your patch was made on {base} and overlaps "
                         f"the changes since ({e}); rebase on revision {d['revision']} and retry",
                         {"current_revision": d["revision"], "current_content": d["content"],
-                         "failed_hunks": [hunks[i].header for i in e.failed]})
+                         "failed_hunks": [hunks[i].header for i in e.failed]}) from e
             if content == d["content"]:
                 raise CoordError("no_change", f"the patch leaves DOC{did} unchanged")
             note = message or f"patch ({len(hunks)} hunk{'s' if len(hunks) != 1 else ''})"

@@ -31,7 +31,7 @@ RENEW_AFTER_DAYS = 15   # or 2/3 of the lifetime, whichever comes first (24 h st
 def cert_dates(path: str | Path) -> tuple[float, float]:
     """(notBefore, notAfter) as epoch seconds, stdlib only (openssl CLI as a fallback)."""
     try:
-        d = ssl._ssl._test_decode_cert(str(path))
+        d = ssl._ssl._test_decode_cert(str(path))  # pyright: ignore[reportAttributeAccessIssue] - undocumented CPython internal, guarded below
         return ssl.cert_time_to_seconds(d["notBefore"]), ssl.cert_time_to_seconds(d["notAfter"])
     except (AttributeError, ssl.SSLError):
         out = subprocess.run([openssl(), "x509", "-in", str(path), "-noout", "-startdate", "-enddate"],
