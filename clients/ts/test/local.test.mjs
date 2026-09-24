@@ -138,3 +138,15 @@ test("delegation of a sub-scope, a reservation and the wake hint through the CLI
   const poll = coord(["poll"], { env: { ...env, COORD_SESSION: a }, cwd: dir }).out;
   assert.match(poll, /^wake: in \d+ min \(.+\) - /m);
 });
+
+test("a session is user + CLI + model, and whoami resumes it", () => {
+  const dir = tmp();
+  const env = localEnv(join(dir, "u.db"), { COORD_USER: "michel" });
+  const who = (...extra) => coord(["--json", "whoami", "opencode", ...extra], { env, cwd: dir }).json;
+  const a = who("--model", "MiMo");
+  assert.equal(a.name, "michel/opencode/mimo");
+  const b = who("--model", "mimo");
+  assert.equal(b.session_id, a.session_id);
+  assert.equal(b.resumed, true);
+  assert.equal(coord(["--json", "whoami", "opencode"], { env: { ...env, COORD_MODEL: "qwen3" }, cwd: dir }).json.name, "michel/opencode/qwen3");
+});

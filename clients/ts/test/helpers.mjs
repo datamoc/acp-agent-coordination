@@ -16,7 +16,8 @@ export const tmp = (name = "coordts-") => mkdtempSync(join(tmpdir(), name));
 /** A clean env: nothing from the developer's own coord config or proxies leaks into tests. */
 export function cleanEnv(extra = {}) {
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("COORD_")));
-  return { ...env, COORD_CONFIG: join(tmpdir(), "coord-no-such-config"), PYTHONPATH: REPO, NO_PROXY: "localhost,127.0.0.1", ...extra };
+  return { ...env, COORD_CONFIG: join(tmpdir(), "coord-no-such-config"), PYTHONPATH: REPO, NO_PROXY: "localhost,127.0.0.1",
+           COORD_USER: "", ...extra };      // COORD_USER="": the family-NN names these tests expect
 }
 
 export const py = (args, env = cleanEnv(), input) =>

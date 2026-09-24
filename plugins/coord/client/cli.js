@@ -14,6 +14,7 @@ import { CoordClient, tokenSource, transportFromEnv } from "./client.js";
 import { ConfigError, loadConfig } from "./config.js";
 import { CoordError } from "./errors.js";
 import { unifiedDiff } from "./diff.js";
+import { userInfo } from "node:os";
 import { fmtEvent, human } from "./format.js";
 import { pollEvents } from "./transport.js";
 import { detectProject, git, rel, repoRoot } from "./git.js";
@@ -27,7 +28,8 @@ const i = (flag, extra = {}) => ({ flag, kind: "int", ...extra });
 const b = (flag) => ({ flag, kind: "bool", default: false });
 const kind = (def) => s("--kind", { default: def, choices: K.message_kinds });
 const COMMANDS = {
-    whoami: { help: "take a session name: <family>-NN", pos: [{ name: "family" }], opts: [s("--project")] },
+    whoami: { help: "take (or resume) your session: user/family/model, e.g. michel/claude/sonnet",
+        pos: [{ name: "family" }], opts: [s("--model"), s("--user"), s("--project")] },
     heartbeat: { pos: [{ name: "status", nargs: "?", default: "" }] },
     end: { help: "end this session (its claims lapse)" },
     login: { help: "SSO device login (Keycloak): sign in once in a browser; tokens refresh by themselves" },
@@ -235,6 +237,17 @@ function readContent(a) {
     return readFileSync(0, "utf8"); // stdin
 }
 const uuid = () => randomUUID();
+/** The user part of a session (michel/claude/sonnet): COORD_USER, else the OS user; COORD_USER="" drops it. */
+function sessionUser() {
+    if (process.env.COORD_USER !== undefined)
+        return process.env.COORD_USER || null;
+    try {
+        return userInfo().username;
+    }
+    catch {
+        return null;
+    }
+}
 const vkey = (v) => v.split(".").map((x) => parseInt(x, 10) || 0);
 /** A server newer than this client has features with no command here; an older one lacks newer commands. */
 export function versionSkew(server, client = CLIENT_VERSION) {
@@ -255,7 +268,8 @@ export async function run(path, a, c) {
     const cmd = path[0];
     switch (cmd) {
         case "whoami": {
-            const r = await call("whoami", { family: a.family, project: a.project || detectProject(), client_id: uuid() });
+            const r = await call("whoami", { family: a.family, project: a.project || detectProject(), client_id: uuid(),
+                user: a.user ?? sessionUser(), model: a.model || process.env.COORD_MODEL || null });
             // .coord-session is shared by every session in this checkout: never overwrite one that still
             // belongs to a live session, or that session would silently start acting as this one.
             let old = process.env.COORD_SESSION ? null : loadSession();

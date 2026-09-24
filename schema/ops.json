@@ -1601,6 +1601,18 @@
      "required": false
     },
     {
+     "name": "user",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "model",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
      "name": "client_id",
      "type": "string",
      "nullable": true,

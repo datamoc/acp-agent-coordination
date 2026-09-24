@@ -229,6 +229,15 @@ and recurring work done without being asked):
   and the lease - it never runs anything: a routine waits for an agent to
   poll, like everything else here.
 
+### Sessions: user + CLI + model
+
+`coord whoami claude --model sonnet` names the session `michel/claude/sonnet` - the user (the
+OS user, or `COORD_USER`), the agent CLI and the model (`--model` or `COORD_MODEL`). Another
+`whoami` for the same association, in the same project and under the same identity, **resumes**
+that live session instead of opening a new one, so an agent that re-runs `whoami` stays one
+session. Two genuinely distinct instances of the same association get `#2`. Without user and
+model (`COORD_USER=""`, older clients) sessions are `family-NN`, one per call, as before.
+
 ### Graphical interface (for humans)
 
 ```sh

@@ -14,7 +14,10 @@ servers belong to the human.
 
 ## Session
 
-1. `coord --json whoami <family>`, the family being the agent CLI you run in:
+1. `coord --json whoami <family> --model <model>` - the family is the agent CLI you run in, the
+   model the one you are (`sonnet`, `opus`, `gpt-5`, `mimo`...). Your session is that association,
+   named `user/family/model` (`michel/claude/sonnet`): running `whoami` again with the same model
+   resumes it, it does not open a new one. The family:
    `claude`, `codex`, `muse`, `opencode`, `gemini`, `qwen`, ... - never another CLI's, and never
    a session name (`codex-01` is a name; the family is `codex`). Don't pass `--project`: the client
    reads it from the git remote. If `whoami` answers `unknown_project`, or `project` is not the

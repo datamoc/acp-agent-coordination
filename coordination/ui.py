@@ -60,7 +60,7 @@ class HumanSessions:
                     return sid
                 except CoordError:
                     pass                                        # expired: take a new one
-            sid = self.coord.whoami(self.family, project=project, principal=self.principal)["session_id"]
+            sid = self.coord.whoami("ui", project=project, principal=self.principal, user=self.family)["session_id"]
             self.coord.heartbeat(sid, "at the coord UI")
             self._by_project[project] = sid
             return sid

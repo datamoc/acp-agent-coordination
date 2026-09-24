@@ -611,6 +611,56 @@ def objections_reservations_and_superseding():
 
 
 @check
+def consensus_survives_restarts_and_decides_several_proposals():
+    """D1 on mwg-pixel-dungeon: a strategy and two routines, all supported, never recorded - a restarted
+    participant's stance did not count, nobody was told, and decide took one proposal only."""
+    c, clock = fresh()
+    host = c.whoami("claude")["session_id"]
+    op = c.whoami("opencode")["session_id"]; cx = c.whoami("codex")["session_id"]
+    d = c.discuss(host, "strategy and routines", participants=["opencode-01", "codex-01"], rule="unanimous")["discussion"]
+    ps = [c.propose(cx, d, body)["proposal"] for body in ("Strategy: close real scope", "Routine: hourly pin check",
+                                                         "Routine: audit each commit")]
+    c.end(op)                                                            # opencode's session dies...
+    back = c.whoami("opencode")                                          # ...and comes back (a new session)
+    op2 = back["session_id"]
+    assert op2 != op
+    for p in ps[:2]:
+        c.react(op2, p, "support")                                       # counts for opencode-01 (same identity)
+    detail = c.discussion(d)["proposals"][0]["consensus"]
+    x = next(q for q in detail["participants"] if q["name"] == "opencode-01")
+    assert x["stance"] == "support" and x["by"] == back["name"] and detail["met"]
+    told = [m["body"] for m in c.inbox(cx, limit=None) if m["kind"] == "decision"]
+    assert any(f"[{ps[0]} on {d}] has consensus" in b for b in told)     # the author is told what to do next
+    raises("no_consensus", c.decide, host, d, "all three", proposal=",".join(ps))   # P3 has no stance yet
+    c.react(op2, ps[2], "support")
+    out = c.decide(host, d, "strategy + 2 routines", proposal=",".join(ps))
+    assert out["consensus"] and [q["status"] for q in c.discussion(d)["proposals"]] == ["accepted"] * 3
+    assert f"accepted proposals: {', '.join(ps)}" in c.doc_show(out["document"])["content"]
+
+
+@check
+def a_session_is_user_cli_and_model():
+    """michel/opencode/mimo: a whoami for the same association resumes its live session instead of opening
+    opencode-18; a different model or user is another session; a dead one is replaced under the same name."""
+    c, clock = fresh()
+    a = c.whoami("opencode", project="p", principal="mtls:opencode", user="Michel", model="MiMo")
+    assert a["name"] == "michel/opencode/mimo" and not a.get("resumed")
+    again = c.whoami("opencode", project="p", principal="mtls:opencode", user="michel", model="mimo")
+    assert again["session_id"] == a["session_id"] and again["resumed"]                 # no new session
+    other = c.whoami("opencode", project="p", principal="mtls:opencode", user="michel", model="qwen3")
+    assert other["name"] == "michel/opencode/qwen3" and other["session_id"] != a["session_id"]
+    assert c.whoami("claude", project="p", user="michel", model="sonnet")["name"] == "michel/claude/sonnet"
+    twin = c.whoami("opencode", project="p", principal="mtls:other", user="michel", model="mimo")
+    assert twin["name"] == "michel/opencode/mimo#2"                                    # same name, other identity
+    assert len([s for s in c.presence("p") if s["family"] == "opencode"]) == 3
+    assert {s["name"]: s["model"] for s in c.presence("p")}["michel/claude/sonnet"] == "sonnet"
+    c.end(a["session_id"])
+    fresh_one = c.whoami("opencode", project="p", principal="mtls:opencode", user="michel", model="mimo")
+    assert fresh_one["session_id"] != a["session_id"] and fresh_one["name"] == "michel/opencode/mimo"
+    assert c.whoami("codex", project="p")["name"] == "codex-01"                         # without user/model: as before
+
+
+@check
 def delegate_a_sub_scope_of_a_claim():
     c, _ = fresh()
     a = c.whoami("claude")["session_id"]; b = c.whoami("codex")["session_id"]
@@ -800,7 +850,7 @@ def ui_guards_and_calls():
     code, _, out = req("/api/call", "POST", call, Cookie=cookie, Origin=base, **{"Content-Type": ctype})
     assert code == 200 and json.loads(out)["ok"], out
     last = c.inbox(project="p", limit=None)[-1]
-    assert last["body"] == "from the UI" and last["from"] == "Michel-W-01"
+    assert last["body"] == "from the UI" and last["from"] == "michel-w/ui"
     bad = json.dumps({"op": "whoami", "args": {"family": "x"}}).encode()          # the UI never picks identities
     assert json.loads(req("/api/call", "POST", bad, Cookie=cookie, Origin=base, **{"Content-Type": ctype})[2])["error"] == "bad_op"
     state = json.loads(req("/api/state", Cookie=cookie)[2])["result"]

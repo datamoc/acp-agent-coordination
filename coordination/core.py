@@ -54,6 +54,9 @@ NEWS = {
     "0.8.1": "the coord logo: favicon and header in the UI, on the site and in the README",
     "0.8.2": "the project comes from .git/config when a sandbox git refuses the checkout; whoami refuses "
              "session names as families and bare project names; coord-db merge-project",
+    "0.9.0": "a session is user + CLI + model (michel/claude/sonnet) and whoami resumes it; consensus: a "
+             "restarted agent keeps its voice, authors are told when a proposal has consensus, decide takes "
+             "P1,P2,P3",
 }
 SERVER_NAME = "coord-server"   # sender of the server's own messages (upgrade notices)
 
@@ -65,7 +68,7 @@ CREATE TABLE IF NOT EXISTS sessions(
     session_id TEXT PRIMARY KEY, display_name TEXT NOT NULL, family TEXT NOT NULL,
     generation INTEGER NOT NULL, project_id TEXT NOT NULL, principal TEXT,
     status TEXT NOT NULL DEFAULT '', started_at REAL NOT NULL,
-    heartbeat_at REAL NOT NULL, ended_at REAL, cursor INTEGER NOT NULL DEFAULT 0);
+    heartbeat_at REAL NOT NULL, ended_at REAL, cursor INTEGER NOT NULL DEFAULT 0, user TEXT, model TEXT);
 CREATE INDEX IF NOT EXISTS ix_sessions_name ON sessions(display_name);
 CREATE TABLE IF NOT EXISTS messages(
     id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL,
@@ -316,6 +319,8 @@ class CoordBase:
         ("claim_roles", "scope_type", "TEXT"),                       # a delegate's sub-scope (NULL: the whole claim)
         ("claim_roles", "scope", "TEXT"),
         ("proposals", "supersedes_id", "INTEGER"),
+        ("sessions", "user", "TEXT"),                                # the association user + CLI + model
+        ("sessions", "model", "TEXT"),
     )
 
     @classmethod
