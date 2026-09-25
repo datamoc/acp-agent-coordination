@@ -568,7 +568,10 @@ def older_databases_still_open():
         assert p.returncode == 0, f"{tag}: seed failed\n{p.stdout}\n{p.stderr}"
         loaded = next((ln.split("MODULE:", 1)[1].strip() for ln in p.stdout.splitlines()
                        if ln.startswith("MODULE:")), "")
-        assert loaded.startswith(str(dest)), f"{tag}: seeded with {loaded}, not {dest}"
+        # macOS puts the realpath in sys.path[0], so /var/folders/... and /private/var/folders/...
+        # are the same directory - compare what is resolved on both sides, not the strings.
+        assert loaded and Path(loaded).resolve().is_relative_to(Path(dest).resolve()), \
+            f"{tag}: seeded with {loaded or 'nothing'}, not {dest}"
 
         c = Coord(str(db))                                    # opens and migrates, current code
         titles = [t["title"] for t in c.tasks(project=project)]
