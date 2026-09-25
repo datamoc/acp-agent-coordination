@@ -688,6 +688,38 @@ def milestones_criteria_targets_and_timeline():
 
 
 @check
+def milestone_projection_says_its_assumptions_or_nothing():
+    """A forecast only with enough history; P50/P85 from the observed pace, bounded by the critical chain."""
+    c, clock = fresh()
+    s = c.whoami("ui", user="alice", human=True)["session_id"]
+    a = c.whoami("claude")["session_id"]
+    left = [c.task_create(s, f"left {i}")["task"] for i in range(6)]
+    c.task_link(s, left[1], [left[0]]); c.task_link(s, left[2], [left[1]])      # a chain of 3
+    ms = c.milestone_create(s, "Playable", ["a full game"], target="10d", after=left)["milestone"]
+    pr = c.milestones(session=s)[0]["projection"]
+    assert pr["available"] is False and any("task(s) done" in w for w in pr["why"])   # no history: no invented date
+    def advance(seconds):                                                     # sessions stay alive meanwhile
+        while seconds > 0:
+            step = min(seconds, 1500)
+            clock.t += step; seconds -= step
+            c.heartbeat(s); c.heartbeat(a)
+    for day in range(8):                                                      # 8 days, 2 tasks done a day
+        for _ in range(2):
+            t = c.task_create(a, f"past work {day}")["task"]
+            c.task_accept(a, t)
+            advance(3600 * 6)
+            c.task_done(a, t)
+        advance(86400 - 2 * 3600 * 6)
+    pr = c.milestones(session=s)[0]["projection"]
+    assert pr["available"] and pr["remaining"] == 6 and pr["basis"]["done"] == 16
+    assert pr["basis"]["critical_chain"] == 3 and pr["basis"]["median_cycle_days"] == 0.25
+    assert pr["p50"] <= pr["p85"] and pr["spread_days"] >= 0 and len(pr["assumptions"]) >= 4
+    assert 0 <= pr["target_chance"] <= 1 and pr["target_runs_met"].endswith("/1000")
+    assert c.milestones(session=s)[0]["projection"] == pr                      # seeded: same data, same answer
+    assert "projection" in c.task_get(ms, session=s)
+
+
+@check
 def resource_claims_beyond_files():
     c, _ = fresh()
     a = c.whoami("claude")["session_id"]; b = c.whoami("codex")["session_id"]

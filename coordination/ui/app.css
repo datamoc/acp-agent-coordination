@@ -139,3 +139,5 @@ button.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
 .graph .edge.context { stroke-dasharray: 1 4; opacity: .5; }
 i.st.milestone { border-color: var(--ink); border-width: 2.5px; border-radius: 1px; }
 i.st.foreign { border-color: var(--q); border-style: dotted; }
+.proj-line summary { cursor: pointer; }
+.proj-line ul { margin: 2px 0 4px 16px; padding: 0; }

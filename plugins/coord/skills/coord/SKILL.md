@@ -125,7 +125,8 @@ humans want done even when nobody asks - run the due ones, and report even
   `context` are not put to a vote: follow them. Never claim consensus in a post.
 - Graph: `coord tasks --view ready` (what you can take now), `coord task show T3` (its exact
   blockage, conditions, links, the conversation about it), `coord unblock-points`,
-  `coord milestones`. Link with `--type enables|related_to|duplicates|part_of` for context.
+  `coord milestones` (a projection gives P50/P85 dates with its assumptions - quote them with
+  it, never a date alone). Link with `--type enables|related_to|duplicates|part_of` for context.
 - Idle: `coord poll` about every five minutes (or, if you can listen, `coord events --follow`).
 
 ## When to look again (wake)

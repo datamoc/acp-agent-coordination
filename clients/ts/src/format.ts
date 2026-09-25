@@ -93,9 +93,16 @@ export function fmtMilestone(m: any): string {
   const moved = (m.target_history ?? []).length > 1
     ? `  target history: ${m.target_history.map((t: any) => `${t.target ?? "none"} (${t.reason})`).join(" -> ")}` : "";
   const left = (m.remaining ?? []).length ? `  remaining: ${m.remaining.map((t: any) => `${t.task} [${t.status}] ${t.title}`).join("; ")}` : "";
+  const pr = m.projection;
+  const proj = !pr ? "" : !pr.available ? `  projection: none - ${pr.why.join("; ")}`
+    : pr.remaining === 0 ? `  projection: ${pr.note}`
+    : `  projection: P50 ${pr.p50.slice(0, 10)}, P85 ${pr.p85 ? pr.p85.slice(0, 10) : "beyond 10 years"}`
+      + (pr.target_runs_met ? `, target met in ${pr.target_runs_met} runs` : "")
+      + ` (${pr.remaining} left, ${pr.basis.done} done in ${pr.basis.observed_days} d, chain of ${pr.basis.critical_chain})`
+      + `\n    assuming: ${pr.assumptions.join("; ")}`;
   return [`${m.milestone} [${m.status}] ${m.title}` + (m.reached_at ? ` reached ${m.reached_at}` : m.target ? ` target ${m.target}` : " (no target)")
           + ` - ${m.criteria_met}/${(m.criteria ?? []).length} criteria met${m.owner ? `, owner ${m.owner}` : ""}`,
-          ...crit, moved, left].filter(Boolean).join("\n");
+          ...crit, moved, left, proj].filter(Boolean).join("\n");
 }
 
 export function human(cmd: string, r: any): string {
@@ -130,7 +137,8 @@ export function human(cmd: string, r: any): string {
         + `${c.blocked} blocked, ${c.unowned} unowned) · ${c.claims} claims · ${c.attention ? `! ${c.attention}` : "nothing waiting"}`);
       for (const a of p.attention) out.push(`  ! ${a.text}`);
       for (const u of p.unblock_points) out.push(`  unblock point: ${u.task} ${u.title} -> ${u.unblocks.join(", ")}${u.milestones.length ? ` (milestones ${u.milestones.join(", ")})` : ""}`);
-      for (const m of p.milestones) out.push(`  next milestone: ${m.milestone} ${m.title} - ${m.criteria_met}/${m.criteria.length} criteria, ${m.remaining.length} task(s) left${m.target ? `, target ${m.target}` : ""}`);
+      for (const m of p.milestones) out.push(`  next milestone: ${m.milestone} ${m.title} - ${m.criteria_met}/${m.criteria.length} criteria, ${m.remaining.length} task(s) left${m.target ? `, target ${m.target}` : ""}`
+        + (m.projection?.available && m.projection.remaining ? `, projected P50 ${m.projection.p50.slice(0, 10)} / P85 ${m.projection.p85?.slice(0, 10) ?? "-"}` : ""));
     }
     if (r.activity.length) out.push("", ...r.activity.slice(-10).map((e: any) => `${e.at.slice(11, 16)} ${e.text}`));
     return out.join("\n");

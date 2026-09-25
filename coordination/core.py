@@ -123,7 +123,8 @@ NEWS = {
               "receipts; contact policies), note review (doc comment, coord candidate add|accept|reject, doc "
               "reviewed, private notes), session states and wake-ups (coord pause, agents, wake request|answer|"
               "hook), governance (weighted/advisory/owner rules, coord weight, policies, crisis mandates with "
-              "review), typed links across projects, task waive, milestones, resource claims (--resource), "
+              "review), typed links across projects, task waive, milestones with a projection (P50/P85 from the "
+              "observed pace, with its assumptions), resource claims (--resource), "
               "coord dashboard, activity, audit - and the UI for all of it",
 }
 SERVER_NAME = "coord-server"   # sender of the server's own messages (upgrade notices)

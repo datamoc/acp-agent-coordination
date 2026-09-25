@@ -8,12 +8,19 @@ may see both. A task is `ready` when every blocking prerequisite is done, cancel
 A milestone is a task of kind `milestone`: a verifiable result with acceptance criteria, an owner, a
 target date whose revisions are kept with their reasons, and the date it was actually reached."""
 
+import random
 import uuid
 
 from .core import LINK_TYPES, CoordBase, CoordError, iso, parse_id, parse_when
 
 RESOLVED = ("done", "cancelled")      # a prerequisite in one of these no longer blocks
 RECENT = 86400                        # "unblocked recently": within a day
+# Milestone projection: only with enough history, never as a percentage of completion.
+PROJECTION_WINDOW = 28                # days of history the throughput is read from
+PROJECTION_MIN_DONE = 5               # fewer tasks done than this in the window: no projection
+PROJECTION_MIN_DAYS = 3               # nor with less than this much history
+PROJECTION_RUNS = 1000                # Monte Carlo runs
+PROJECTION_HORIZON = 3650             # days: beyond this, "not at this pace"
 
 
 class TasksMixin(CoordBase):
@@ -412,9 +419,96 @@ class TasksMixin(CoordBase):
             if a is not None and a["status"] not in RESOLVED:
                 remaining.append({"task": f"T{x}", "title": a["title"], "status": a["status"], "assigned": a["assigned_name"],
                                   "project": a["project_id"], "blocked_by": [f"T{y}" for y in self._blocked_by(db, x)]})
-        return {"owner": t["owner"], "scope": t["description"], "target": iso(t["target_at"]),
-                "reached_at": iso(t["reached_at"]), "criteria": crit, "criteria_met": sum(c["met"] for c in crit),
-                "target_history": targets, "remaining": remaining}
+        out = {"owner": t["owner"], "scope": t["description"], "target": iso(t["target_at"]),
+               "reached_at": iso(t["reached_at"]), "criteria": crit, "criteria_met": sum(c["met"] for c in crit),
+               "target_history": targets, "remaining": remaining}
+        if t["reached_at"] is None:
+            out["projection"] = self._projection(db, t, remaining)
+        return out
+
+    def _projection(self, db, t, remaining: list[dict]) -> dict:
+        """A forecast of when the milestone's remaining tasks will be done - only when the data allow it,
+        always with its assumptions and its uncertainty, never as a percentage of completion.
+
+        Method: the projects' observed throughput (tasks done per day over the last PROJECTION_WINDOW
+        days) is resampled day by day, PROJECTION_RUNS times, until the remaining tasks are done
+        (Monte Carlo); no run can finish before the longest chain of remaining prerequisites, taken
+        at the observed median time from accepted to done. P50 / P85 are the dates half / 85 % of the
+        runs finish by; with a target, the share of runs that meet it. The seed is the milestone id:
+        the same data give the same answer."""
+        now, n = self.clock(), len(remaining)
+        if n == 0:
+            return {"available": True, "remaining": 0, "p50": iso(now), "p85": iso(now),
+                    "note": "no task left before it: it is reached as soon as its criteria are met"}
+        projects = sorted({t["project_id"], *(r["project"] for r in remaining)})
+        marks = ",".join("?" * len(projects))
+        since = now - PROJECTION_WINDOW * 86400
+        done = db.execute(f"SELECT entity_id, created_at FROM events WHERE kind='task.done' AND project_id IN ({marks})"
+                          " AND created_at>=? ORDER BY created_at", (*projects, since)).fetchall()
+        first = db.execute(f"SELECT MIN(created_at) FROM events WHERE project_id IN ({marks})", tuple(projects)).fetchone()[0]
+        observed = (now - max(since, first or now)) / 86400
+        why = []
+        if len(done) < PROJECTION_MIN_DONE:
+            why.append(f"only {len(done)} task(s) done in the last {PROJECTION_WINDOW} days (needs {PROJECTION_MIN_DONE})")
+        if observed < PROJECTION_MIN_DAYS:
+            why.append(f"only {observed:.1f} day(s) of history (needs {PROJECTION_MIN_DAYS})")
+        if why:
+            return {"available": False, "remaining": n, "why": why,
+                    "note": "not enough history for an honest forecast: follow the criteria and the remaining tasks"}
+        days = max(1, int(observed + 0.999))
+        per_day = [0] * days
+        for e in done:
+            per_day[min(days - 1, int((e["created_at"] - (now - days * 86400)) // 86400))] += 1
+        cycles = []
+        for e in done:
+            acc = db.execute("SELECT MIN(created_at) FROM events WHERE kind='task.accepted' AND entity_id=?",
+                             (e["entity_id"],)).fetchone()[0]
+            if acc is not None and acc <= e["created_at"]:
+                cycles.append(e["created_at"] - acc)
+        cycles.sort()
+        median_cycle = cycles[len(cycles) // 2] if cycles else 0.0
+        ids = {int(r["task"][1:]) for r in remaining}
+        chain: dict[int, int] = {}
+
+        def depth(x: int) -> int:           # the longest chain of remaining prerequisites ending at x
+            if x not in chain:
+                chain[x] = 0
+                chain[x] = 1 + max([depth(a) for a in self._blocked_by(db, x) if a in ids], default=0)
+            return chain[x]
+        longest = max(depth(x) for x in ids)
+        floor_days = longest * median_cycle / 86400
+        rng = random.Random(t["task_id"])
+        finish = []
+        for _ in range(PROJECTION_RUNS):
+            left, day = n, 0
+            while left > 0 and day < PROJECTION_HORIZON:
+                day += 1
+                left -= rng.choice(per_day)
+            finish.append(max(day, floor_days))
+        finish.sort()
+        p50, p85 = finish[len(finish) // 2], finish[int(len(finish) * 0.85)]
+        beyond = p85 >= PROJECTION_HORIZON
+        out = {"available": True, "method": "monte-carlo on observed throughput, bounded by the critical chain",
+               "remaining": n, "p50": iso(now + p50 * 86400), "p85": None if beyond else iso(now + p85 * 86400),
+               "spread_days": None if beyond else round(p85 - p50, 1),
+               "basis": {"window_days": PROJECTION_WINDOW, "observed_days": round(observed, 1), "done": len(done),
+                         "per_day": round(len(done) / days, 2), "critical_chain": longest,
+                         "median_cycle_days": round(median_cycle / 86400, 2), "runs": PROJECTION_RUNS,
+                         "projects": projects},
+               "assumptions": [f"the pace of the last {days} day(s) ({len(done)} task(s) done) goes on",
+                               f"the {n} remaining task(s) are all that is left: new tasks or a wider scope move the date",
+                               "the tasks are of comparable size - one task counts as one",
+                               f"a chain of {longest} task(s) is done one after the other, each taking the median "
+                               f"{median_cycle / 86400:.1f} day(s) from accepted to done",
+                               "calendar days: pauses, quotas and absences only count as far as they did in the history"]}
+        if beyond:
+            out["note"] = f"at this pace, not within {PROJECTION_HORIZON} days"
+        if t["target_at"] is not None:
+            by_target = (t["target_at"] - now) / 86400
+            hit = sum(1 for f in finish if f <= by_target)
+            out["target_runs_met"] = f"{hit}/{PROJECTION_RUNS}"
+            out["target_chance"] = round(hit / PROJECTION_RUNS, 2)
+        return out
 
     def milestone_create(self, session: str, title: str, criteria: list[str], target: str | None = None,
                          owner: str | None = None, scope: str = "", after: list[str] | None = None,

@@ -302,6 +302,19 @@ async function openTask(id) {
   showText(`${t.task} · ${t.project}`, `created by ${t.created_by} · ${t.created_at}`, lines.join("\n"), [el("div", { class: "row" }, ...buttons)]);
 }
 
+/** The forecast with its assumptions, or why there is none - never a percentage of completion. */
+function projectionLine(pr) {
+  if (!pr) return null;
+  if (!pr.available) return el("div", { class: "small muted" }, `projection: none - ${pr.why.join("; ")}`);
+  if (!pr.remaining) return el("div", { class: "small" }, `projection: ${pr.note}`);
+  return el("details", { class: "small proj-line" },
+    el("summary", {}, `projection: half the runs finish by ${pr.p50.slice(0, 10)}, 85 % by ${pr.p85 ? pr.p85.slice(0, 10) : "beyond 10 years"}`
+      + (pr.target_runs_met ? ` · target met in ${pr.target_runs_met} runs` : "")),
+    el("div", { class: "muted" }, `${pr.remaining} task(s) left · ${pr.basis.done} done in the last ${pr.basis.observed_days} day(s)`
+      + ` · critical chain of ${pr.basis.critical_chain} · ${pr.method}`),
+    el("ul", {}, ...pr.assumptions.map((a) => el("li", {}, a))));
+}
+
 function renderMilestones(list) {
   $("milestones").replaceChildren(...(list.length ? list.map((m) => el("div", { class: `ms ${m.status}` },
     el("div", {}, el("a", { class: "link", onclick: act(() => openTask(m.milestone)) }, el("span", { class: "id" }, m.milestone)), el("b", {}, m.title),
@@ -312,6 +325,7 @@ function renderMilestones(list) {
       onchange: act(() => call("milestone_criterion", { milestone: m.milestone, criterion: c.n, met: !c.met })) }), ` ${c.text}`,
       c.met ? el("span", { class: "muted" }, ` (${c.met_by})`) : null)),
     m.remaining.length ? el("div", { class: "small" }, `still before it: ${m.remaining.map((t) => `${t.task} ${t.status}`).join(", ")}`) : null,
+    projectionLine(m.projection),
     m.target_history.length > 1 ? el("div", { class: "small muted" }, `target moved: ${m.target_history.map((x) => `${(x.target || "none").slice(0, 10)} (${x.reason})`).join(" → ")}`) : null,
     m.status === "upcoming" ? el("div", { class: "row" },
       el("button", { class: "ghost small", onclick: act(() => {
@@ -360,7 +374,8 @@ function renderBoard(board) {
       ...p.unblock_points.slice(0, 3).map((u) => el("div", { class: "small" }, "unblock point: ", el("span", { class: "id" }, u.task), `${u.title} → ${u.unblocks.join(", ")}`,
         u.milestones.length ? el("span", { class: "muted" }, ` (then ${u.milestones.join(", ")})`) : null)),
       ...p.milestones.map((m) => el("div", { class: "small" }, "next milestone: ", el("span", { class: "id" }, m.milestone), `${m.title} - ${m.criteria_met}/${m.criteria.length} criteria, ${m.remaining.length} task(s) left`,
-        m.target ? ` · target ${m.target.slice(0, 10)}` : "")));
+        m.target ? ` · target ${m.target.slice(0, 10)}` : "",
+        m.projection?.available && m.projection.remaining ? ` · projected ${m.projection.p50.slice(0, 10)}–${(m.projection.p85 || "…").slice(0, 10)}` : "")));
   }));
   return total;
 }

@@ -396,7 +396,14 @@ completion would make others ready now - a count of descendants is not a priorit
 targets stay, with their reasons), `milestone reach T20` (every criterion met, nothing blocking
 - it may be reached while other work goes on). `coord milestones` is the timeline: reached ones
 with their dates, then the upcoming ones with criteria met, tasks left and how the target moved -
-no invented percentage.
+no invented percentage. When the history allows it (at least 5 tasks done over 3 days or more in
+the last 28), an upcoming milestone carries a **projection**: the projects' observed pace, tasks
+done per day, is replayed 1 000 times (Monte Carlo, seeded - the same data give the same answer)
+until its remaining tasks are done, never faster than its longest chain of prerequisites at the
+median accepted-to-done time. It gives P50 and P85 dates (the spread is the uncertainty), how
+many runs meet the target, the basis (window, tasks done, chain) and its assumptions in words:
+the pace goes on, the scope does not grow, tasks count alike. Without enough history it says so
+and why, rather than inventing a date.
 
 **Claims on any resource.** `coord claim gpu:0 --resource gpu`, `claim npm-test --resource
 build`, `claim 8080 --resource port`, `claim android-test-phone --resource device`: the same
