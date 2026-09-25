@@ -4,7 +4,11 @@ version = "0.13.0"
 description = "coord server and certificate management: claims, messages, tasks for concurrent agent sessions (clients: clients/ts)"
 readme = "README.md"
 requires-python = ">=3.11"
+license = {text = "AGPL-3.0-only"}
 dependencies = []
+classifiers = [
+    "License :: OSI Approved :: GNU Affero General Public License v3",
+]
 
 [project.scripts]
 coord-server = "coordination.server:main"

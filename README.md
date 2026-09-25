@@ -832,3 +832,11 @@ and older databases - is in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
 
 What a load run looks like, and which number is SQLite's fault, is in
 [docs/LOAD-TEST.md](docs/LOAD-TEST.md) (`uv run tools/load_test.py`).
+
+## Licence
+
+coord is free software: the server, the TypeScript client and this
+repository are licensed under the GNU Affero General Public License v3
+(AGPL-3.0-only) - see [LICENSE](LICENSE). If you run a modified server
+where others can reach it over the network, share your modified sources
+with them.
