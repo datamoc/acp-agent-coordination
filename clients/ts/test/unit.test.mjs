@@ -9,7 +9,18 @@ import { loadConfig } from "../dist/config.js";
 import { canonicalProject } from "../dist/git.js";
 import { OPS } from "../dist/ops.generated.js";
 import { bypassProxy } from "../dist/transport.js";
-import { REPO, tmp } from "./helpers.mjs";
+import { REPO, cleanEnv, serverDbEnv, tmp } from "./helpers.mjs";
+
+test("startServer: a test that forgets COORD_DB gets a temp file, never the checkout's", () => {
+  const clean = cleanEnv();
+  const def = serverDbEnv([], clean);
+  assert.ok(def.COORD_DB, "a database is always set");
+  assert.ok(def.COORD_DB.includes("coordts-"), def.COORD_DB);            // a tmp() directory
+  assert.notEqual(def.COORD_DB, join(REPO, "coord2.db"));
+  assert.ok(!def.COORD_DB.startsWith(REPO), def.COORD_DB);               // not state_home()
+  assert.equal(serverDbEnv([], cleanEnv({ COORD_DB: "/x/y.db" })).COORD_DB, "/x/y.db");  // explicit wins
+  assert.ok(!("COORD_DB" in serverDbEnv(["--db", "/z/w.db"], clean)), "--db in args wins too");
+});
 
 test("project ids match the shared vectors (same as the Python server)", () => {
   const { vectors } = JSON.parse(readFileSync(join(REPO, "schema/project-vectors.json"), "utf8"));

@@ -35,8 +35,18 @@ export async function freePort() {
   });
 }
 
-/** Start `coord-server` and wait until it listens. Returns { url, stop }. */
+/** Start `coord-server` and wait until it listens. Returns { url, stop }.
+ *
+ *  The database defaults to a temporary file: a test that forgets COORD_DB must never write into
+ *  the checkout's real coord2.db, which is where `coord-server` reads state_home() from. Pass
+ *  COORD_DB (or `--db`) to point it somewhere specific. */
+export function serverDbEnv(args = [], env = cleanEnv()) {
+  if (!("COORD_DB" in env) && !args.includes("--db")) return { ...env, COORD_DB: join(tmp(), "server.db") };
+  return env;
+}
+
 export async function startServer(args = [], env = cleanEnv()) {
+  env = serverDbEnv(args, env);
   const port = await freePort();
   const proc = spawn(PYTHON, ["-m", "coordination.server", "--port", String(port), ...args], { cwd: REPO, env });
   let out = "";
