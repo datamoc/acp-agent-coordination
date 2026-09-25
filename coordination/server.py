@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import cast
 
 from . import a2a, state_home
-from .net import is_loopback
+from .net import is_loopback, prefer_loopback_ipv4
 from .service import PROJECT_ROLES, READ_OPS, WRITE_OPS, Coord, CoordError, server_version
 
 VERBOSE = 15   # -v: one line per request, between INFO (default) and DEBUG (-vv)
@@ -58,7 +58,7 @@ class OIDCIntrospector:
 
     def __init__(self, url: str, client_id: str, client_secret: str, cache_seconds: int = 60,
                  opener=None):
-        self.url, self.client_id, self.client_secret = url, client_id, client_secret
+        self.url, self.client_id, self.client_secret = prefer_loopback_ipv4(url), client_id, client_secret
         if opener is None:   # a loopback IdP never goes through a proxy (Windows reads the system one)
             handlers = [urllib.request.ProxyHandler({})] if is_loopback(urllib.parse.urlsplit(url).hostname or "") else []
             opener = urllib.request.build_opener(*handlers).open

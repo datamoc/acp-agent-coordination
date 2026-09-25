@@ -28,7 +28,7 @@ import urllib.parse
 import urllib.request
 import uuid
 
-from .net import is_loopback
+from .net import is_loopback, prefer_loopback_ipv4
 from .service import FEATURES, CoordError
 
 A2A_VERSION = "1.0"
@@ -191,7 +191,8 @@ class Pusher:
             host = urllib.parse.urlsplit(plan["url"]).hostname or ""
             opener = _opener(host)
             try:
-                with opener.open(urllib.request.Request(plan["url"], data=plan["body"], headers=headers),
+                with opener.open(urllib.request.Request(prefer_loopback_ipv4(plan["url"]), data=plan["body"],
+                                                         headers=headers),
                                  timeout=self.timeout) as r:
                     self.sent.append((plan["url"], r.status))
                     self.coord._wake_delivered(wake_id, 200 <= r.status < 300, f"HTTP {r.status}")
@@ -216,7 +217,8 @@ class Pusher:
             return
         opener = _opener(host)
         try:
-            with opener.open(urllib.request.Request(c["url"], data=body, headers=headers), timeout=self.timeout) as r:
+            with opener.open(urllib.request.Request(prefer_loopback_ipv4(c["url"]), data=body,
+                                                     headers=headers), timeout=self.timeout) as r:
                 self.sent.append((c["url"], r.status))
         except Exception as e:   # a dead webhook must not affect the server
             self.sent.append((c["url"], getattr(e, "code", 0)))

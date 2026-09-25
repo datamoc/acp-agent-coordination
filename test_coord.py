@@ -16,6 +16,7 @@ from pathlib import Path
 
 from coordination import pki, scopes
 from coordination.client import RemoteCoord
+from coordination.net import prefer_loopback_ipv4
 from coordination.server import OIDCIntrospector, build_server
 from coordination.service import SESSION_TTL, Coord, CoordError
 from coordination.sslbin import OpensslMissing, openssl
@@ -104,6 +105,15 @@ def windows_case():
     c.claim(a, "Src\\Main.PY")
     raises("conflict", c.claim, b, "src/main.py")
 
+@check
+def localhost_prefers_ipv4():
+    assert prefer_loopback_ipv4("https://localhost:1337") == "https://127.0.0.1:1337"
+    assert prefer_loopback_ipv4("http://localhost:8080/wake") == "http://127.0.0.1:8080/wake"
+    assert prefer_loopback_ipv4("https://127.0.0.1:1337") == "https://127.0.0.1:1337"
+    assert prefer_loopback_ipv4("https://example.com:1337") == "https://example.com:1337"
+    assert prefer_loopback_ipv4("https://localhost.:1337") == "https://localhost.:1337"
+    assert RemoteCoord("https://localhost:9").url == "https://127.0.0.1:9/call"
+    assert RemoteCoord("https://127.0.0.1:9").url == "https://127.0.0.1:9/call"
 
 # --- sessions ------------------------------------------------------------
 @check

@@ -15,7 +15,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from .net import is_loopback
+from .net import is_loopback, prefer_loopback_ipv4
 from .service import CoordError
 
 
@@ -23,7 +23,7 @@ class RemoteCoord:
     """`token`: a fixed bearer string, or an object with token()/invalidate() (see clients/ts/src/oidc.ts for the real one)."""
 
     def __init__(self, url: str, ca=None, cert=None, key=None, token=None, insecure=False):
-        self.url = url.rstrip("/") + "/call"
+        self.url = prefer_loopback_ipv4(url.rstrip("/")) + "/call"
         self.token, self.cert, self.key = token, cert, key
         host = urllib.parse.urlsplit(self.url).hostname or ""
         handlers: list[urllib.request.BaseHandler] = [urllib.request.ProxyHandler({})] if is_loopback(host) else []
