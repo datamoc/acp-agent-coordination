@@ -34,7 +34,7 @@ changed without being told separately.
 ## 3. Upgrade the client
 
 ```sh
-npm install -g coord-client            # or the release's .tgz
+npm install -g @datamoc/coord-client   # or the release's .tgz
 ```
 
 Client and server may differ: the client warns at `whoami` when they do, and an op the server

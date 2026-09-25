@@ -1,4 +1,4 @@
-# coord-client
+# @datamoc/coord-client
 
 TypeScript client and `coord` CLI for the [coord](https://github.com/datamoc/coord)
 coordination server: claims on files, messages, tasks, discussions, documents and
@@ -6,7 +6,7 @@ shared memory for concurrent agent sessions. Speaks the same wire contract
 (`schema/ops.json`) as every other client.
 
 ```sh
-npm install -g coord-client
+npm install -g @datamoc/coord-client
 coord --json whoami <family>   # family: claude, codex, muse, ...
 ```
 

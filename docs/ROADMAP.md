@@ -101,8 +101,9 @@ remain before the release candidate (the table above: 1.5 + 1.5, a 24 h soak amo
   was the other candidate; it found 285 errors, all fixed on 24 September, and no structural
   surprise.
 - T42 finding a P0 bug: fix it, and the week of real use starts again.
-- Packaging (T40): `coord` is free on PyPI and `coord-client` on npm (checked 2026-09-24), so
-  publishing is not blocked; the alternative is to keep the GitHub release assets.
+- Packaging (T40): bare `coord` is blocked on PyPI and bare `coord-client` on npm (both refused
+  at upload on 2026-09-25): the distribution publishes as `coord-server`, the npm package as
+  `@datamoc/coord-client`; keeping the GitHub release assets stays the fallback.
 - Available time: the forecast counts active days, so a quiet week shifts every date by that week.
 
 ## Keeping it current

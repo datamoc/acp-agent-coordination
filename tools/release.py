@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "dist"
 TS = ROOT / "clients" / "ts"
 
-ASSETS = ("coord-server-{v}-py3-none-any.whl", "coord-server-{v}.tar.gz", "coord-client-{v}.tgz")
+ASSETS = ("coord-server-{v}-py3-none-any.whl", "coord-server-{v}.tar.gz", "datamoc-coord-client-{v}.tgz")
 
 
 def run(cmd: list[str], cwd: Path | None = None, dry: bool = False) -> str:
@@ -65,7 +65,7 @@ def default_notes(version: str) -> str:
     base = f"https://github.com/datamoc/coord/releases/download/v{version}"
     return (section + "\n## Install\n```sh\n"
             f"uv tool install {base}/coord-server-{version}-py3-none-any.whl\n"
-            f"npm install -g {base}/coord-client-{version}.tgz\n```\n")
+            f"npm install -g {base}/datamoc-coord-client-{version}.tgz\n```\n")
 
 
 def sha256sums(files: list[Path], out: Path) -> None:

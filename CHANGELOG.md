@@ -11,6 +11,8 @@ Everything after the `v0.13.0` tag:
 
 - **PyPI name**: the Python distribution publishes as `coord-server` - bare `coord`
   is blocked on PyPI even though nothing is published under it.
+- **npm name**: the client publishes as `@datamoc/coord-client` - bare `coord-client`
+  is refused as too similar to the existing `coordclient`.
 
 - **`task update`** - a task's title, description, priority and category can be edited by its
   creator, its assignee or a decider. Status still has its own path (accept, done, decline,

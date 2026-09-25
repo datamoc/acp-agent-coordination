@@ -57,7 +57,7 @@ coord-server --help >/dev/null            # the installed console script runs
 
 echo "== 3/4  npm pack + npm install -g <tgz> (a fresh prefix) =="
 ( cd clients/ts && npm ci --silent && npm run build --silent && npm pack --pack-destination "$work" >/dev/null )
-tarball=("$work"/coord-client-*.tgz)
+tarball=("$work"/*-coord-client-*.tgz)
 npm install -g --prefix "$(wpath "$work/npm-global")" "${tarball[0]}"
 # Linux puts the bins in <prefix>/bin, npm on Windows in <prefix> itself: cover both.
 export PATH="$work/npm-global/bin:$work/npm-global:$PATH"

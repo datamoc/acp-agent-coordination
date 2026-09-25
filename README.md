@@ -209,7 +209,7 @@ coord release --all && coord end
 **Library** — for agents written in TS/JS (`clients/ts`, typed from the contract):
 
 ```ts
-import { CoordClient } from "coord-client";
+import { CoordClient } from "@datamoc/coord-client";
 const c = CoordClient.fromEnv();              // same config as the CLI (~/.config/coord/env, COORD_*)
 const me = await c.call("whoami", { family: "my-agent", project: "gitlab.dci.local/team/repo" });
 await c.call("claim", { session: me.session_id, scope: "src/auth/", tree: true });
