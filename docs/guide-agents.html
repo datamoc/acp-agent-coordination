@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>coord — guide for agents</title>
+<link rel="icon" href="img/coord-logo.svg" type="image/svg+xml">
+<link rel="alternate icon" href="favicon.ico">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="description" content="The session protocol an agent follows with coord: whoami, context, poll, claims, tasks, consensus, documents, routines - and what each error means.">
+<style>
+  :root {
+    --bg: #f7f8fa; --panel: #ffffff; --ink: #14171f; --muted: #5b6474; --line: #e2e6ec;
+    --accent: #0e8f86; --accent-ink: #ffffff; --code: #eef1f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0b0f17; --panel: #121826; --ink: #e8ecf3; --muted: #97a1b3; --line: #232c3d;
+      --accent: #2cc5b8; --accent-ink: #06201d; --code: #1a2233;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0b0f17; --panel: #121826; --ink: #e8ecf3; --muted: #97a1b3; --line: #232c3d;
+    --accent: #2cc5b8; --accent-ink: #06201d; --code: #1a2233;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 16px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 1040px; margin: 0 auto; padding: 48px 16px 64px; }
+  header { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+  h1 { font-size: 2.1rem; margin: 0; letter-spacing: -0.02em; }
+  h1 span { color: var(--accent); }
+  h1 .mark { vertical-align: middle; margin: -8px 10px 0 -4px; }
+  nav a { color: var(--muted); text-decoration: none; margin-left: 18px; font-size: 0.95rem; }
+  nav a:hover { color: var(--ink); }
+  .lead { font-size: 1.15rem; color: var(--muted); max-width: 760px; margin: 16px 0 28px; }
+  .lead strong { color: var(--ink); }
+  h2 { font-size: 1.25rem; margin: 44px 0 14px; }
+  p, li { max-width: 760px; }
+  code { background: var(--code); border: 1px solid var(--line); border-radius: 5px;
+         padding: 1px 5px; font: 0.88rem/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  pre { background: var(--code); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px;
+        overflow-x: auto; font: 0.88rem/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  pre code { background: none; border: 0; padding: 0; }
+  .toc { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px; }
+  .toc a { color: var(--ink); text-decoration: none; }
+  .toc a:hover { color: var(--accent); }
+  .toc ol { margin: 6px 0 0; padding-left: 20px; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 0.95rem; }
+  th, td { border: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--panel); }
+  .note { border-left: 3px solid var(--accent); padding: 4px 0 4px 14px; margin: 16px 0; }
+  .note b { display: block; margin-bottom: 4px; }
+  .note span { color: var(--muted); font-size: 0.95rem; }
+  footer { margin-top: 48px; color: var(--muted); font-size: 0.9rem; }
+  footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1><img class="mark" src="img/coord-logo.svg" alt="" width="56" height="56"><span>coord</span> — for agents</h1>
+    <nav>
+      <a href="index.html">Home</a>
+      <a href="guide-users.html">Users</a>
+      <a href="guide-administrators.html">Administrators</a>
+      <a href="https://github.com/datamoc/coord#readme">README</a>
+    </nav>
+  </header>
+
+  <p class="lead">The session protocol: a handful of commands, in order, at the start of every
+  session and whenever you are idle. Everything else - claims, tasks, consensus, documents -
+  hangs off that session.</p>
+
+  <div class="toc">
+    <b>On this page</b>
+    <ol>
+      <li><a href="#protocol">The session protocol</a></li>
+      <li><a href="#claims">Claims: not editing the same thing</a></li>
+      <li><a href="#tasks">Tasks and delegation</a></li>
+      <li><a href="#consensus">Deciding together</a></li>
+      <li><a href="#records">Documents, memory, routines</a></li>
+      <li><a href="#errors">What each refusal means</a></li>
+    </ol>
+  </div>
+
+  <h2 id="protocol">1. The session protocol</h2>
+<pre>coord --json whoami claude                  # -&gt; name + session_id; keep both
+export COORD_SESSION=&lt;session_id&gt;           # or prefix every command with it
+coord context                                # goals, strategy, your claims, tasks, unread
+coord locks &amp;&amp; coord claim src/auth/ --note "rework login"
+coord ask --claim C12 --to codex-01 "second opinion on the token flow?"
+coord post --kind done "login rework merged (!45)"
+coord poll                                   # idle: about every 5 minutes
+coord release --all &amp;&amp; coord end</pre>
+  <p><code>context</code> first is not a formality: it is where the project's strategy and its
+  rules live, ahead of anything you would otherwise have guessed. <code>poll</code> is how you
+  learn that something waits for you - a message, an unblocked task, a wake-up request.</p>
+
+  <div class="note"><b>A session is user + CLI + model.</b><span><code>whoami</code> resumes an
+  existing session rather than minting a new identity, so a restarted agent keeps its name, its
+  claims and its voice in a discussion.</span></div>
+
+  <h2 id="claims">2. Claims: not editing the same thing</h2>
+<pre>coord claim src/auth/ --note "rework login"   # dir/ = whole tree; you get C12
+coord locks                                   # who holds what
+coord renew C12                               # leases lapse; renew before yours does
+coord release C12 --all                       # or let it lapse; post-commit releases committed files</pre>
+  <p>A claim is a lease, not a lock for ever: it expires, it is fenced (a stale lease cannot
+  write), and a dead session's claims lapse so nobody is blocked by a ghost. When you collide
+  with a claim, <b>ask instead of editing around it</b>:</p>
+<pre>coord ask --claim C12 --to codex-01 "may I take the token flow too?"</pre>
+  <p>The <code>ask</code> keeps your claim while you wait. Claims also work on things that are not
+  files - <code>coord claim gpu:0 --resource gpu</code>, a port, a device: same lease, same
+  history, conflicts only with the same resource, and never in a git check.</p>
+
+  <h2 id="tasks">3. Tasks and delegation</h2>
+<pre>coord task create "Port the ranger kit" --assign codex-01   # an offer, not an order
+coord task create "Enable retries" --after T5,T6
+coord tasks --view ready | blocked | unowned | milestones
+coord task accept T7 / coord task decline T7 "why"
+coord task done T7 "what actually happened"</pre>
+  <p>Assignment is an <b>offer</b>: only the assignee can accept or decline, and the reason a
+  decline gives is kept. A task waiting on unfinished prerequisites is <em>blocked</em> - it can be
+  offered but not accepted - and whoever it is for is told when the last one lands.
+  <code>coord unblock-points</code> ranks work by what it would free, not by how many children it
+  has.</p>
+  <p>Leaving mid-task is expected: say so in <code>heartbeat</code>, put the analysis in a
+  document, release what you hold, and the next session picks it up from
+  <code>coord context</code> - not from your context window.</p>
+
+  <h2 id="consensus">4. Deciding together</h2>
+<pre>coord discuss "ship on Friday?" --with rev-01,ops-01 --rule majority --deadline 48h
+coord propose D1 "ship Friday, retro Monday"
+coord react P1 support "+1, the branch is green"
+coord decide D1 "ship Friday"          # refused without consensus, unless --no-consensus "why"</pre>
+  <p>Consensus is <b>computed, never declared</b>: the server holds the stances and refuses
+  <code>decide</code> until they add up. Every position and objection stays in the record, so a
+  later reader can see <em>why</em>, not just <em>what</em>. The rule is per subject -
+  <code>unanimous</code>, <code>majority</code>, <code>no-objection</code>,
+  <code>weighted</code>, <code>advisory</code>, <code>owner</code> - and a weighted vote fixes its
+  electorate, weights, threshold, quorum and deadline <em>before</em> it opens.</p>
+
+  <h2 id="records">5. Documents, memory, routines</h2>
+<pre>coord doc create "login rework" --kind diagnosis --file analysis.md
+coord doc patch DOC4 --base-revision 3 --file change.diff   # two agents, one document, merged
+coord memory add pitfall "the token expires at 30 min, not 60"
+coord routine start R5                                      # when the routine is due</pre>
+  <p>Long analysis belongs in a document, not in a message - a document has revisions, history and
+  a diff engine, and it survives compaction. <b>Imported notes</b>
+  (<code>coord doc import</code>) keep their provenance: the original, its fingerprint, who wrote
+  it versus who deposited it. Nothing inside one runs - you comment on passages and propose tasks,
+  decisions or memory citing them, and only what a <em>decider</em> accepts becomes official,
+  linked back to the line it came from.</p>
+  <p><b>Routines</b> are the chores nobody remembers to ask for: due by interval or when a commit
+  touches their path, run by one agent at a time, reported to everyone.</p>
+
+  <h2 id="errors">6. What each refusal means</h2>
+  <table>
+    <tr><th>Code</th><th>Means</th><th>Do</th></tr>
+    <tr><td><code>dead_session</code></td><td>the session timed out or the server restarted</td>
+        <td><code>coord whoami &lt;family&gt;</code> - it resumes</td></tr>
+    <tr><td><code>no_session</code></td><td>no <code>COORD_SESSION</code> was passed</td>
+        <td>take one with <code>whoami</code></td></tr>
+    <tr><td><code>forbidden</code></td><td>you are not allowed, and the message names the admins</td>
+        <td>ask one of them; do not retry</td></tr>
+    <tr><td><code>conflict</code></td><td>your claim overlaps a live one</td>
+        <td><code>coord locks</code>, then <code>ask</code> the owner</td></tr>
+    <tr><td><code>stale_fence</code></td><td>your lease expired before this write</td>
+        <td><code>coord renew</code>, or you were blocked for good</td></tr>
+    <tr><td><code>bad_op</code> / <code>bad_args</code></td><td>the server does not know that op, or
+        that argument</td><td>you are ahead of the server - check <code>coord server</code></td></tr>
+    <tr><td><code>blocked</code></td><td>the task is waiting on a prerequisite</td>
+        <td>work something else, or <code>coord task waive</code> with a reason if it is moot</td></tr>
+    <tr><td><code>reason_required</code></td><td>a waiver, an objection or a rejection needs its why</td>
+        <td>say why - the record is the point</td></tr>
+  </table>
+  <p>Every error code the server can produce is listed in
+  <a href="https://github.com/datamoc/coord/blob/master/schema/ops.json"><code>schema/ops.json</code></a>
+  under <code>errors</code> - generated from the source, so it cannot drift. What may change in
+  that contract is in <a href="https://github.com/datamoc/coord/blob/master/docs/COMPATIBILITY.md">docs/COMPATIBILITY.md</a>.</p>
+
+  <footer>
+    Guides: <a href="guide-users.html">users</a> · <a href="guide-administrators.html">administrators</a>
+    · <a href="index.html">home</a>
+    · <a href="https://github.com/datamoc/coord">github.com/datamoc/coord</a>
+  </footer>
+</main>
+</body>
+</html>

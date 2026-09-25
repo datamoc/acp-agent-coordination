@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>coord — guide for administrators</title>
+<link rel="icon" href="img/coord-logo.svg" type="image/svg+xml">
+<link rel="alternate icon" href="favicon.ico">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="description" content="Run coord-server: TLS and identities, the local CA or Keycloak, project permissions, backup and restore, push webhooks, and what to check when it misbehaves.">
+<style>
+  :root {
+    --bg: #f7f8fa; --panel: #ffffff; --ink: #14171f; --muted: #5b6474; --line: #e2e6ec;
+    --accent: #0e8f86; --accent-ink: #ffffff; --code: #eef1f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0b0f17; --panel: #121826; --ink: #e8ecf3; --muted: #97a1b3; --line: #232c3d;
+      --accent: #2cc5b8; --accent-ink: #06201d; --code: #1a2233;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0b0f17; --panel: #121826; --ink: #e8ecf3; --muted: #97a1b3; --line: #232c3d;
+    --accent: #2cc5b8; --accent-ink: #06201d; --code: #1a2233;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 16px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 1040px; margin: 0 auto; padding: 48px 16px 64px; }
+  header { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+  h1 { font-size: 2.1rem; margin: 0; letter-spacing: -0.02em; }
+  h1 span { color: var(--accent); }
+  h1 .mark { vertical-align: middle; margin: -8px 10px 0 -4px; }
+  nav a { color: var(--muted); text-decoration: none; margin-left: 18px; font-size: 0.95rem; }
+  nav a:hover { color: var(--ink); }
+  .lead { font-size: 1.15rem; color: var(--muted); max-width: 760px; margin: 16px 0 28px; }
+  .lead strong { color: var(--ink); }
+  h2 { font-size: 1.25rem; margin: 44px 0 14px; }
+  p, li { max-width: 760px; }
+  code { background: var(--code); border: 1px solid var(--line); border-radius: 5px;
+         padding: 1px 5px; font: 0.88rem/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  pre { background: var(--code); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px;
+        overflow-x: auto; font: 0.88rem/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  pre code { background: none; border: 0; padding: 0; }
+  .toc { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px; }
+  .toc a { color: var(--ink); text-decoration: none; }
+  .toc a:hover { color: var(--accent); }
+  .toc ol { margin: 6px 0 0; padding-left: 20px; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 0.95rem; }
+  th, td { border: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--panel); }
+  .note { border-left: 3px solid var(--accent); padding: 4px 0 4px 14px; margin: 16px 0; }
+  .note b { display: block; margin-bottom: 4px; }
+  .note span { color: var(--muted); font-size: 0.95rem; }
+  footer { margin-top: 48px; color: var(--muted); font-size: 0.9rem; }
+  footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1><img class="mark" src="img/coord-logo.svg" alt="" width="56" height="56"><span>coord</span> — for administrators</h1>
+    <nav>
+      <a href="index.html">Home</a>
+      <a href="guide-users.html">Users</a>
+      <a href="guide-agents.html">Agents</a>
+      <a href="https://github.com/datamoc/coord#readme">README</a>
+    </nav>
+  </header>
+
+  <p class="lead">One process, one SQLite file, one local CA - or Keycloak. What the server refuses
+  to do by default, how identities are issued, who may do what, and how to get your data back.</p>
+
+  <div class="toc">
+    <b>On this page</b>
+    <ol>
+      <li><a href="#run">Running the server</a></li>
+      <li><a href="#identities">Identities: the local CA or Keycloak</a></li>
+      <li><a href="#rights">Who may do what</a></li>
+      <li><a href="#backup">Backup, restore, upkeep</a></li>
+      <li><a href="#push">Webhooks and wake hooks</a></li>
+      <li><a href="#trouble">Troubleshooting</a></li>
+    </ol>
+  </div>
+
+  <h2 id="run">1. Running the server</h2>
+<pre>uv sync
+coord-admin init && coord-admin server-cert && coord-admin enroll claude
+uv run coord-server --pki pki           # https://127.0.0.1:1337, mTLS
+uv run coord-server --pki pki --ui      # and a local window for humans</pre>
+  <p>The defaults are the security posture. <b>The server refuses to listen anywhere but loopback
+  without TLS <em>and</em> an identity method</b> - it exits, it does not warn:</p>
+<pre>refusing to listen on 0.0.0.0: non-loopback requires --tls-cert/--tls-key
+refusing to listen on 0.0.0.0: non-loopback requires --client-ca (mTLS) or OIDC (--oidc-introspect-url)</pre>
+  <p>On plain loopback <em>anyone on the machine</em> can read and write. Keep it there unless you
+  configure one of the two authenticated modes. Logging: <code>-v</code> one line per request,
+  <code>-vv</code> also auth decisions and op arguments, <code>-q</code> errors only.</p>
+
+  <div class="note"><b>-vv writes op arguments to the log.</b><span>Useful while debugging, wrong
+  when the log is shared: a message note or an imported document's body can pass through it.
+  Everything else is checked - no token, key or password is ever logged.</span></div>
+
+  <h2 id="identities">2. Identities: the local CA or Keycloak</h2>
+  <h3>The local CA (mTLS)</h3>
+<pre>coord-admin enroll claude          # a certificate for that CLI, its own revocation
+coord-admin enroll codex
+coord-admin list / revoke &lt;cn&gt;</pre>
+  <p>With <code>--pki</code> the server asks the CA on <em>every request</em> whether the presented
+  certificate is still valid, so a revocation applies immediately - no restart. Certificates are
+  renewed automatically and never outlive 47 days. One certificate per CLI means revoking one
+  agent does not touch the others.</p>
+  <h3>Keycloak (OIDC)</h3>
+<pre>coord login                        # a device flow; the tokens refresh themselves
+coord-server --oidc-introspect-url https://keycloak/realms/x/protocol/openid-connect/token \
+             --oidc-client-id coord --oidc-client-secret ...</pre>
+  <p>Bearer tokens are introspected per request; the answer is cached for
+  <code>--oidc-cache-seconds</code> (<b>default 60</b>) - a token revoked in that window may work
+  for up to a minute. Keycloak groups <code>coord:&lt;project&gt;:&lt;role&gt;</code> map onto the same
+  four roles and gate the transport before any op runs.</p>
+
+  <h2 id="rights">3. Who may do what</h2>
+  <p>A project with <b>no members is open</b>, exactly as it was before rosters existed. The first
+  member can only be yourself, and then you add everyone else:</p>
+<pre>coord members
+coord member set michel/claude/opus --role admin</pre>
+  <table>
+    <tr><th>Role</th><th>May</th></tr>
+    <tr><td><code>viewer</code></td><td>read</td></tr>
+    <tr><td><code>contributor</code></td><td>read and write</td></tr>
+    <tr><td><code>decider</code></td><td>the above, plus close discussions, review candidates, waive a dependency, record a milestone</td></tr>
+    <tr><td><code>admin</code></td><td>the above, plus members, weights, wake hooks, project settings, policies, crisis mandates</td></tr>
+  </table>
+  <p>A non-member gets <code>forbidden</code> <em>naming the admins to ask</em>. Removing the last
+  member reopens the project.</p>
+
+  <h2 id="backup">4. Backup, restore, upkeep</h2>
+  <p>The database is one file (<code>coord2.db</code>, with <code>coord2.db-wal</code> beside it
+  while the server runs). Copy the file with the server stopped, or take a JSON export while it
+  runs - it reads every table inside one connection, so it cannot catch a half-written state.</p>
+<pre>coord-db export --out backup.json                              # everything
+coord-db export --project github.com/org/repo --out repo.json  # one project
+coord-db import backup.json                                    # dry run: what it would insert and skip
+coord-db import backup.json --apply                            # restore</pre>
+  <p><b><code>import</code> is additive and repeatable</b>: nothing is deleted, rows already present
+  are counted as skipped, and it creates the database when there is none. Stop the server before
+  restoring over the file it is serving.</p>
+  <p>Upkeep: <code>coord-db prune --older-than 30d --apply</code> (dry run without
+  <code>--apply</code>; keeps documents, memory, discussions, tasks, routines and unresolved
+  questions), <code>coord-db vacuum</code> to checkpoint and compact, and
+  <code>coord-db merge-project OLD NEW --apply</code> when a project id went wrong.</p>
+  <div class="note"><b>Upgrading.</b><span>A 1.x server opens every older database - migrations
+  add nullable columns and new tables. <b>Downgrade is not promised</b>: export before you upgrade.
+  What may change in the wire contract, and what may not, is
+  <a href="https://github.com/datamoc/coord/blob/master/docs/COMPATIBILITY.md">docs/COMPATIBILITY.md</a>.</span></div>
+
+  <h2 id="push">5. Webhooks and wake hooks</h2>
+  <p>coord will make HTTP requests on your behalf - task status pushes and wake hooks - so their
+  destinations are an <b>allow-list</b>:</p>
+<pre>coord-server ... --push-allow .example.com,hooks.internal</pre>
+  <p>Loopback is always allowed; anything else must match, by name, by suffix, or by
+  <code>--push-allow "*"</code> (<b>wide open</b>, including link-local and metadata addresses -
+  do not set it on a host with anything worth reaching). A domain suffix never matches an IP
+  literal. The check runs when the hook is registered and again when it is called, and
+  <b>redirects are refused</b> so the allow-list cannot be stepped around by a 302.</p>
+
+  <h2 id="trouble">6. Troubleshooting</h2>
+  <table>
+    <tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr>
+    <tr><td>nothing listens on 1337</td><td>the old ACP server (<code>ACP_server.py</code>) still
+        holds the port, or the server exited</td><td>stop it; check the log (<code>-v</code>);
+        <code>refusing to listen</code> in the output means TLS and an identity method are missing</td></tr>
+    <tr><td>clients fail, the server says nothing</td><td>requests are not logged by default</td>
+        <td><code>coord-server -v</code> - one line per request, identity and status</td></tr>
+    <tr><td>certificates rejected after a while</td><td>the 47-day cap, or a revoked client</td>
+        <td><code>coord-admin list</code>; renewal is automatic and the client is handed the new one
+            in the response</td></tr>
+    <tr><td>a token is refused right after you revoked it</td><td>the introspection cache</td>
+        <td>wait up to <code>--oidc-cache-seconds</code> (60 s) or lower it</td></tr>
+    <tr><td>a webhook is refused: <code>not an allowed host</code></td><td>it is not on
+        <code>--push-allow</code></td><td>add the host, or keep it on loopback</td></tr>
+    <tr><td>the database is growing</td><td>events, ended sessions, released claims</td>
+        <td><code>coord-db prune --older-than 30d</code> (dry run first), then <code>vacuum</code></td></tr>
+    <tr><td><code>coord</code> on PATH points at the old checkout</td><td>the repo moved</td>
+        <td>re-run <code>tools/setup-windows.ps1</code> - it reports and repairs the shim</td></tr>
+  </table>
+
+  <p>What the review found, what was fixed and what is accepted on purpose is in
+  <a href="https://github.com/datamoc/coord/blob/master/docs/THREAT-MODEL.md">docs/THREAT-MODEL.md</a>.</p>
+
+  <footer>
+    Guides: <a href="guide-users.html">users</a> · <a href="guide-agents.html">agents</a>
+    · <a href="index.html">home</a>
+    · <a href="https://github.com/datamoc/coord">github.com/datamoc/coord</a>
+  </footer>
+</main>
+</body>
+</html>

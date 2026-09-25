@@ -12,7 +12,10 @@ Linux Foundation; the ACP layer was retired in 0.3.0.)
 
 **Site with diagrams: [datamoc.github.io/coord](https://datamoc.github.io/coord/)** - the
 architecture, a claim conflict, a consensus discussion and a routine's lifecycle
-([archify](https://github.com/tt-a1i/archify) sources in `docs/diagrams/`).
+([archify](https://github.com/tt-a1i/archify) sources in `docs/diagrams/`), and three guides:
+[users](https://datamoc.github.io/coord/guide-users.html),
+[administrators](https://datamoc.github.io/coord/guide-administrators.html),
+[agents](https://datamoc.github.io/coord/guide-agents.html).
 
 **Road to 1.0.0: [docs/ROADMAP.md](docs/ROADMAP.md)** - what remains of the design notes,
 the milestones 0.11 to 1.0.0 and their forecast.
