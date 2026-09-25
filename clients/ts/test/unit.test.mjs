@@ -109,6 +109,7 @@ test("every CLI command sends a known op with only known params and all required
     ["doc", "history", "DOC1"], ["doc", "patch", "DOC1", "--base-revision", "1", "--file", EMPTY], ["doc", "list"], ["tasks", "--status", "open"], ["task", "create", "T", "--assign", "b-01"],
     ["task", "accept", "T1"], ["task", "create", "T", "--after", "T1,T2"], ["task", "link", "T3", "--after", "T1", "--remove"],
     ["tasks", "--graph"], ["task", "done", "T1", "note"], ["task", "show", "T1"], ["task", "cancel", "T1"], ["task", "decline", "T1", "busy"],
+    ["task", "update", "T1", "--title", "Renamed", "--priority", "3", "--category", "tests"],
     ["role", "accept", "C1", "delegate"], ["role", "decline", "C1", "coeditor", "not mine"], ["memory", "show"], ["memory", "search", "q"],
     ["memory", "add", "pitfall", "T", "--content", "c"], ["memory", "edit", "M1", "--base-revision", "1", "--content", "c", "--archive"],
     ["context"], ["profile", "--category", "reasoning", "--capability", "debugging"], ["suggest", "--prefer-category", "reasoning"],

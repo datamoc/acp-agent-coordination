@@ -146,6 +146,8 @@ const COMMANDS: Record<string, Cmd> = {
   task: { sub: {
     create: { pos: [{ name: "title" }], opts: [s("--description", { default: "" }), i("--priority", { default: 0 }), s("--claim"),
                                               s("--assign"), s("--category"), s("--after")] },
+    update: { help: "edit what a task says - title, description, priority, category (creator, assignee or decider); status keeps its own path: accept, done, decline, cancel",
+              pos: [{ name: "task" }], opts: [s("--title"), s("--description"), i("--priority"), s("--category")] },
     link: { help: "T3 after T1,T2: T3 cannot be accepted until they are done (--remove to unlink); context without blocking: --type enables (T1 enables T3), related_to, duplicates, part_of (T3 part_of T1)",
             pos: [{ name: "task" }], opts: [s("--after", { required: true }), b("--remove"),
                                             s("--type", { default: "blocks", choices: K.link_types }), s("--condition"), s("--reason", { default: "" })] },
@@ -494,6 +496,9 @@ export async function run(path: string[], a: NS, c: CoordClient): Promise<[strin
         case "create": return ["task", await call("task_create", { session: S(), title: a.title, description: a.description, priority: a.priority,
                                                                     claim: a.claim, assign: a.assign, category: a.category,
                                                                     after: list(a.after), client_id: uuid() }), 0];
+        case "update": return ["task", await call("task_update", { session: S(), task: a.task, title: a.title,
+                                                                     description: a.description, priority: a.priority,
+                                                                     category: a.category }), 0];
         case "link": return ["task", await call("task_link", { session: S(), task: a.task, after: list(a.after) ?? [], remove: a.remove,
                                                                type: a.type, condition: a.condition, reason: a.reason }), 0];
         case "waive": return ["task", await call("task_waive", { session: S(), task: a.task, after: a.after, reason: a.reason }), 0];

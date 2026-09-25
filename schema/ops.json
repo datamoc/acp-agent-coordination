@@ -2749,6 +2749,53 @@
     }
    ]
   },
+  "task_update": {
+   "kind": "write",
+   "params": [
+    {
+     "name": "session",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "task",
+     "type": "string",
+     "nullable": false,
+     "required": true
+    },
+    {
+     "name": "title",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "description",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "priority",
+     "type": "integer",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "category",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    },
+    {
+     "name": "client_id",
+     "type": "string",
+     "nullable": true,
+     "required": false
+    }
+   ]
+  },
   "task_waive": {
    "kind": "write",
    "params": [

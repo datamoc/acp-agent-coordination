@@ -399,6 +399,61 @@ class TasksMixin(CoordBase):
             self._unblock_dependents(db, me, tid)
             return {"task": f"T{tid}", "status": "cancelled"}
 
+    def task_update(self, session: str, task: str, title: str | None = None,
+                    description: str | None = None, priority: int | None = None,
+                    category: str | None = None, client_id: str | None = None) -> dict:
+        """Edit what a task *says*: its title, description, priority and category. Status keeps its
+        own path (accept, done, decline, cancel) and the graph keeps its own (link, waive). The
+        creator, the assignee or a decider may edit; a field left as None is untouched, so a caller
+        can change exactly one thing, and what changed is recorded."""
+        def fn(db):
+            tid = parse_id("task", task)
+            t = db.execute("SELECT * FROM tasks WHERE task_id=?", (tid,)).fetchone()
+            if t is None:
+                raise CoordError("missing", f"no task T{tid}")
+            me, _ = self._access(db, session, t["project_id"], "participate")
+            if me["display_name"] != t["created_by"] and t["assigned_to"] != session:
+                self._access(db, session, t["project_id"], "decide")   # raises unless a decider
+            sets: list[str] = []
+            args: list = []
+            changed: list[str] = []
+            if title is not None:
+                new = title.strip()
+                if not new:
+                    raise CoordError("bad_args", "a task keeps a non-empty title")
+                if new != t["title"]:
+                    sets.append("title=?")
+                    args.append(new)
+                    changed.append("title")
+            if description is not None and description != t["description"]:
+                sets.append("description=?")
+                args.append(description)
+                changed.append("description")
+            if priority is not None:
+                new = int(priority)
+                if not 0 <= new <= 9:
+                    raise CoordError("bad_args", "priority must be between 0 and 9")
+                if new != t["priority"]:
+                    sets.append("priority=?")
+                    args.append(new)
+                    changed.append("priority")
+            if category is not None:
+                new = category.strip() or None
+                if new != t["category"]:
+                    sets.append("category=?")
+                    args.append(new)
+                    changed.append("category")
+            if not changed:
+                return {"task": f"T{tid}", "changed": []}
+            sets.append("updated_at=?")
+            args.append(self.clock())
+            args.append(tid)
+            db.execute(f"UPDATE tasks SET {', '.join(sets)} WHERE task_id=?", args)
+            self._event(db, t["project_id"], "task.updated", session, "task", tid,
+                        fields=", ".join(changed))
+            return {"task": f"T{tid}", "changed": changed}
+        return self._mutate("task_update", client_id, fn)
+
     # --- milestones -----------------------------------------------------------------
     def _milestone_row(self, db, milestone):
         t = self._task_row(db, milestone)

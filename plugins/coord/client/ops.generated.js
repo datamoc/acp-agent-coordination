@@ -803,6 +803,18 @@ export const OPS = {
             "reason"
         ]
     },
+    "task_update": {
+        "kind": "write",
+        "params": [
+            "session",
+            "task",
+            "title",
+            "description",
+            "priority",
+            "category",
+            "client_id"
+        ]
+    },
     "task_waive": {
         "kind": "write",
         "params": [

@@ -516,7 +516,11 @@ unassigned = `open` (anyone may `task accept`); assigned = `offered` - only the
 assignee can `task accept T3`, or `task decline T3 "why"` (back to `open`,
 unassigned, reason kept). Creator and assignee get direct messages at each
 step; offers show in the assignee's `poll` and `context`. `task done T3
-"note"`, `task cancel T3` (creator or assignee), `task show T3`, `tasks
+"note"`, `task cancel T3` (creator or assignee), `task show T3`, `task update T3
+--title "..." [--priority 3] [--category x] [--description "..."]` - the creator,
+the assignee or a decider edits what the task *says* (title, description,
+priority, category); status keeps its own path, a field left off is untouched,
+and what changed appears in `coord activity`. `tasks
 --status open|offered|accepted|done|cancelled`; `task notify T3 --url
 https://...` registers an A2A push webhook (below). Orphaned (both the
 creator's and the assignee's sessions gone past their TTL, not just briefly

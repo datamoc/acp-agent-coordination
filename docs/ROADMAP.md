@@ -41,7 +41,7 @@ load, without a serious bug.
 ## Milestones
 
 ```
-0.11 quality gates ──► 0.12 contract frozen ──► 0.13 hardened ──► 1.0-rc1 ──► one week of real use ──► 1.0
+0.11 quality gates ──► 0.14 contract frozen ──► 0.15 hardened ──► 1.0-rc1 ──► one week of real use ──► 1.0
  T22 check warn/fail      T28 contract review      T33 security review   T38 guides    T42 mwg-pixel-dungeon
  T23 post-commit          T29 compat policy        T34 load test         T39 changelog
  T24 Python matrix        T30 upgrade tests        T35 24 h soak         T40 packaging
@@ -52,18 +52,20 @@ load, without a serious bug.
 | Milestone | Tasks | Effort (active days) | Reached (25 Sep) | Notes |
 |---|---|---|---|---|
 | **0.11** quality gates | T22-T26 → T27 | 1 | **yes** - the night of 24-25 Sep | T25 (ruff/pyright) was the biggest: 285 errors to 0 |
-| **0.12** contract frozen | T28-T31 → T32 | 1.5 | no - T28-T32 open | T28 decides what 1.0 promises; T30 needs fixture databases from old tags |
-| **0.13** hardened | T33-T36 → T37 | 1.5 + a 24 h soak | no - T33-T37 open | the soak runs overnight; T36 is the unknown |
+| **0.14** contract frozen | T28-T31 → T32 | 1.5 | no - T28-T32 open | T28 decides what 1.0 promises; T30 needs fixture databases from old tags |
+| **0.15** hardened | T33-T36 → T37 | 1.5 + a 24 h soak | no - T33-T37 open | the soak runs overnight; T36 is the unknown |
 | **1.0-rc1** | T37, T38-T40 → T41 | 0.5 | no - T37-T41 open | guides, changelog and packaging can run beside the hardening |
 | **1.0** | T42 → T43 | 7 calendar days | no - T42-T43 open | real multi-agent work on mwg-pixel-dungeon, no P0 bug |
 
-**The numbers have run ahead of the milestones.** 0.11.0, 0.12.0 and 0.13.0 shipped in one night
-while T28-T37 - contract review, compatibility policy, upgrade tests, threat model, load test,
-soak - are all still open. The milestone names are the tasks' own titles (T32 "Milestone 0.12:
-contract frozen", T37 "Milestone 0.13: hardened"), so they now collide with version numbers that
-have already been released: the next milestone reached cannot be called 0.12. Either the
-remaining milestones take the next free numbers or they drop the number from their name -
-whichever it is, T32 and T37 are retitled with it. **To decide before T28 starts.**
+**The numbers ran ahead of the milestones - decided 2026-09-25 (T104).** 0.11.0, 0.12.0 and
+0.13.0 shipped in one night while T28-T37 - contract review, compatibility policy, upgrade tests,
+threat model, load test, soak - are all still open, so T32 and T37 were named after version
+numbers that had already been released. **Decision: a milestone takes the number of the release
+it ships in**, so the two remaining ones were retitled to the next free versions - T32 "Milestone
+0.14: contract frozen (1.0 API candidate)", T37 "Milestone 0.15: hardened" - while 0.12.0 and
+0.13.0 keep what they actually shipped (doc import, participation). The jump from 0.11 to 0.14
+is that, and only that. If a feature release takes 0.14.0 first, the milestone moves again:
+retitle the task, never the version that already shipped.
 
 **Critical path:** T25 → T27 (both done) → T28 → T29 → T32 → T34 → T35 → T36 → T37 → T41 →
 T42 → T43. The week of real use is the longest step and cannot be compressed: it is what earns
@@ -86,7 +88,7 @@ which is why the forecast is re-run rather than trusted.
 remain before the release candidate (the table above: 1.5 + 1.5, a 24 h soak among them, and
 0.5). Three scenarios, re-run on 2026-09-25, the day after milestone 0.11 was reached:
 
-| Scenario | Pace | 0.11 (reached) | 0.12 | 0.13 | 1.0-rc1 | **1.0** |
+| Scenario | Pace | 0.11 (reached) | 0.14 | 0.15 | 1.0-rc1 | **1.0** |
 |---|---|---|---|---|---|---|
 | Optimistic | 5 active days a week, fixes small (3.5 days) | 24-25 Sep | Sep 26 | Sep 28 | Sep 29 | **Oct 6** |
 | **Likely** | 4 active days a week, 4.5 days of work | 24-25 Sep | Sep 28 | Sep 30 | Oct 1 | **Oct 8** |
@@ -101,8 +103,6 @@ remain before the release candidate (the table above: 1.5 + 1.5, a 24 h soak amo
 - T42 finding a P0 bug: fix it, and the week of real use starts again.
 - Packaging (T40): `coord` is free on PyPI and `coord-client` on npm (checked 2026-09-24), so
   publishing is not blocked; the alternative is to keep the GitHub release assets.
-- The milestone names (above): a decision, not a day - but T32 and T37 cannot be reached under a
-  number that has already shipped.
 - Available time: the forecast counts active days, so a quiet week shifts every date by that week.
 
 ## Keeping it current
@@ -111,6 +111,7 @@ Each milestone is a task: when its prerequisites are done, whoever it is for is 
 unblocked (`task.unblocked`). Re-run the forecast at each milestone with the actual pace, and
 update this file with the dates reached.
 
-**Re-runs.** *2026-09-25 (0.13.0):* 0.11 reached a day early; 0.12 and 0.13 not reached - their
-version numbers shipped with other work, so their names need settling first. The remaining
+**Re-runs.** *2026-09-25 (0.13.0):* 0.11 reached a day early; 0.14 and 0.15 not reached - their
+numbers were settled the same day (T104: a milestone takes the number of the release it ships
+in). The remaining
 forecast is unchanged: **1.0 still lands around 8 October 2026**.

@@ -481,6 +481,42 @@ def imported_notes_are_reviewed_into_state():
 
 
 @check
+def task_update_edits_what_a_task_says():
+    """task_update changes title, description, priority and category - never the status - and says what changed."""
+    c, _ = fresh()
+    a = c.whoami("claude", project="perm")
+    b = c.whoami("codex", project="perm")
+    s_a, s_b = a["session_id"], b["session_id"]
+    tid = c.task_create(s_a, "old title", category="code")["task"]
+
+    assert c.task_update(s_a, tid, title="new title") == {"task": tid, "changed": ["title"]}
+    assert c.task_update(s_a, tid, priority=3)["changed"] == ["priority"]
+    assert c.task_update(s_a, tid, category="tests")["changed"] == ["category"]
+    t = c.task_get(tid)
+    assert (t["title"], t["priority"], t["category"]) == ("new title", 3, "tests")
+    assert t["status"] == "open"                                   # status keeps its own path
+
+    # nothing given, or the value it already has, changes nothing
+    assert c.task_update(s_a, tid)["changed"] == []
+    assert c.task_update(s_a, tid, title="new title", priority=3)["changed"] == []
+    raises("bad_args", c.task_update, s_a, tid, title="   ")       # a task keeps a non-empty title
+    raises("bad_args", c.task_update, s_a, tid, priority=99)
+    raises("missing", c.task_update, s_a, "T9999", title="ghost")
+
+    # open project: anybody may edit. Restricted: only the creator, the assignee or a decider
+    assert c.task_update(s_b, tid, description="why it exists")["changed"] == ["description"]
+    c.member_set(s_a, a["name"], "admin")
+    c.member_set(s_a, b["name"], "contributor")
+    raises("forbidden", c.task_update, s_b, tid, title="not mine to rename")
+    assert c.task_update(s_a, tid, title="renamed by the admin")["changed"] == ["title"]
+    assert c.task_get(tid, session=s_a)["title"] == "renamed by the admin"
+
+    # what changed lands in the activity stream
+    log = [e for e in c.activity(project="perm", session=s_a) if e["kind"] == "task.updated"]
+    assert log and log[-1]["text"].endswith("(title)")
+
+
+@check
 def paused_agents_and_wake_requests():
     c, clock = fresh()
     h = c.whoami("ui", user="alice", human=True)["session_id"]

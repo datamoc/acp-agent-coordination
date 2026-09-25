@@ -93,6 +93,7 @@ export interface OpArgs {
   task_done: { session: string; task: string; note?: string; };
   task_get: { task: string; session?: string | null; };
   task_link: { session: string; task: string; after: string[]; remove?: boolean; type?: string; condition?: string | null; reason?: string; };
+  task_update: { session: string; task: string; title?: string | null; description?: string | null; priority?: number | null; category?: string | null; client_id?: string | null; };
   task_waive: { session: string; task: string; after: string; reason: string; };
   tasks: { project?: string | null; status?: string | null; assigned_session?: string | null; session?: string | null; view?: string | null; assigned?: string | null; };
   thread: { message: number; session?: string | null; };
@@ -908,6 +909,18 @@ export const OPS: Record<OpName, { kind: "read" | "write"; params: readonly stri
    "type",
    "condition",
    "reason"
+  ]
+ },
+ "task_update": {
+  "kind": "write",
+  "params": [
+   "session",
+   "task",
+   "title",
+   "description",
+   "priority",
+   "category",
+   "client_id"
   ]
  },
  "task_waive": {
