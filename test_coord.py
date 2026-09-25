@@ -516,6 +516,68 @@ def task_update_edits_what_a_task_says():
     assert log and log[-1]["text"].endswith("(title)")
 
 
+OLD_TAGS = ("v0.2.1", "v0.5.0", "v0.9.0", "v0.10.0")
+
+# Written with whatever the API was at that tag - only operations that existed then.
+SEED_OLD_DB = """
+import sys
+import coordination.service as svc
+from coordination.service import Coord
+print("MODULE:", svc.__file__)
+c = Coord(sys.argv[1])
+r = c.whoami("old", project=sys.argv[2])
+s = r.get("session_id") or r["session"]
+c.post(s, "hello from " + sys.argv[3])
+c.claim(s, "src/old.py")
+c.task_create(s, "seeded by " + sys.argv[3])
+print("seeded")
+"""
+
+
+@check
+def older_databases_still_open():
+    """A current server opens a database written by 0.2, 0.5, 0.9 and 0.10, keeps its rows and
+    keeps writing to it (T30). Each fixture is produced by the code of its own tag, not by us."""
+    import io
+    import subprocess
+    import tarfile
+
+    repo = Path(__file__).resolve().parent
+    for tag in OLD_TAGS:
+        dest = TMP / ("old-" + tag.replace(".", "_"))
+        if dest.exists():
+            shutil.rmtree(dest)
+        dest.mkdir(parents=True)
+        blob = subprocess.run(["git", "archive", tag, "coordination"], cwd=repo,
+                              capture_output=True, check=True).stdout
+        with tarfile.open(fileobj=io.BytesIO(blob)) as tf:
+            try:
+                tf.extractall(dest, filter="data")
+            except TypeError:                       # Python < 3.11.4 has no filter=
+                tf.extractall(dest)
+
+        db = dest / "coord2.db"
+        project = "fixture-" + tag
+        env = dict(os.environ, PYTHONPATH=str(dest))
+        p = subprocess.run([sys.executable, "-c", SEED_OLD_DB, str(db), project, tag],
+                           cwd=str(dest), env=env, capture_output=True, text=True, timeout=120)
+        assert p.returncode == 0, f"{tag}: seed failed\n{p.stdout}\n{p.stderr}"
+        loaded = next((ln.split("MODULE:", 1)[1].strip() for ln in p.stdout.splitlines()
+                       if ln.startswith("MODULE:")), "")
+        assert loaded.startswith(str(dest)), f"{tag}: seeded with {loaded}, not {dest}"
+
+        c = Coord(str(db))                                    # opens and migrates, current code
+        titles = [t["title"] for t in c.tasks(project=project)]
+        assert f"seeded by {tag}" in titles, (tag, titles)     # old rows survive
+        assert "src/old.py" in {x["scope"] for x in c.locks(project=project)}, tag
+        assert c.members(project=project) is not None          # project_members: a table from 0.11
+        assert c.members(project=project)["restricted"] is False
+
+        s2 = c.whoami("new", project=project)["session_id"]    # and it still writes
+        c.post(s2, "after the upgrade")
+        assert any(m["body"] == "after the upgrade" for m in c.inbox(s2, limit=None)), tag
+
+
 @check
 def paused_agents_and_wake_requests():
     c, clock = fresh()
