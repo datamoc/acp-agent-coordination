@@ -2252,6 +2252,14 @@ def local_and_oidc_modes_never_load_pki():
                        capture_output=True, text=True, cwd=TMP)
     assert p.returncode == 0 and p.stdout.strip().endswith("ok"), p.stdout + p.stderr
 
+@check
+def ui_project_visibility_toggle():
+    src = (Path(__file__).parent / "coordination" / "ui" / "app.js").read_text()
+    assert "coord.hidden_projects" in src              # per-browser preference (T109)
+    assert src.count("setProjectHidden") == 3          # definition + Hide + Show wiring
+    assert '"Hide"' in src and '"Show"' in src
+
+
 def main():
     failed = 0
     for fn in CHECKS:

@@ -360,13 +360,30 @@ function renderDue(routines) {
 
 const badge = (id, n) => { $(id).textContent = n ? String(n) : ""; };
 
+// Project visibility: per-browser display preference (T109). Hiding removes a
+// project from the board below; its data is untouched and the project picker
+// still lists it, so a hidden project stays one click away.
+function hiddenProjects() {
+  try { return JSON.parse(localStorage.getItem("coord.hidden_projects") || "[]"); }
+  catch { return []; }
+}
+function setProjectHidden(name, hide) {
+  const hidden = new Set(hiddenProjects());
+  if (hide) hidden.add(name); else hidden.delete(name);
+  try { localStorage.setItem("coord.hidden_projects", JSON.stringify([...hidden])); } catch { /* private window */ }
+}
+
 function renderBoard(board) {
   let total = 0;
-  $("board").replaceChildren(...board.projects.map((p) => {
+  const hidden = new Set(hiddenProjects());
+  const shown = board.projects.filter((p) => !hidden.has(p.project));
+  const missing = board.projects.filter((p) => hidden.has(p.project));
+  $("board").replaceChildren(...shown.map((p) => {
     const c = p.counts;
     total += c.attention;
     return el("div", { class: "proj" },
       el("div", {}, el("a", { class: "link", onclick: () => { $("project").value = p.project; enter(p.project).then(() => showTab("now")); } }, el("b", {}, p.project)),
+        el("button", { class: "ghost small", title: "hide this project from the board", onclick: act(() => { setProjectHidden(p.project, true); }) }, "Hide"),
         el("span", { class: "muted small" }, ` ${c.agents} agents (${c.active} active, ${c.paused} paused) · ${c.tasks} tasks · ${c.ready} ready · ${c.blocked} blocked · ${c.unowned} unowned · ${c.claims} claims`)),
       el("div", { class: "row" }, ...p.agents.map((a) => el("span", { class: `chip state-${a.state}${a.asleep_with_work ? " asleep" : ""}`, title: a.status || "" }, `${a.name} ${a.state}`))),
       el("ul", { class: "list" }, ...p.attention.map((x) => el("li", { class: `att att-${x.kind}` }, "⚠ ", x.text,
@@ -376,7 +393,9 @@ function renderBoard(board) {
       ...p.milestones.map((m) => el("div", { class: "small" }, "next milestone: ", el("span", { class: "id" }, m.milestone), `${m.title} - ${m.criteria_met}/${m.criteria.length} criteria, ${m.remaining.length} task(s) left`,
         m.target ? ` · target ${m.target.slice(0, 10)}` : "",
         m.projection?.available && m.projection.remaining ? ` · projected ${m.projection.p50.slice(0, 10)}–${(m.projection.p85 || "…").slice(0, 10)}` : "")));
-  }));
+  }),
+    ...missing.map((p) => el("div", { class: "small muted" }, `hidden: ${p.project} `,
+      el("button", { class: "ghost small", onclick: act(() => { setProjectHidden(p.project, false); }) }, "Show"))));
   return total;
 }
 
