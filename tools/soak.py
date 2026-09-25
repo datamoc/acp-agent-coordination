@@ -201,6 +201,17 @@ def pct(values: list[float], q: float) -> float:
     return v[min(len(v) - 1, max(0, int(round(q / 100 * (len(v) - 1)))))]
 
 
+def file_size(path: Path) -> int:
+    """Size of a database file that may not be there. SQLite deletes the -wal and -shm files when
+    its last connection closes, and this server opens a connection per request, so under light load
+    they vanish between two samples. That is a fact about the files, not an error - a `exists()`
+    then `stat()` here is a race, and losing the run to it is a monitor killing the experiment."""
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     g = ap.add_mutually_exclusive_group()
@@ -264,20 +275,24 @@ def main() -> int:
     wal = Path(str(db) + "-wal")
     while time.time() < end:
         time.sleep(min(30, max(1, duration * 60)))
-        with lock:
-            snap = {"at": round(time.time() - started, 1),
-                    "errors": stats.get("errors", 0),
-                    "sse_events": stats.get("sse_events", 0),
-                    "sse_reconnects": stats.get("sse_reconnects", 0),
-                    **{op: stats[op]["n"] for op in ("claim", "post", "locks") if op in stats}}
-        snap["rss"] = rss_bytes(proc.pid)
-        snap["wal"] = wal.stat().st_size if wal.exists() else 0
-        snap["db"] = db.stat().st_size if db.exists() else 0
-        samples.append(snap)
-        if not a.json:
-            print(f"  t+{snap['at']:7.0f}s  ops={sum(snap.get(k, 0) for k in ('claim','post','locks')):<7} "
-                  f"errors={snap['errors']}  sse={snap['sse_events']} (reconnects {snap['sse_reconnects']})  "
-                  f"rss={(snap['rss'] or 0)//1024//1024}MB  wal={snap['wal']//1024}KB", flush=True)
+        try:
+            with lock:
+                snap = {"at": round(time.time() - started, 1),
+                        "errors": stats.get("errors", 0),
+                        "sse_events": stats.get("sse_events", 0),
+                        "sse_reconnects": stats.get("sse_reconnects", 0),
+                        **{op: stats[op]["n"] for op in ("claim", "post", "locks") if op in stats}}
+            snap["rss"] = rss_bytes(proc.pid)
+            snap["wal"] = file_size(wal)
+            snap["db"] = file_size(db)
+            samples.append(snap)
+            if not a.json:
+                print(f"  t+{snap['at']:7.0f}s  ops={sum(snap.get(k, 0) for k in ('claim','post','locks')):<7} "
+                      f"errors={snap['errors']}  sse={snap['sse_events']} (reconnects {snap['sse_reconnects']})  "
+                      f"rss={(snap['rss'] or 0)//1024//1024}MB  wal={snap['wal']//1024}KB", flush=True)
+        except Exception as e:              # a monitor must never end the run it is watching
+            with lock:
+                stats["monitor_error"] = f"{type(e).__name__}: {e}"
 
     stop.set()
     for t in threads:
@@ -286,7 +301,8 @@ def main() -> int:
     with lock:
         elapsed = time.time() - started
         final = {"duration_s": round(elapsed, 1), "duration_h": round(elapsed / 3600, 3),
-                 "startup_error": stats.get("startup_error"), "agents": a.agents,
+                 "startup_error": stats.get("startup_error"),
+                 "monitor_error": stats.get("monitor_error"), "agents": a.agents,
                  "renew_after_days": a.renew_after_days,
                  "errors": stats.get("errors", 0),
                  "sse_events": stats.get("sse_events", 0),
@@ -317,7 +333,7 @@ def main() -> int:
         print(f"\n{final['duration_h']:.2f} h, {final['errors']} errors, "
               f"{final['sse_events']} SSE events over {final['sse_opens']} opens "
               f"({final['sse_reconnects']} reconnects), {final['certificates']} certificates for 'soak'")
-        for what in ("startup_error", "sse_error"):
+        for what in ("startup_error", "sse_error", "monitor_error"):
             if final.get(what):
                 print(f"  !! {what}: {final[what]}")
         for op, s in final["ops"].items():
@@ -331,7 +347,7 @@ def main() -> int:
     if a.out:
         Path(a.out).write_text(render(final, samples), encoding="utf-8")
         print(f"  report: {a.out}")
-    if final.get("startup_error") or final.get("sse_error"):
+    if final.get("startup_error") or final.get("sse_error") or final.get("monitor_error"):
         return 1
     return 1 if final["errors"] else 0
 
