@@ -86,7 +86,13 @@ foreach ($n in $names) {
 # --- the coord command --------------------------------------------------------------------------
 Step "coord command"
 New-Item -ItemType Directory -Force $Bin | Out-Null
-Set-Content -Encoding ASCII (Join-Path $Bin "coord.cmd") "@node `"$Cli`" %*"
+$shim = Join-Path $Bin "coord.cmd"
+$shimWant = "@node `"$Cli`" %*"
+$shimHave = if (Test-Path -LiteralPath $shim) { Get-Content -Raw -LiteralPath $shim } else { $null }
+if ($null -ne $shimHave -and $shimHave.Trim() -ne $shimWant) {
+    Warn "coord.cmd pointed at another checkout (moved repo, or an old name): $($shimHave.Trim())"
+}
+Set-Content -Encoding ASCII $shim $shimWant
 Ok "$Bin\coord.cmd -> plugins\coord\client\cli.js (the bundled client: no npm build needed)"
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
 if (($userPath -split ";") -notcontains $Bin) {
