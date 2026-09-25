@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "dist"
 TS = ROOT / "clients" / "ts"
 
-ASSETS = ("coord-{v}-py3-none-any.whl", "coord-{v}.tar.gz", "coord-client-{v}.tgz")
+ASSETS = ("coord-server-{v}-py3-none-any.whl", "coord-server-{v}.tar.gz", "coord-client-{v}.tgz")
 
 
 def run(cmd: list[str], cwd: Path | None = None, dry: bool = False) -> str:
@@ -64,7 +64,7 @@ def default_notes(version: str) -> str:
     section = changelog_section(version)
     base = f"https://github.com/datamoc/coord/releases/download/v{version}"
     return (section + "\n## Install\n```sh\n"
-            f"uv tool install {base}/coord-{version}-py3-none-any.whl\n"
+            f"uv tool install {base}/coord-server-{version}-py3-none-any.whl\n"
             f"npm install -g {base}/coord-client-{version}.tgz\n```\n")
 
 
@@ -116,6 +116,11 @@ def main() -> None:
 
     run(["uv", "build"], dry=dry)
     run(["npm", "pack", "--pack-destination", str(DIST)], cwd=TS, dry=dry)
+    for f in sorted(DIST.glob("coord_server-*")):
+        target = DIST / f.name.replace("coord_server-", "coord-server-", 1)
+        print(f"+ rename {f.name} -> {target.name}")
+        if not dry:
+            f.rename(target)
     assets = [DIST / t.format(v=version) for t in ASSETS]
     if not dry:
         missing = [str(f) for f in assets if not f.exists()]

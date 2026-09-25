@@ -9,6 +9,9 @@ when it starts on a newer version. Dates are commit dates.
 
 Everything after the `v0.13.0` tag:
 
+- **PyPI name**: the Python distribution publishes as `coord-server` - bare `coord`
+  is blocked on PyPI even though nothing is published under it.
+
 - **`task update`** - a task's title, description, priority and category can be edited by its
   creator, its assignee or a decider. Status still has its own path (accept, done, decline,
   cancel). The contract simply had no way to do this before.
