@@ -1,15 +1,18 @@
 """Write schema/ops.json - the coord wire contract - from coordination/service.py.
 
 Every op is POST /call {"op": <name>, "args": {...}} -> {"ok": true, "result": ...}
-or {"ok": false, "error": <code>, "message": ..., "data": ...}. Clients in any
-language check themselves against this file (see test_coord.py and
-clients/ts/test/). Regenerate after changing an op signature:
+or {"ok": false, "error": <code>, "message": ..., "data": ...}. The contract carries
+the ops and their params, the enums, and the error codes - the second half of the
+reply, which clients match on. Clients in any language check themselves against this
+file (see test_coord.py and clients/ts/test/). Regenerate after changing an op
+signature or adding an error code:
 
     uv run tools/gen_schema.py
 """
 
 import inspect
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -36,6 +39,19 @@ def json_type(annotation) -> tuple[str, bool]:
     return _JSON[parts[0]], nullable
 
 
+def errors() -> list[str]:
+    """Every error code the server can raise - the half of the contract clients match on
+    (`{"ok": false, "error": <code>, "message": ...}`) that was not in it. Collected from the
+    CoordError literals in the package, so a new code cannot appear without appearing here too."""
+    codes: set[str] = set()
+    pkg = Path(__file__).resolve().parents[1] / "coordination"
+    for f in sorted(pkg.glob("*.py")):
+        codes.update(re.findall(r'CoordError\(\s*"([a-z_]+)"', f.read_text(encoding="utf-8")))
+    if not codes:
+        raise SystemExit(f"no CoordError codes found under {pkg}")
+    return sorted(codes)
+
+
 def schema() -> dict:
     ops = {}
     for op in sorted(READ_OPS | WRITE_OPS):
@@ -53,7 +69,7 @@ def schema() -> dict:
                           "MESSAGE_PRIORITIES", "ACK_STATES", "CONTACT_POLICIES", "DOC_VISIBILITY", "LINK_TYPES",
                           "SUGGESTION_TARGETS", "SUGGESTION_NATURES", "SESSION_STATES", "WAKE_REASONS",
                           "MANDATE_POWERS")}
-    return {"version": 1, "transport": "POST /call {op, args}", "enums": enums, "ops": ops}
+    return {"version": 1, "transport": "POST /call {op, args}", "enums": enums, "errors": errors(), "ops": ops}
 
 
 def render() -> str:

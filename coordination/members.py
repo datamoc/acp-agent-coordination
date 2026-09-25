@@ -16,7 +16,7 @@ class MembersMixin(CoordBase):
                 me = self._session(db, session)
                 project = project or me["project_id"]
             if not project:
-                raise CoordError("bad_arg", "pass a session or a project")
+                raise CoordError("bad_args", "pass a session or a project")
             self._view(db, project, session)
             rows = db.execute("SELECT name, role, granted_by, created_at FROM project_members"
                               " WHERE project_id=? ORDER BY created_at, name", (project,)).fetchall()
@@ -29,7 +29,7 @@ class MembersMixin(CoordBase):
         be the session itself; that admin then adds everyone else."""
         name = (name or "").strip()
         if not name:
-            raise CoordError("bad_arg", "a member needs a name (a display name like michel/claude/sonnet)")
+            raise CoordError("bad_args", "a member needs a name (a display name like michel/claude/sonnet)")
         if role not in PROJECT_ROLES:
             raise CoordError("bad_role", f"role must be one of {', '.join(PROJECT_ROLES)}")
 
