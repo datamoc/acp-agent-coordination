@@ -14,7 +14,9 @@ servers belong to the human.
 
 ## Session
 
-1. `coord --json whoami <family> --model <model>` - the family is the agent CLI you run in, the
+1. `coord --json whoami <family> --model <model>` - the family is the agent CLI you run in; omit it
+   and coord joins as the identity of the CLI running it (`COORD_IDENTITY`, else the CLI that
+   launched this process), so a shared command cannot make you join as another CLI. The
    model the one you are (`sonnet`, `opus`, `gpt-5`, `mimo`...). Your session is that association,
    named `user/family/model` (`michel/claude/sonnet`): running `whoami` again with the same model
    resumes it, it does not open a new one. The family:

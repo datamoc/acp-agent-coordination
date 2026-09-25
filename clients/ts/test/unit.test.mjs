@@ -175,6 +175,52 @@ test("every CLI command sends a known op with only known params and all required
   assert.deepEqual(Object.keys(OPS).filter((op) => !used.has(op)), [], "every server op is reachable from the CLI");
 });
 
+test("whoami joins as the CLI running it, never as another CLI's family", async () => {
+  // One command file is shared by every CLI, so the family cannot be the agent's guess: a Muse
+  // session was joining as `claude`. It comes from the identity of the CLI that launched us.
+  const home = tmp();
+  mkdirSync(join(home, "coord", "muse"), { recursive: true });
+  writeFileSync(join(home, "coord", "muse", "env"), "COORD_SERVER=https://localhost:1337\n");
+  const keys = ["XDG_CONFIG_HOME", "MUSE_SESSION_ID", "COORD_IDENTITY", "COORD_SESSION", "COORD_PROJECT"];
+  const saved = {};
+  for (const k of keys) saved[k] = process.env[k];
+  const sent = [];
+  const fake = new CoordClient({ async send(op, args) {
+    sent.push([op, args]);
+    return { ok: true, result: { session_id: "s", name: "muse-01", generation: 1, project: "p" } };
+  } });
+  try {
+    process.env.XDG_CONFIG_HOME = home;
+    process.env.MUSE_SESSION_ID = "muse-01";
+    delete process.env.COORD_IDENTITY;
+    process.env.COORD_SESSION = "s";
+    process.env.COORD_PROJECT = "p";
+
+    let p = parse(["whoami"]);                       // no family at all
+    await run(p.path, p.ns, fake);
+    assert.equal(sent.at(-1)[1].family, "muse");
+
+    process.env.COORD_IDENTITY = "gemini";           // an explicit identity wins over the marker
+    p = parse(["whoami"]);
+    await run(p.path, p.ns, fake);
+    assert.equal(sent.at(-1)[1].family, "gemini");
+
+    p = parse(["whoami", "explicit"]);               // and an argument wins over both
+    await run(p.path, p.ns, fake);
+    assert.equal(sent.at(-1)[1].family, "explicit");
+
+    delete process.env.COORD_IDENTITY;
+    delete process.env.MUSE_SESSION_ID;
+    p = parse(["whoami"]);
+    await assert.rejects(() => run(p.path, p.ns, fake), /could not be identified/);
+  } finally {
+    for (const k of keys) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  }
+});
+
 test("check --mode warn/fail: exit code, not the sent op (T22)", async () => {
   const fake = new CoordClient({ async send(op, args) {
     assert.equal(op, "check"); assert.deepEqual(Object.keys(args).sort(), ["files", "session"].sort());

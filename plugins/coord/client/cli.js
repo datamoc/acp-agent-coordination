@@ -11,7 +11,7 @@ import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CoordClient, tokenSource, transportFromEnv } from "./client.js";
-import { ConfigError, loadConfig } from "./config.js";
+import { ConfigError, hostIdentity, loadConfig } from "./config.js";
 import { CoordError } from "./errors.js";
 import { unifiedDiff } from "./diff.js";
 import { userInfo } from "node:os";
@@ -27,9 +27,20 @@ const s = (flag, extra = {}) => ({ flag, kind: "str", ...extra });
 const i = (flag, extra = {}) => ({ flag, kind: "int", ...extra });
 const b = (flag) => ({ flag, kind: "bool", default: false });
 const kind = (def) => s("--kind", { default: def, choices: K.message_kinds });
+/** The family to join as when the command did not name one: the identity of the CLI running us
+ *  (COORD_IDENTITY, else the one named after the agent CLI that launched this process). One
+ *  command file is shared by every CLI, so the agent must not pick the family itself - a Muse
+ *  session was joining as `claude` because the shared text mentioned it. No marker, no guess. */
+function hostFamily() {
+    const id = process.env.COORD_IDENTITY || hostIdentity();
+    if (id)
+        return id;
+    throw new UsageError("whoami: no family given, and the agent CLI running this could not be "
+        + "identified - pass one (coord whoami claude) or set COORD_IDENTITY");
+}
 const COMMANDS = {
-    whoami: { help: "take (or resume) your session: user/family/model, e.g. michel/claude/sonnet",
-        pos: [{ name: "family" }], opts: [s("--model"), s("--user"), s("--project"), b("--human")] },
+    whoami: { help: "take (or resume) your session: user/family/model, e.g. michel/claude/sonnet; without a family it is the CLI running this",
+        pos: [{ name: "family", nargs: "?" }], opts: [s("--model"), s("--user"), s("--project"), b("--human")] },
     heartbeat: { pos: [{ name: "status", nargs: "?", default: "" }] },
     end: { help: "end this session (its claims lapse)" },
     login: { help: "SSO device login (Keycloak): sign in once in a browser; tokens refresh by themselves" },
@@ -381,7 +392,7 @@ export async function run(path, a, c) {
     const cmd = path[0];
     switch (cmd) {
         case "whoami": {
-            const r = await call("whoami", { family: a.family, project: a.project || detectProject(), client_id: uuid(),
+            const r = await call("whoami", { family: a.family || hostFamily(), project: a.project || detectProject(), client_id: uuid(),
                 user: a.user ?? sessionUser(), model: a.model || process.env.COORD_MODEL || null,
                 ...(a.human ? { human: true } : {}) });
             // .coord-session is shared by every session in this checkout: never overwrite one that still
