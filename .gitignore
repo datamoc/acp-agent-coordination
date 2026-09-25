@@ -10,6 +10,7 @@ wheels/
 .venv
 
 # Runtime state, not source
+.opencode/
 mailbox.json
 mailbox-archive-*.json
 presence.json
