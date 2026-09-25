@@ -20,6 +20,9 @@ architecture, a claim conflict, a consensus discussion and a routine's lifecycle
 **Road to 1.0.0: [docs/ROADMAP.md](docs/ROADMAP.md)** - what remains of the design notes,
 the milestones 0.11 to 1.0.0 and their forecast.
 
+**Changelog: [CHANGELOG.md](CHANGELOG.md)** - every release, newest first, and
+**[docs/UPGRADE-1.0.md](docs/UPGRADE-1.0.md)** for the move from 0.x to 1.0.
+
 | Part | Where | Language | Command |
 |---|---|---|---|
 | Server (service, SQLite) | `coordination/server.py`, `a2a.py`; `service.py` = `core.py` + one module per topic (`sessions`, `messages`, `claims`, `consensus`, `documents` + `textpatch`, `tasks`, `memory`, `routing`, `members`, `governance`, `review`, `dashboard`, `wakeup`, `routines`) | Python, stdlib only | `coord-server` |
