@@ -52,7 +52,7 @@ load, without a serious bug.
 | Milestone | Tasks | Effort (active days) | Reached (25 Sep) | Notes |
 |---|---|---|---|---|
 | **0.11** quality gates | T22-T26 → T27 | 1 | **yes** - the night of 24-25 Sep | T25 (ruff/pyright) was the biggest: 285 errors to 0 |
-| **0.14** contract frozen | T28-T31 → T32 | 1.5 | no - only T32 left | T28-T31 all done: contract reviewed, policy written, fixtures built from the tags, import + restore guide |
+| **0.14** contract frozen | T28-T31 → T32 | 1.5 | **yes** - 25 Sep | contract reviewed (DOC10), policy in docs/COMPATIBILITY.md, fixtures built from the tags, import + restore guide |
 | **0.15** hardened | T33-T36 → T37 | 1.5 + a 24 h soak | no - T33-T37 open | the soak runs overnight; T36 is the unknown |
 | **1.0-rc1** | T37, T38-T40 → T41 | 0.5 | no - T37-T41 open | guides, changelog and packaging can run beside the hardening |
 | **1.0** | T42 → T43 | 7 calendar days | no - T42-T43 open | real multi-agent work on mwg-pixel-dungeon, no P0 bug |
@@ -67,7 +67,7 @@ it ships in**, so the two remaining ones were retitled to the next free versions
 is that, and only that. If a feature release takes 0.14.0 first, the milestone moves again:
 retitle the task, never the version that already shipped.
 
-**Critical path:** T25 → T27 (both done) → T28 → T29 → T32 → T34 → T35 → T36 → T37 → T41 →
+**Critical path:** T25 → T27 → T28 → T29 → T32 (all five done) → T34 → T35 → T36 → T37 → T41 →
 T42 → T43. The week of real use is the longest step and cannot be compressed: it is what earns
 the "1".
 
@@ -88,11 +88,11 @@ which is why the forecast is re-run rather than trusted.
 remain before the release candidate (the table above: 1.5 + 1.5, a 24 h soak among them, and
 0.5). Three scenarios, re-run on 2026-09-25, the day after milestone 0.11 was reached:
 
-| Scenario | Pace | 0.11 (reached) | 0.14 | 0.15 | 1.0-rc1 | **1.0** |
+| Scenario | Pace | 0.11 (reached) | 0.14 (reached) | 0.15 | 1.0-rc1 | **1.0** |
 |---|---|---|---|---|---|---|
-| Optimistic | 5 active days a week, fixes small (3.5 days) | 24-25 Sep | Sep 26 | Sep 28 | Sep 29 | **Oct 6** |
-| **Likely** | 4 active days a week, 4.5 days of work | 24-25 Sep | Sep 28 | Sep 30 | Oct 1 | **Oct 8** |
-| Pessimistic | 2-3 active days a week, the review or the soak finds real problems (6.5 days) | 24-25 Sep | Oct 2 | Oct 8 | Oct 12 | **Oct 19** |
+| Optimistic | 5 active days a week, fixes small (3.5 days) | 24-25 Sep | 25 Sep | Sep 28 | Sep 29 | **Oct 6** |
+| **Likely** | 4 active days a week, 4.5 days of work | 24-25 Sep | 25 Sep | Sep 30 | Oct 1 | **Oct 8** |
+| Pessimistic | 2-3 active days a week, the review or the soak finds real problems (6.5 days) | 24-25 Sep | 25 Sep | Oct 8 | Oct 12 | **Oct 19** |
 
 **Target milestone: 1.0 around 8 October 2026**, with 6-19 October as the range.
 
@@ -111,7 +111,10 @@ Each milestone is a task: when its prerequisites are done, whoever it is for is 
 unblocked (`task.unblocked`). Re-run the forecast at each milestone with the actual pace, and
 update this file with the dates reached.
 
-**Re-runs.** *2026-09-25 (0.13.0):* 0.11 reached a day early; 0.14 and 0.15 not reached - their
-numbers were settled the same day (T104: a milestone takes the number of the release it ships
-in). The remaining
-forecast is unchanged: **1.0 still lands around 8 October 2026**.
+**Re-runs.** *2026-09-25 (0.13.0), twice over:* 0.11 reached a day early, its numbering settled
+the same day (T104: a milestone takes the number of the release it ships in) - and then **0.14,
+the contract frozen, reached the same day**: T105, T28, T29, T30, T31 and T32 all closed on
+25 September, hours before the forecast's earliest (optimistic) date of 26 September. What is left
+starts at the security review, the load test, the guides and the changelog. **1.0 still lands
+around 8 October 2026** on every scenario: the remaining effort - 1.5 days of hardening, the 24 h
+soak, the release candidate and the week of real use - did not shrink.

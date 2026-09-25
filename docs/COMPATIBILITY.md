@@ -51,6 +51,24 @@ client cannot hand a new argument to an old server and hope it is ignored. Match
    **Downgrade is not promised**: take `coord-db export` before upgrading, restore with
    `coord-db import`.
 
+## Settled before the freeze
+
+Three names each carry two meanings (found by the contract review, DOC10). They are **accepted as
+they are**, and this is the decision T32 froze them under:
+
+- **`message`** is an integer id in `ack`, `receipts`, `reply`, `resolve`, `thread`, and the change
+  summary in `doc_edit` / `doc_patch` - the `--message/-m` flag, a git-style note about the edit.
+- **`priority`** is an integer on `task_create` / `task_update`, and the
+  `low|normal|high|urgent` enum on `post` - attention, not rank.
+- **`after`** is a cursor in `inbox` and `events`, and prerequisites in `task_create`, `task_link`
+  and `milestone_create`; `task_waive` takes exactly one, on purpose (waiving lifts one link and
+  keeps its reason).
+
+Renaming them now would break every existing caller - CLI, agent skill, README, direct API users -
+for something the generated types already prevent: a client reads `integer`, `string` or
+`string[]` out of `schema/ops.json` per parameter, so it cannot confuse them. Accepted; not
+revisited in 1.x, which is exactly what rule 2 above promises.
+
 ## Deprecation window
 
 **Two minor releases**, and never fewer than one. A deprecation is announced in three places at
