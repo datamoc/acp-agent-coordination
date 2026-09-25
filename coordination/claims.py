@@ -1,6 +1,12 @@
-"""Claims: scopes, fences, roles (ask/grant), git checks."""
+"""Claims: scopes, fences, roles (ask/grant), git checks.
+
+A claim is a file scope by default; with a `resource` kind it is any shared resource - gpu:0, the
+npm-test build slot, a test database, localhost:8080, a licence seat, a test phone - with the same
+owner, reason, lease (ttl), renewal, state and history. Resource claims conflict only with claims on
+the same resource kind and name, and never take part in git checks."""
 
 import contextlib
+import re
 import sqlite3
 
 from . import scopes
@@ -15,11 +21,12 @@ class ClaimsMixin(CoordBase):
             raise CoordError("bad_scope", str(e)) from e
         return ("tree" if (tree or is_dir) else "exact"), path
 
-    def _active_claims(self, db, project):
+    def _active_claims(self, db, project, resource: str | None = None):
+        """Live claims of a project on files (resource None) or on one resource kind."""
         now = self.clock()
         return db.execute(
-            "SELECT * FROM claims WHERE project_id=? AND released_at IS NULL AND expires_at>?" + self._LIVE_OWNER,
-            (project, now, now - SESSION_TTL)).fetchall()
+            "SELECT * FROM claims WHERE project_id=? AND released_at IS NULL AND expires_at>? AND resource IS ?"
+            + self._LIVE_OWNER, (project, now, resource, now - SESSION_TTL)).fetchall()
 
     def _delegated(self, db, c, session_id: str, stype: str, path: str) -> bool:
         """An accepted delegate role on claim `c` covers (stype, path): the whole claim, or its sub-scope."""
@@ -39,21 +46,37 @@ class ClaimsMixin(CoordBase):
     def _claim_dict(r) -> dict:
         return {"claim": f"C{r['claim_id']}", "claim_id": r["claim_id"], "owner": r["owner_name"],
                 "owner_session_id": r["owner_session_id"], "scope_type": r["scope_type"],
-                "scope": scopes.display(r["scope_type"], r["scope"]), "note": r["note"],
+                "scope": scopes.display(r["scope_type"], r["scope"]) if r["resource"] is None
+                else f"[{r['resource']}] {r['scope']}", "resource": r["resource"], "note": r["note"],
                 "fence": r["fence"], "expires_at": iso(r["expires_at"]),
                 "release_on_commit": bool(r["release_on_commit"]), "project": r["project_id"],
                 "released": r["released_at"] is not None}
 
     def claim(self, session: str, scope: str, tree: bool | None = None, note: str = "",
-              ttl: int = CLAIM_TTL, release_on_commit: bool = False,
+              ttl: int = CLAIM_TTL, release_on_commit: bool = False, resource: str | None = None,
               client_id: str | None = None) -> dict:
-        stype, path = self._norm(scope, tree)
+        """Claim a file scope (a path, `dir/` for a tree) or, with `resource`, a shared resource:
+        claim gpu:0 --resource gpu, claim npm-test --resource build, claim 8080 --resource port."""
+        if resource is not None:
+            resource = resource.strip().lower()
+            if not re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", resource) or resource == "file":
+                raise CoordError("bad_scope", "a resource kind is a short word: gpu, build, service, port, browser, "
+                                 "license, device... (leave it out for files)")
+            stype, path = "exact", (scope or "").strip()
+            if not path or len(path) > 200:
+                raise CoordError("bad_scope", "name the resource: gpu:0, npm-test, localhost:8080...")
+            if release_on_commit:
+                raise CoordError("bad_args", "--release-on-commit is for file claims")
+        else:
+            stype, path = self._norm(scope, tree)
 
         def fn(db):
             me, project = self._access(db, session, None, "participate")
             self._reap(db)
-            for c in self._active_claims(db, project):
-                if not scopes.overlaps(stype, path, c["scope_type"], c["scope"]):
+            for c in self._active_claims(db, project, resource):
+                if resource is not None and c["scope"] != path:
+                    continue
+                if resource is None and not scopes.overlaps(stype, path, c["scope_type"], c["scope"]):
                     continue
                 if c["owner_session_id"] == session:
                     if c["scope_type"] == stype and c["scope"] == path:
@@ -62,19 +85,21 @@ class ClaimsMixin(CoordBase):
                     continue
                 if self._delegated(db, c, session, stype, path):
                     continue
-                raise CoordError("conflict", f"{scopes.display(stype, path)} overlaps C{c['claim_id']} "
-                                 f"({scopes.display(c['scope_type'], c['scope'])}) held by "
+                shown = scopes.display(stype, path) if resource is None else f"[{resource}] {path}"
+                raise CoordError("conflict", f"{shown} overlaps C{c['claim_id']} "
+                                 f"({self._claim_dict(c)['scope']}) held by "
                                  f"{c['owner_name']}", {"held_by": self._claim_dict(c)})
             now = self.clock()
             fence = self._next_fence(db)
             cur = db.execute(
                 "INSERT INTO claims(project_id, owner_session_id, owner_name, scope_type, scope, note,"
-                " claimed_at, expires_at, fence, release_on_commit) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                " claimed_at, expires_at, fence, release_on_commit, resource) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                 (project, session, me["display_name"], stype, path, note or "", now, now + ttl,
-                 fence, int(bool(release_on_commit))))
+                 fence, int(bool(release_on_commit)), resource))
             row = db.execute("SELECT * FROM claims WHERE claim_id=?", (cur.lastrowid,)).fetchone()
             self._event(db, project, "claim.acquired", session, "claim", cur.lastrowid,
-                        scope=scopes.display(stype, path), fence=fence)
+                        scope=scopes.display(stype, path) if resource is None else f"[{resource}] {path}", fence=fence,
+                        **({"resource": resource} if resource else {}))
             return self._claim_dict(row)
         return self._mutate("claim", client_id, fn)
 
@@ -290,7 +315,7 @@ class ClaimsMixin(CoordBase):
             # ones opted in with --release-on-commit (still honoured, and still the only way to
             # auto-release a tree-scope claim, which this loop does not touch).
             for c in db.execute("SELECT * FROM claims WHERE owner_session_id=? AND released_at IS NULL"
-                                " AND scope_type='exact'", (session,)).fetchall():
+                                " AND scope_type='exact' AND resource IS NULL", (session,)).fetchall():
                 if c["scope"] in paths:
                     db.execute("UPDATE claims SET released_at=?, released_by=? WHERE claim_id=?",
                                (self.clock(), session, c["claim_id"]))

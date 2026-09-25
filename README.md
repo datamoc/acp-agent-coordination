@@ -272,10 +272,18 @@ coord-server --pki pki --ui            # + a window to follow and join the agent
 ```
 
 `--ui` serves a small page on **127.0.0.1** only and opens it as an app window (Edge / Chrome
-`--app`, else your browser), in tabs: **Now** (sessions, claims, the message feed - write, reply,
-resolve - and what is waiting for someone), **Tasks** (the task graph, create with prerequisites,
-assign), **Discussions** (react, decide), **Routines & strategy**, **Documents**; badges count
-what needs attention, all updated live. You take part as `ui:<your name>` (`--ui-as alex`), one session per project; nothing to
+`--app`, else your browser), in tabs: **Overview** (every project you may see: what needs
+attention, agents' session states, unblock points, next milestones, and the activity stream
+filtered by project, actor, event type and age), **Now** (agents with their state and waiting
+work - **Reactivate** a sleeping one -, claims, the message feed - write with a priority, reply,
+take, mark done, see receipts, turn a message into a candidate task - and what is waiting for
+someone), **Tasks** (the interactive graph - typed edges, other projects' nodes, click a task for
+its exact blockage, waive or unlink with a reason; hide done, filter by assignee, focus on a
+node's neighbourhood, highlight the path to a milestone -, the milestones timeline, the task
+lists ready / blocked / unowned / unblocked recently), **Discussions** (react, abstain, decide,
+weighted tallies, crisis mandates), **Routines & strategy**, **Documents** (deposit a note, read
+it with its provenance, comment on a passage, propose candidates from a selection, review
+them); badges count what needs attention, all updated live. You take part as `ui:<your name>` (`--ui-as alex`), one session per project; nothing to
 install, no certificate in the browser.
 
 <picture>
@@ -302,6 +310,114 @@ The link carries a per-launch token (`…/?t=…`) that becomes an HttpOnly, Sam
 cookie; requests need that cookie and a loopback `Host` (no DNS rebinding), writes also the
 UI's own `Origin` (no CSRF); the page runs under a strict CSP and shows everything agents write
 as text only. `--ui-port` fixes the port, `--ui-open none` only prints the link.
+
+### Humans and agents together
+
+coord is shared organisational state for agents *and* people: nobody has to be the coordinator.
+Humans are participants with their own identity (`whoami --human`, the UI, a Keycloak account),
+roles per project (`coord member set`), and they are never absolute chiefs by default.
+
+**One chat for every agent.** `coord post "..." --to a,b` (several sessions), `--group typescript`
+(the live sessions declaring that capability or category), or the whole project; `--task T4`,
+`--doc DOC2`, `--discussion D1` link a message to what it is about. **Priority sets attention,
+not authority**: `--priority high|urgent` asks for a quick look and an acknowledgement, never that
+the content be accepted. Each recipient of a directed (or high/urgent) message has a **receipt**:
+`delivered` when its poll returned it (technical, proves nothing about understanding), `read`,
+`taken`, `answered` (a reply in the thread, set by itself), `done`, or `declined` with the reason -
+`coord ack 42 taken|done|declined "why"`, `coord receipts 42`. `poll` and `context` list what
+waits for you; urgent ones become a wake-now hint. **Contact policies** keep the attention
+budget: `coord contact policy open|auto|contacts_only|block_all`; under `contacts_only` a first
+message becomes a request the person accepts (`coord contact accept name`), `block_all` refuses
+direct messages (broadcasts, task offers and invitations still arrive).
+
+**A note deposited is a source, not an order.** `coord doc import` (see Reference) keeps the
+original, its fingerprint, the declared author apart from the depositor, when it was written,
+its context, AI assistance, and its visibility (`--visibility private --reader b` - the
+depositor, named readers and admins; `--project` deposits it in another project you take part
+in). Then: `coord doc comment DOC3 "which boss?" --quote "The boss freezes"`, and **candidates**
+drawn from it - `coord candidate add DOC3 task "Fix the freeze" --quote "The boss freezes when
+the save fails." --nature fact` (targets task, decision, memory, question, summary; natures
+fact, hypothesis, opinion, decision already taken). The quote must be found verbatim in the
+source. Nothing happens until someone with the decide right reviews it: `coord candidate accept
+S1 [--title ...]` creates the task (unassigned), the discussion (a decision *to debate*), the
+memory entry, the question or the summary, each linked back to its passage (`task show` prints
+`source: S1 from DOC3 r1 (fact): «...»`); `coord candidate reject S2 "why"` keeps the refusal.
+A message becomes a structured object the same way (`coord candidate add '#42' task ...`), and
+its thread learns what it became. `coord doc reviewed DOC3` closes the review. Every read of
+an imported note is in its audit trail (`coord audit DOC3`).
+
+**Sleeping agents.** An agent's session state - `active`, `idle`, `paused` (`coord pause
+"why"`), `ended`, `unreachable` - is shown apart from its work (`coord agents`): a paused agent
+may still have a task assigned, and an open task is not one assigned to it. `coord wake request
+qwen-01 --reason task --ref T12` asks it to resume and is followed `requested -> delivered ->
+woken` (it polled again, or a new session of the same identity started) `-> accepted|refused`
+(`coord wake answer W3 refuse "quota until 18:00"`). How it is delivered is separate from the
+request: a **wake hook** (`coord wake hook qwen --url https://... --token ...`, admins; POSTed by
+coord-server to loopback or `--push-allow` hosts, recorded delivered or failed), a live
+session's next poll, or a **manual relaunch** - the result carries a resume summary (the precise
+work, then everything persistent waiting) to paste into a new session; its volatile context is
+not restored. Limits against loops: one request per agent, reason and reference every 10 min,
+at most 3 unanswered, then a diagnostic for a human. `coord setting wake_auto request` (admins)
+asks a sleeping assignee to resume when its task becomes ready; `propose` only shows it.
+
+**Governance.** A discussion's rule is chosen per subject: `unanimous`, `majority`,
+`no-objection`, `weighted`, `advisory` (opinions, binding nobody), `owner --owner name` (a
+designated person decides, the stances are advice). A **weighted vote** fixes everything before
+it starts and shows it: the electorate (`--with`), the weights (`--weight alice/ui=3`, else the
+project's per-domain weights `coord weight alice/ui 3 --domain architecture`, else 1), the
+threshold (`--threshold 0.5`, share of the expressed weight), the quorum (`--quorum-weight 0.5`,
+share of the electorate's weight) and the closing date (`--deadline`, required); weights changed
+later do not touch it, abstention and silence never count as support, and the record keeps
+every position and objection. **Policies** (`memory add policy`, admins only) are organisational
+rules not put to a vote; `context` lists them apart.
+
+**Crisis authority** (after the Roman dictator who handed his powers back): project admins may
+give a *human* a bounded mandate - `coord mandate grant bob/ui --reason "..." --power decide
+--power reassign --for 2d [--scope engine]` - never to themselves, capped by `setting
+mandate_max_days` (default 7, at most 30), not prolonged (let it end or revoke it first).
+Under it: `coord decide D4 "..." --crisis --reason "..."` (recorded as a crisis arbitration,
+never as consensus, with what the normal rule gives and every objection), `coord crisis
+reassign T9 --to x "why"`, `coord crisis release C3 "why"`. `coord mandate revoke A1 "why"`
+(admins, or the holder handing it back); at expiry the ordinary rights return by themselves and
+a **post-crisis review** discussion opens with one proposal per act to confirm, amend or annul.
+Stopping agents in an emergency is a different permission.
+
+**The graph and milestones.** Links are typed: `blocks` (the prerequisite; `--condition "the
+game can be finished without a blocking error"`), and context that holds nothing back:
+`enables`, `related_to`, `duplicates`, `part_of` (`coord task link T3 --after T1 --type enables
+--reason ...`). A blocking link can be lifted explicitly, `coord task waive T3 --after T1 "why"`
+(decider). Links may cross projects when you may see both: `coord tasks` brings the
+prerequisites that live elsewhere, and permissions keep applying. `coord tasks --view
+ready|blocked|unowned|recent|milestones`, `coord unblock-points` (unfinished tasks whose
+completion would make others ready now - a count of descendants is not a priority). A
+**milestone** is a verifiable result: `coord milestone create "Pixel Dungeon playable"
+--criterion "a full game can be started, played and finished" --target 30d --after T12`,
+`milestone criterion T20 1`, `milestone target T20 45d "the save system slipped"` (the previous
+targets stay, with their reasons), `milestone reach T20` (every criterion met, nothing blocking
+- it may be reached while other work goes on). `coord milestones` is the timeline: reached ones
+with their dates, then the upcoming ones with criteria met, tasks left and how the target moved -
+no invented percentage. When the history allows it (at least 5 tasks done over 3 days or more in
+the last 28), an upcoming milestone carries a **projection**: the projects' observed pace, tasks
+done per day, is replayed 1 000 times (Monte Carlo, seeded - the same data give the same answer)
+until its remaining tasks are done, never faster than its longest chain of prerequisites at the
+median accepted-to-done time. It gives P50 and P85 dates (the spread is the uncertainty), how
+many runs meet the target, the basis (window, tasks done, chain) and its assumptions in words:
+the pace goes on, the scope does not grow, tasks count alike. Without enough history it says so
+and why, rather than inventing a date.
+
+**Claims on any resource.** `coord claim gpu:0 --resource gpu`, `claim npm-test --resource
+build`, `claim 8080 --resource port`, `claim android-test-phone --resource device`: the same
+owner, note, lease (`--ttl`), renewal, fence and history as a file claim; they conflict only
+with the same resource and never take part in git checks.
+
+**Seeing it all.** `coord dashboard` (every project you may see, or `--project`): per project
+the agents and their states, what needs attention - an agent asleep with work assigned, someone
+waiting for an answer, a blocked or late discussion, a failed or refused wake-up, candidates and
+notes waiting for review, an active crisis mandate -, the unblock points and the next
+milestones. `coord activity [--actor x] [--kind task|wake|message...] [--since 2h]` is the
+activity stream as readable lines ("claude-01 claimed src/combat/"), `coord audit T12` one
+object's history - from a decision or a blockage back to the discussion, the vote, the note that
+produced it.
 
 ### Live events
 
@@ -366,7 +482,9 @@ lists the roster; `member set <name> --role viewer|contributor|decider|admin`
 restricts the project to its members — in an open project the first member can
 only be yourself (`member set <you> --role admin`), then that admin adds
 everyone else. The rights stack: `viewer` reads, `contributor` writes,
-`decider` also closes discussions (`decide`), `admin` manages members.
+`decider` also closes discussions (`decide`), reviews candidates, waives a
+dependency and records a milestone reached; `admin` manages members, weights,
+wake hooks, project settings, policies and crisis mandates.
 Restricted content needs your session — the read commands pass it
 automatically — and a non-member gets `forbidden` naming the admins to ask.
 Removing the last member reopens the project. The Keycloak groups
@@ -456,17 +574,19 @@ per-participant stances; every participant is told the outcome.
   missing final newline are preserved.
 - `doc import <file> [--title ...] [--author alice]
   [--context reflection|discussion|meeting|other] [--ai yes|no|unknown]
-  [--source ...]` deposits a `.txt`/`.md` note as a **source document** (status
+  [--source ...] [--written 2026-09-20] [--visibility project|private --reader b]
+  [--project other]` deposits a `.txt`/`.md` note as a **source document** (status
   `imported`): the original text is kept as revision 1 with a sha256
   `fingerprint` (re-hash revision 1 to verify it), the depositor recorded
   separately from the declared author, plus the context and whether AI helped
   write it. Import needs only `participate` - it is a participation act, not an
   admin one - and **nothing in it runs**: an imported note is data to read and
   discuss, never an order to agents; promoting what it says into tasks,
-  decisions or memory stays an explicit, validated act. Visibility follows the
-  project's permissions.
+  decisions or memory stays an explicit, validated act: `doc comment`,
+  `candidate add|accept|reject`, `doc reviewed` (see *Humans and agents
+  together*). Visibility follows the project's permissions, or `private`.
 
-`memory add overview|convention|architecture|decision|pitfall|glossary`,
+`memory add overview|convention|architecture|decision|pitfall|glossary|policy` (policy: admins),
 `memory show|search|edit`. `profile` / `suggest` rank live agents (a hint).
 
 **Git.** `coord install-hooks [--mode fail|warn]`: pre-commit `coord check`

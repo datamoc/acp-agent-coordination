@@ -45,8 +45,9 @@ STREAM_POLL_SECONDS = 1.0     # /events/stream checks the event log this often
 STREAM_MAX_SECONDS = 3600     # then closes; clients reconnect with Last-Event-ID
 # The transport gate for OIDC principals, above the service's own roster checks: which role a
 # `coord:<project>:<role>` group must carry for each op (PROJECT_ROLES ranks them in core.py).
-ADMIN_OPS = {"member_set", "member_remove"}    # these grant and withdraw rights themselves
-DECIDE_OPS = {"decide"}                        # closing a discussion is the decider right
+ADMIN_OPS = {"member_set", "member_remove",    # these grant and withdraw rights themselves
+             "weight_set", "mandate_grant", "setting_set", "wake_hook_set"}
+DECIDE_OPS = {"decide", "suggestion_review", "doc_reviewed", "task_waive", "milestone_reach"}   # the decider right
 logging.addLevelName(VERBOSE, "VERBOSE")
 log = logging.getLogger("coord-server")
 
@@ -246,10 +247,14 @@ def make_handler(coord, oidc: OIDCIntrospector | None, mtls: bool, authority=Non
                     if oidc.project_role(info, project) < need:
                         raise CoordError("forbidden", f"no {'contributor' if need else 'viewer'} role "
                                          f"on project {project}")
+            if op == "wake_hook_set" and args.get("url") and not a2a.host_allowed(args["url"], pusher.allow if pusher else []):
+                raise CoordError("bad_args", f"wake hook {args['url']!r} is not allowed: loopback or --push-allow hosts only")
             try:
                 result = getattr(coord, op)(**args)
             except TypeError as e:
                 raise CoordError("bad_args", str(e)) from e
+            if pusher is not None and op == "wake_request" and result.get("mechanism") == "webhook":
+                pusher.wake(result["id"])                    # the concrete mechanism behind the abstract request
             if pusher is not None and op in a2a.TASK_OPS:
                 log.debug("push: notifying webhooks of task %s", result["task"])
                 pusher.notify(result["task"])                # webhooks: accepted / done / cancelled

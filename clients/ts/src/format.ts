@@ -75,8 +75,74 @@ export function consensusLine(c: any): string {
   return `consensus: ${c.met ? "yes" : "no"} - ${stances}` + (c.met || !c.why?.length ? "" : `; ${c.why.join("; ")}`);
 }
 
+const list = (xs: any[] | undefined) => (xs?.length ? xs.join(", ") : "-");
+
+/** One agent: "qwen-01 [paused: quota] ready T12 | messages #40 | wake W3 requested". */
+export function fmtAgent(a: any): string {
+  const p = a.pending ?? {};
+  const work = [p.ready_tasks?.length ? `ready ${list(p.ready_tasks)}` : "", p.blocked_tasks?.length ? `blocked ${list(p.blocked_tasks)}` : "",
+                p.messages?.length ? `messages ${list(p.messages)}` : "", p.discussions?.length ? `discussions ${list(p.discussions)}` : ""]
+    .filter(Boolean).join(" | ");
+  const wakes = (a.wake_requests ?? []).map((w: any) => `${w.wake} ${w.status}`).join(", ");
+  return `${a.name}${a.kind === "human" ? " (human)" : ""} [${a.state}${a.paused ? `: ${a.paused}` : ""}]`
+    + (work ? ` ${work}` : " no pending work") + (wakes ? ` | wake ${wakes}` : "") + (a.asleep_with_work ? "  <- asleep with work" : "");
+}
+
+export function fmtMilestone(m: any): string {
+  const crit = (m.criteria ?? []).map((c: any) => `  [${c.met ? "x" : " "}] ${c.n}. ${c.text}${c.met ? ` (${c.met_by})` : ""}`);
+  const moved = (m.target_history ?? []).length > 1
+    ? `  target history: ${m.target_history.map((t: any) => `${t.target ?? "none"} (${t.reason})`).join(" -> ")}` : "";
+  const left = (m.remaining ?? []).length ? `  remaining: ${m.remaining.map((t: any) => `${t.task} [${t.status}] ${t.title}`).join("; ")}` : "";
+  const pr = m.projection;
+  const proj = !pr ? "" : !pr.available ? `  projection: none - ${pr.why.join("; ")}`
+    : pr.remaining === 0 ? `  projection: ${pr.note}`
+    : `  projection: P50 ${pr.p50.slice(0, 10)}, P85 ${pr.p85 ? pr.p85.slice(0, 10) : "beyond 10 years"}`
+      + (pr.target_runs_met ? `, target met in ${pr.target_runs_met} runs` : "")
+      + ` (${pr.remaining} left, ${pr.basis.done} done in ${pr.basis.observed_days} d, chain of ${pr.basis.critical_chain})`
+      + `\n    assuming: ${pr.assumptions.join("; ")}`;
+  return [`${m.milestone} [${m.status}] ${m.title}` + (m.reached_at ? ` reached ${m.reached_at}` : m.target ? ` target ${m.target}` : " (no target)")
+          + ` - ${m.criteria_met}/${(m.criteria ?? []).length} criteria met${m.owner ? `, owner ${m.owner}` : ""}`,
+          ...crit, moved, left, proj].filter(Boolean).join("\n");
+}
+
 export function human(cmd: string, r: any): string {
   if (cmd === "inbox" || cmd === "thread") return r.map(fmtMsg).join("\n") || "(no messages)";
+  if (cmd === "agents") return r.map(fmtAgent).join("\n") || "(nobody)";
+  if (cmd === "activity") return r.map((e: any) => `${e.at.slice(0, 16).replace("T", " ")} ${e.text}`).join("\n") || "(no activity)";
+  if (cmd === "receipts") {
+    return [`#${r.id} from ${r.from} (${r.kind}, ${r.priority})`,
+            ...r.recipients.map((x: any) => `  ${x.name}: ${x.state}${x.note ? ` - ${x.note}` : ""}`)].join("\n");
+  }
+  if (cmd === "milestones") return r.map(fmtMilestone).join("\n\n") || "(no milestones)";
+  if (cmd === "candidates") {
+    return r.map((x: any) => `${x.suggestion} [${x.status}] ${x.target}: ${x.title} <- ${x.source} (${x.nature}) \u00ab${x.quote}\u00bb`
+      + (x.result ? ` -> ${x.result}` : "") + (x.review_note ? ` (${x.reviewed_by}: ${x.review_note})` : "")).join("\n") || "(no candidates)";
+  }
+  if (cmd === "wake-list") {
+    return r.map((w: any) => `${w.wake} ${w.agent} [${w.status}, ${w.mechanism}] ${w.reason} ${w.ref ?? ""} by ${w.requested_by}`
+      + (w.response || w.diagnostic ? ` - ${w.response ?? w.diagnostic}` : "")).join("\n") || "(no wake-up requests)";
+  }
+  if (cmd === "wake" && r.resume) return `${r.wake} to ${r.agent}: ${r.status} (${r.mechanism})${r.manual ? `\n${r.manual}` : ""}\n\n${r.resume}`;
+  if (cmd === "mandates") {
+    return r.map((m: any) => `${m.mandate} [${m.status}] ${m.holder} until ${m.expires_at} - ${m.powers.join(", ")}; ${m.reason}`
+      + ` (granted by ${m.granted_by.join(", ")})` + (m.acts.length ? `\n  acts: ${m.acts.map((x: any) => x.discussion ?? x.entity).join(", ")}` : "")
+      + (m.review ? `\n  review: ${m.review}` : "")).join("\n") || "(no mandates)";
+  }
+  if (cmd === "doc-comments") return r.map((k: any) => `${k.comment} ${k.by} r${k.revision}${k.quote ? ` on \u00ab${k.quote}\u00bb` : ""}: ${k.body}`).join("\n") || "(no comments)";
+  if (cmd === "dashboard") {
+    const out: string[] = [];
+    for (const p of r.projects) {
+      const c = p.counts;
+      out.push(`${p.project}: ${c.agents} agents (${c.active} active, ${c.paused} paused) · ${c.tasks} tasks (${c.ready} ready, `
+        + `${c.blocked} blocked, ${c.unowned} unowned) · ${c.claims} claims · ${c.attention ? `! ${c.attention}` : "nothing waiting"}`);
+      for (const a of p.attention) out.push(`  ! ${a.text}`);
+      for (const u of p.unblock_points) out.push(`  unblock point: ${u.task} ${u.title} -> ${u.unblocks.join(", ")}${u.milestones.length ? ` (milestones ${u.milestones.join(", ")})` : ""}`);
+      for (const m of p.milestones) out.push(`  next milestone: ${m.milestone} ${m.title} - ${m.criteria_met}/${m.criteria.length} criteria, ${m.remaining.length} task(s) left${m.target ? `, target ${m.target}` : ""}`
+        + (m.projection?.available && m.projection.remaining ? `, projected P50 ${m.projection.p50.slice(0, 10)} / P85 ${m.projection.p85?.slice(0, 10) ?? "-"}` : ""));
+    }
+    if (r.activity.length) out.push("", ...r.activity.slice(-10).map((e: any) => `${e.at.slice(11, 16)} ${e.text}`));
+    return out.join("\n");
+  }
   if (cmd === "locks") return r.map(fmtClaim).join("\n") || "(no active claims)";
   if (cmd === "claim" || cmd === "renew") return fmtClaim(r);
   if (cmd === "poll") {
@@ -85,12 +151,20 @@ export function human(cmd: string, r: any): string {
     out.push("tasks: " + (r.tasks.map((t: any) => `${t.task} ${t.title}`).join(", ") || "-"));
     out.push("discussions: " + (r.discussions.map((d: any) => `${d.discussion} ${d.topic}`).join(", ") || "-"));
     if (r.routines?.length) out.push("routines due: " + r.routines.map((x: any) => `${x.routine} ${x.title} (${x.why})`).join(", "));
+    if (r.awaiting?.length) out.push("waiting for you: " + r.awaiting.map((m: any) => `#${m.id} from ${m.from}${m.priority ? ` (${m.priority})` : ""}`).join(", ")
+      + " - coord ack <id> taken|done, or reply");
+    for (const w of r.wake_requests ?? []) out.push(`${w.wake} asks you to resume (${w.reason} ${w.ref ?? ""}) - coord wake answer ${w.wake} accept|refuse "why"`);
     if (r.wake) out.push(fmtWake(r.wake));
     return out.join("\n");
   }
-  if (cmd === "doc-show") return `${r.document} r${r.revision}/${r.latest_revision} [${r.kind}/${r.status}] ${r.title}\n\n${r.content}`;
+  if (cmd === "doc-show") {
+    const prov = r.origin === "import" ? `\nimported: by ${r.deposited_by}, author ${r.author}, ${r.context}${r.written_at ? `, written ${r.written_at}` : ""}`
+      + `, AI-assisted: ${r.ai_assisted === null ? "not stated" : r.ai_assisted ? "yes" : "no"}, ${r.fingerprint}, visibility ${r.visibility}`
+      + (r.derived?.length ? `\nderived: ${r.derived.map((x: any) => `${x.suggestion} ${x.target} ${x.status}${x.result ? ` -> ${x.result}` : ""}`).join(", ")}` : "") : "";
+    return `${r.document} r${r.revision}/${r.latest_revision} [${r.kind}/${r.status}] ${r.title}${prov}${r.comments ? `\n${r.comments} comment(s): coord doc comments ${r.document}` : ""}\n\n${r.content}`;
+  }
   if (cmd === "tasks") {
-    return r.map((t: any) => `${t.task} [${t.status}] p${t.priority} ${t.title}` + (t.assigned ? ` (${t.assigned})` : "")
+    return r.map((t: any) => `${t.task} [${t.kind === "milestone" ? "milestone " : ""}${t.status}${t.ready ? ", ready" : ""}] p${t.priority} ${t.title}` + (t.assigned ? ` (${t.assigned})` : "")
       + (t.blocked_by?.length ? `  blocked by ${t.blocked_by.join(", ")}` : t.after?.length ? `  after ${t.after.join(", ")}` : "")).join("\n") || "(no tasks)";
   }
   if (cmd === "tasks-graph") return taskGraph(r);
@@ -140,6 +214,9 @@ export function human(cmd: string, r: any): string {
   if (cmd === "context") {
     const lines = [`you: ${r.me.name} gen ${r.me.generation} project ${r.me.project} | unread ${r.unread}`];
     lines.push(...(r.strategy ?? []).map((m: any) => `strategy: ${m.title}: ${m.content}`));
+    lines.push(...(r.policies ?? []).map((m: any) => `policy (not put to a vote): ${m.title}: ${m.content}`));
+    lines.push(...(r.awaiting ?? []).map((m: any) => `waiting for you: #${m.id} from ${m.from}${m.priority ? ` (${m.priority})` : ""}: ${m.body.slice(0, 100)}`));
+    lines.push(...(r.wake_requests ?? []).map((w: any) => `wake-up: ${w.wake} (${w.reason} ${w.ref ?? ""}) - coord wake answer ${w.wake} accept|refuse`));
     lines.push(...r.overview.map((m: any) => `overview: ${m.title}: ${m.content}`));
     lines.push(...(r.routines ?? []).map((x: any) => `routine due: ${x.routine} ${x.title} (${x.why}) - coord routine start ${x.routine}`));
     if (r.wake) lines.push(fmtWake(r.wake));

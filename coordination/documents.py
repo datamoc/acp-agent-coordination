@@ -1,9 +1,10 @@
 """Collaborative documents with revisions and optimistic concurrency."""
 
 import hashlib
+import json
 
 from . import textpatch
-from .core import DOC_KINDS, NOTE_CONTEXTS, CoordBase, CoordError, iso, parse_id
+from .core import DOC_KINDS, DOC_VISIBILITY, NOTE_CONTEXTS, CoordBase, CoordError, iso, parse_id, parse_when
 
 
 class DocumentsMixin(CoordBase):
@@ -30,7 +31,9 @@ class DocumentsMixin(CoordBase):
 
     def doc_import(self, session: str, title: str, content: str, author: str = "",
                    context: str = "reflection", ai_assisted: bool | None = None,
-                   source: str = "", client_id: str | None = None) -> dict:
+                   source: str = "", written_at: str | None = None, visibility: str = "project",
+                   readers: list[str] | None = None, project: str | None = None,
+                   client_id: str | None = None) -> dict:
         """Deposit a .txt/.md note as a source document pending review (status `imported`).
 
         Provenance is kept beside the content: the original text as revision 1, its sha256
@@ -38,8 +41,11 @@ class DocumentsMixin(CoordBase):
         separately from the declared `author`, the context it came from, and whether it was
         written or amended with AI (None = not stated). It is a source, not an order: nothing
         in it runs - promoting what it says into tasks, decisions or memory stays an explicit,
-        validated act. Visibility follows the project's permissions. Participation, not an
-        admin operation: `participate` is the only right it needs."""
+        validated act. Visibility follows the project's permissions, or `private`: only the depositor,
+        the named `readers` and the project's admins see it. `written_at` is when the note was written
+        (declared), apart from the import date. `project` deposits it in another project you take part
+        in (a note about several repositories). Participation, not an admin operation: `participate` is
+        the only right it needs."""
         title = (title or "").strip()
         if not title:
             raise CoordError("empty", "the note needs a title (--title, or the file's name)")
@@ -48,20 +54,26 @@ class DocumentsMixin(CoordBase):
             raise CoordError("empty", "the file is empty")
         if context not in NOTE_CONTEXTS:
             raise CoordError("bad_context", f"context must be one of {', '.join(NOTE_CONTEXTS)}")
+        if visibility not in DOC_VISIBILITY:
+            raise CoordError("bad_args", f"visibility must be one of {', '.join(DOC_VISIBILITY)}")
+        written = parse_when(written_at, self.clock()) if written_at else None
+        target = project
 
         def fn(db):
-            me, project = self._access(db, session, None, "participate")
+            me, project = self._access(db, session, target, "participate")
             now = self.clock()
             fingerprint = "sha256:" + hashlib.sha256(content.encode("utf-8")).hexdigest()
             did = db.execute(
                 "INSERT INTO documents("
                 "project_id, title, kind, created_by, revision, content, status, created_at, updated_at,"
-                " origin, fingerprint, author_name, ai_assisted, context, source)"
-                " VALUES(?, ?, ?, ?, 1, ?, 'imported', ?, ?, 'import', ?, ?, ?, ?, ?)",
+                " origin, fingerprint, author_name, ai_assisted, context, source, written_at, visibility, readers)"
+                " VALUES(?, ?, ?, ?, 1, ?, 'imported', ?, ?, 'import', ?, ?, ?, ?, ?, ?, ?, ?)",
                 (project, title, "note", me["display_name"], content, now, now, fingerprint,
                  (author or "").strip() or None,
                  None if ai_assisted is None else int(bool(ai_assisted)),
-                 context, source or "")).lastrowid
+                 context, source or "", written, visibility,
+                 json.dumps(sorted({r.strip() for r in readers or [] if r.strip()})) if visibility == "private" else None
+                 )).lastrowid
             db.execute("INSERT INTO document_revisions VALUES(?,?,?,?,?,?,?)",
                        (did, 1, me["session_id"], me["display_name"], content,
                         f"imported ({context})" + (f" from {source}" if source else ""), now))
@@ -69,8 +81,33 @@ class DocumentsMixin(CoordBase):
                         fingerprint=fingerprint, context=context)
             return {"document": f"DOC{did}", "id": did, "revision": 1, "status": "imported",
                     "fingerprint": fingerprint, "author": (author or "").strip() or me["display_name"],
-                    "deposited_by": me["display_name"]}
+                    "deposited_by": me["display_name"], "project": project, "visibility": visibility}
         return self._mutate("doc_import", client_id, fn)
+
+    def _doc_gate(self, db, d, session: str | None) -> None:
+        """Read gate for one document: the project's view right, and for a private note its depositor,
+        its named readers or a project admin."""
+        self._view(db, d["project_id"], session)
+        if d["visibility"] != "private":
+            return
+        if not session:
+            raise CoordError("forbidden", f"DOC{d['id']} is private: pass your session")
+        me = self._session(db, session)
+        readers = set(json.loads(d["readers"] or "[]")) | {d["created_by"]}
+        if me["display_name"] in readers:
+            return
+        roster = self._roster(db, d["project_id"])
+        if any(r["name"] == me["display_name"] and r["role"] == "admin" for r in roster):
+            return
+        raise CoordError("forbidden", f"DOC{d['id']} is private to {', '.join(sorted(readers))}",
+                         {"document": f"DOC{d['id']}"})
+
+    def _doc_readable(self, db, d, session: str | None) -> bool:
+        try:
+            self._doc_gate(db, d, session)
+            return True
+        except CoordError:
+            return False
 
     def doc_show(self, document: str, revision: int | None = None, session: str | None = None) -> dict:
         did = parse_id("document", document)
@@ -78,7 +115,7 @@ class DocumentsMixin(CoordBase):
             d = db.execute("SELECT * FROM documents WHERE id=?", (did,)).fetchone()
             if d is None:
                 raise CoordError("missing", f"no document DOC{did}")
-            self._view(db, d["project_id"], session)
+            self._doc_gate(db, d, session)
             content, rev = d["content"], d["revision"]
             if revision is not None:
                 r = db.execute("SELECT * FROM document_revisions WHERE document_id=? AND revision=?",
@@ -86,6 +123,10 @@ class DocumentsMixin(CoordBase):
                 if r is None:
                     raise CoordError("missing", f"DOC{did} has no revision {revision}")
                 content, rev = r["content"], r["revision"]
+            comments = db.execute("SELECT COUNT(*) FROM document_comments WHERE document_id=?", (did,)).fetchone()[0]
+            derived = [{"suggestion": f"S{x['id']}", "target": x["target"], "status": x["status"], "result": x["result"]}
+                       for x in db.execute("SELECT * FROM suggestions WHERE source_type='document' AND source_id=?"
+                                           " ORDER BY id", (did,))]
         out = {"document": f"DOC{did}", "title": d["title"], "kind": d["kind"], "status": d["status"],
                "revision": rev, "latest_revision": d["revision"], "created_by": d["created_by"],
                "updated_at": iso(d["updated_at"]), "content": content}
@@ -93,7 +134,14 @@ class DocumentsMixin(CoordBase):
             out.update(origin="import", fingerprint=d["fingerprint"],
                        author=d["author_name"] or d["created_by"], deposited_by=d["created_by"],
                        ai_assisted=None if d["ai_assisted"] is None else bool(d["ai_assisted"]),
-                       context=d["context"], source=d["source"])
+                       context=d["context"], source=d["source"], imported_at=iso(d["created_at"]),
+                       written_at=iso(d["written_at"]), visibility=d["visibility"] or "project",
+                       readers=json.loads(d["readers"]) if d["readers"] else None, derived=derived)
+            if session:                  # the audit: who read an imported note, and which revision
+                with self._tx() as db:
+                    self._event(db, d["project_id"], "document.read", session, "document", did, revision=rev)
+        out["comments"] = comments
+        out["project"] = d["project_id"]
         return out
 
     def doc_edit(self, session: str, document: str, base_revision: int, content: str,
@@ -102,6 +150,7 @@ class DocumentsMixin(CoordBase):
         def fn(db):
             d = self._doc_editable(db, document)
             me, _ = self._access(db, session, d["project_id"], "participate")
+            self._doc_gate(db, d, session)
             did = d["id"]
             if d["revision"] != int(base_revision):
                 raise CoordError("revision_conflict",
@@ -142,6 +191,7 @@ class DocumentsMixin(CoordBase):
         def fn(db):
             d = self._doc_editable(db, document)
             me, _ = self._access(db, session, d["project_id"], "participate")
+            self._doc_gate(db, d, session)
             did, base = d["id"], int(base_revision)
             b = db.execute("SELECT content FROM document_revisions WHERE document_id=? AND revision=?",
                            (did, base)).fetchone()
@@ -179,10 +229,10 @@ class DocumentsMixin(CoordBase):
     def doc_history(self, document: str, session: str | None = None) -> list[dict]:
         did = parse_id("document", document)
         with self._read() as db:
-            d = db.execute("SELECT project_id FROM documents WHERE id=?", (did,)).fetchone()
+            d = db.execute("SELECT * FROM documents WHERE id=?", (did,)).fetchone()
             if d is None:
                 raise CoordError("missing", f"no document DOC{did}")
-            self._view(db, d["project_id"], session)
+            self._doc_gate(db, d, session)
             rows = db.execute("SELECT * FROM document_revisions WHERE document_id=? ORDER BY revision",
                               (did,)).fetchall()
         if not rows:
@@ -202,6 +252,8 @@ class DocumentsMixin(CoordBase):
                 q += f" AND {f}"; a += list(fargs)
             if kind:
                 q += " AND kind=?"; a.append(kind)
-            rows = db.execute(q + " ORDER BY id", a).fetchall()
+            rows = [r for r in db.execute(q + " ORDER BY id", a).fetchall() if self._doc_readable(db, r, session)]
         return [{"document": f"DOC{r['id']}", "title": r["title"], "kind": r["kind"],
-                 "revision": r["revision"], "status": r["status"]} for r in rows]
+                 "revision": r["revision"], "status": r["status"],
+                 **({"origin": "import", "author": r["author_name"] or r["created_by"], "context": r["context"],
+                     "visibility": r["visibility"] or "project"} if r["origin"] == "import" else {})} for r in rows]

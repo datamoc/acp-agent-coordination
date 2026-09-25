@@ -78,8 +78,15 @@ class RoutingMixin(CoordBase):
                 hints.append((d["deadline"], f"D{d['id']} deadline: {d['topic']}"))
             # Broadcast questions/warnings only: a directed one (task offer, discussion invite, `ask`) already
             # has its own hint (offered task, discussion deadline) and its own resolution path, not `resolve`.
+            for m in self._awaiting(db, session, me["display_name"]):
+                if m.get("priority") in ("high", "urgent"):
+                    hints.append((now, f"#{m['id']} {m['priority']} from {m['from']}: coord ack {m['id']} taken|done, or reply"))
+            for w in db.execute("SELECT id, reason, ref FROM wake_requests WHERE project_id=? AND target_name=? AND"
+                                " status IN ('requested','delivered','woken')", (project, me["display_name"])).fetchall():
+                hints.append((now, f"W{w['id']} asks you to resume ({w['reason']} {w['ref'] or ''}): "
+                                   f"coord wake answer W{w['id']} accept|refuse"))
             for q in db.execute("SELECT id, kind, from_name, created_at FROM messages WHERE project_id=? AND"
-                                " resolved_at IS NULL AND kind IN ('question','warning') AND to_session_id IS NULL"
+                                " resolved_at IS NULL AND kind IN ('question','warning') AND to_session_id IS NULL AND listed=0"
                                 " AND from_session_id!=? AND created_at<=? AND NOT EXISTS(SELECT 1 FROM discussions"
                                 " WHERE message_id=messages.id)",
                                 (project, session, now - WAKE_UNANSWERED)).fetchall():
@@ -100,15 +107,20 @@ class RoutingMixin(CoordBase):
     def context(self, session: str) -> dict:
         with self._read() as db:
             me, project = self._access(db, session, None, "view")
-            unread = db.execute("SELECT COUNT(*) FROM messages WHERE id>? AND project_id=? AND"
-                                " (to_session_id IS NULL OR to_session_id=?)",
-                                (me["cursor"], me["project_id"], session)).fetchone()[0]
+            vis, vargs = self._visible(session)
+            unread = db.execute(f"SELECT COUNT(*) FROM messages WHERE id>? AND project_id=? AND {vis}",
+                                (me["cursor"], me["project_id"], *vargs)).fetchone()[0]
+            awaiting = self._awaiting(db, session, me["display_name"])
         mem = self.memory(project=project, session=session)
         return {"me": {"name": me["display_name"], "generation": me["generation"], "project": project},
                 "strategy": [m for m in mem if m["kind"] == "strategy"],   # in full: every agent follows it
+                "policies": [m for m in mem if m["kind"] == "policy"],     # organisational rules: not put to a vote
+                "awaiting": awaiting,
+                "wake_requests": self.wake_requests(project=project, target=me["display_name"], open_only=True,
+                                                    session=session),
                 "overview": [m for m in mem if m["kind"] == "overview"],
                 "memory": [{"memory": m["memory"], "kind": m["kind"], "title": m["title"]}
-                           for m in mem if m["kind"] not in ("strategy", "overview")][:10],
+                           for m in mem if m["kind"] not in ("strategy", "overview", "policy")][:10],
                 "routines": self.routines(project=project, due=True, session=session),
                 "wake": self.wake(session),
                 "open_tasks": self.tasks(project=project, status="open", session=session)[:10],

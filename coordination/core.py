@@ -26,6 +26,16 @@ MSG_MAX = 10000
 INBOX_DEFAULT = 20
 
 MESSAGE_KINDS = ("info", "question", "advice", "proposal", "decision", "review", "warning", "done")
+# Priority sets attention, not authority: high/urgent ask for a quick look and an acknowledgement,
+# never that the content be accepted.
+MESSAGE_PRIORITIES = ("low", "normal", "high", "urgent")
+# What a recipient did with a directed message. `delivered` is technical (poll/inbox returned it) and
+# proves nothing about understanding; `answered` is set by a reply in the thread; the rest are explicit
+# acts of the recipient (`coord ack`). A work request ends `done` (or `declined`, with the reason).
+RECEIPT_STATES = ("delivered", "read", "taken", "answered", "done", "declined")
+ACK_STATES = ("read", "taken", "done", "declined")
+# Contact policies (attention is a resource): who may send someone a direct message.
+CONTACT_POLICIES = ("open", "auto", "contacts_only", "block_all")
 ROLES = ("advisor", "reviewer", "coeditor", "delegate")
 # Project permissions: a roster row makes a project restricted; each role carries the rights
 # below (view < participate < decide < admin). Without a roster the project is open and keeps
@@ -38,12 +48,39 @@ ROLE_RIGHTS = {"viewer": ("view",),
                "admin": ("view", "participate", "decide", "admin")}
 STANCES = ("support", "support-with-reservation", "object", "abstain", "need-more-info")
 SUPPORTING = ("support", "support-with-reservation")   # both count for consensus; reservations are listed
-CONSENSUS_RULES = ("unanimous", "majority", "no-objection")
+# How a discussion decides. unanimous / majority / no-objection count heads; weighted counts weights fixed
+# when the discussion opens (with a threshold and a quorum of weight); advisory collects opinions and
+# binds nobody; owner: a designated person decides, the stances are advice.
+CONSENSUS_RULES = ("unanimous", "majority", "no-objection", "weighted", "advisory", "owner")
 DEFAULT_QUORUM = 2   # consensus always involves someone besides the decider
 DOC_KINDS = ("note", "diagnosis", "plan", "proposal", "decision", "review", "adr")
 NOTE_CONTEXTS = ("reflection", "discussion", "meeting", "other")   # what an imported note came from
-MEMORY_KINDS = ("strategy", "overview", "convention", "architecture", "decision", "pitfall", "glossary")
+# `policy`: an organisational rule that is not put to a vote (a security restriction...): only a
+# project admin adds or edits one, and no discussion outcome overrides it.
+MEMORY_KINDS = ("strategy", "overview", "convention", "architecture", "decision", "pitfall", "glossary", "policy")
 TASK_STATUSES = ("open", "offered", "accepted", "done", "cancelled")   # offered: assigned, not yet accepted
+# Typed links between tasks (and milestones). Only `blocks` holds a task back (its prerequisite must be
+# done, cancelled or the link waived); the others are context the graph shows.
+LINK_TYPES = ("blocks", "enables", "related_to", "duplicates", "part_of")
+DOC_VISIBILITY = ("project", "private")      # private: the depositor, the named readers, the project admins
+# What an imported note (or a message) may propose; each candidate cites its passage and says what it is.
+SUGGESTION_TARGETS = ("task", "decision", "memory", "question", "summary")
+SUGGESTION_NATURES = ("fact", "hypothesis", "opinion", "decision")   # decision: one already taken elsewhere
+# A session's state, apart from its work: a paused agent can still have tasks assigned.
+SESSION_STATES = ("active", "idle", "paused", "ended", "unreachable")
+IDLE_AFTER = 600             # live but silent for 10 min: idle
+# Project settings a project admin may change (`coord setting`), with their allowed values.
+SETTINGS = {"wake_auto": ("off", "propose", "request"),   # sleeping agent + ready work: show, or ask it to resume
+            "mandate_max_days": None}                     # a number of days, at most MANDATE_MAX
+WAKE_REASONS = ("task", "message", "question", "unblocked", "review", "other")
+# requested -> delivered (the agent's session saw it, or its wake hook answered) -> woken (the agent
+# came back: a poll or a new session of the same identity) -> accepted / refused. failed: the hook failed.
+WAKE_STATUSES = ("requested", "delivered", "woken", "accepted", "refused", "failed")
+WAKE_MIN_INTERVAL = 600      # at most one wake-up request per agent and reason every 10 min
+WAKE_MAX_ATTEMPTS = 3        # then stop and say why: an agent that falls asleep again needs a human
+# Crisis authority: a bounded, revocable mandate for a human to break a deadlock.
+MANDATE_POWERS = ("decide", "reassign", "release_claims")
+MANDATE_MAX = 30 * 86400     # hard cap on a mandate's length; a project may set a lower one
 ROLES_BY_CONSENT = ("coeditor", "delegate")   # carry write duties: the grantee must accept them
 ROUTINE_STATUSES = ("active", "paused", "retired")
 ROUTINE_OUTCOMES = ("ok", "issues", "failed")   # issues/failed also post a warning
@@ -52,7 +89,9 @@ ROUTINE_OUTCOMES = ("ok", "issues", "failed")   # issues/failed also post a warn
 FEATURES = ("sessions", "messages", "claims", "fences", "roles", "discussions", "consensus", "documents",
             "document-patches", "tasks", "a2a", "push-notifications", "memory", "strategy", "routines",
             "server-info", "wake-hints", "delegation-scopes", "reservations", "superseding", "event-stream", "ui", "task-graph",
-            "project-permissions")
+            "project-permissions", "note-import", "note-review", "receipts", "priorities", "contact-policies",
+            "session-states", "wake-requests", "dashboard", "activity", "weighted-votes", "crisis-authority",
+            "policies", "typed-links", "milestones", "resource-claims")
 # What each release brought agents: announced to every project when the server starts on a newer version.
 NEWS = {
     "0.4.0": "one certificate per agent CLI; plugins for Muse, Gemini, Qwen, opencode, Kilo and Crush",
@@ -80,6 +119,13 @@ NEWS = {
     "0.12.0": "coord doc import <file>: a .txt/.md note lands as a source document pending review, with its "
               "provenance - the original kept as revision 1, sha256 fingerprint, declared author separate "
               "from the depositor, context and AI-assisted flag; nothing inside it runs until validated",
+    "0.13.0": "humans and agents together: one chat (post --to a,b / --group, --priority, links; coord ack, "
+              "receipts; contact policies), note review (doc comment, coord candidate add|accept|reject, doc "
+              "reviewed, private notes), session states and wake-ups (coord pause, agents, wake request|answer|"
+              "hook), governance (weighted/advisory/owner rules, coord weight, policies, crisis mandates with "
+              "review), typed links across projects, task waive, milestones with a projection (P50/P85 from the "
+              "observed pace, with its assumptions), resource claims (--resource), "
+              "coord dashboard, activity, audit - and the UI for all of it",
 }
 SERVER_NAME = "coord-server"   # sender of the server's own messages (upgrade notices)
 
@@ -188,13 +234,65 @@ CREATE TABLE IF NOT EXISTS routine_runs(
     routine_id INTEGER NOT NULL, run INTEGER NOT NULL, session_id TEXT NOT NULL, name TEXT NOT NULL,
     trigger TEXT, started_at REAL NOT NULL, finished_at REAL, outcome TEXT, result TEXT,
     PRIMARY KEY(routine_id, run));
+CREATE TABLE IF NOT EXISTS message_recipients(
+    message_id INTEGER NOT NULL, session_id TEXT NOT NULL, name TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'sent', delivered_at REAL, read_at REAL, taken_at REAL,
+    answered_at REAL, done_at REAL, note TEXT, PRIMARY KEY(message_id, session_id));
+CREATE INDEX IF NOT EXISTS ix_recipients_session ON message_recipients(session_id, state);
+CREATE TABLE IF NOT EXISTS contact_policies(
+    project_id TEXT NOT NULL, name TEXT NOT NULL, policy TEXT NOT NULL, set_at REAL NOT NULL,
+    PRIMARY KEY(project_id, name));
+CREATE TABLE IF NOT EXISTS contacts(
+    project_id TEXT NOT NULL, name TEXT NOT NULL, peer TEXT NOT NULL, status TEXT NOT NULL,
+    created_at REAL NOT NULL, PRIMARY KEY(project_id, name, peer));
+CREATE TABLE IF NOT EXISTS document_comments(
+    id INTEGER PRIMARY KEY AUTOINCREMENT, document_id INTEGER NOT NULL, revision INTEGER NOT NULL,
+    author_session_id TEXT NOT NULL, author_name TEXT NOT NULL, quote TEXT, body TEXT NOT NULL,
+    created_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS suggestions(
+    id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL,
+    source_type TEXT NOT NULL, source_id INTEGER NOT NULL, source_revision INTEGER,
+    quote TEXT NOT NULL, nature TEXT NOT NULL, target TEXT NOT NULL, title TEXT NOT NULL,
+    body TEXT NOT NULL DEFAULT '', memory_kind TEXT, status TEXT NOT NULL DEFAULT 'proposed',
+    proposed_by TEXT NOT NULL, reviewed_by TEXT, review_note TEXT, result TEXT,
+    created_at REAL NOT NULL, reviewed_at REAL);
+CREATE TABLE IF NOT EXISTS project_settings(
+    project_id TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, set_by TEXT, set_at REAL NOT NULL,
+    PRIMARY KEY(project_id, key));
+CREATE TABLE IF NOT EXISTS project_weights(
+    project_id TEXT NOT NULL, name TEXT NOT NULL, domain TEXT NOT NULL DEFAULT '', weight REAL NOT NULL,
+    set_by TEXT, set_at REAL NOT NULL, PRIMARY KEY(project_id, name, domain));
+CREATE TABLE IF NOT EXISTS mandates(
+    id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, holder TEXT NOT NULL,
+    granted_by TEXT NOT NULL, reason TEXT NOT NULL, scope TEXT NOT NULL, powers TEXT NOT NULL,
+    starts_at REAL NOT NULL, expires_at REAL NOT NULL, revoked_at REAL, revoked_by TEXT,
+    revoke_reason TEXT, review_discussion_id INTEGER, created_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS wake_requests(
+    id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL, target_name TEXT NOT NULL,
+    target_session_id TEXT, reason TEXT NOT NULL, ref TEXT, note TEXT NOT NULL DEFAULT '',
+    requested_by TEXT NOT NULL, auto INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'requested',
+    mechanism TEXT NOT NULL DEFAULT 'manual', diagnostic TEXT, response TEXT, created_at REAL NOT NULL,
+    delivered_at REAL, woken_at REAL, answered_at REAL);
+CREATE TABLE IF NOT EXISTS wake_hooks(
+    project_id TEXT NOT NULL, target TEXT NOT NULL, url TEXT NOT NULL, token TEXT,
+    created_by TEXT NOT NULL, created_at REAL NOT NULL, PRIMARY KEY(project_id, target));
+CREATE TABLE IF NOT EXISTS task_links(
+    task_id INTEGER NOT NULL, other_id INTEGER NOT NULL, type TEXT NOT NULL, reason TEXT,
+    created_by TEXT NOT NULL, created_at REAL NOT NULL, PRIMARY KEY(task_id, other_id, type));
+CREATE TABLE IF NOT EXISTS milestone_criteria(
+    milestone_id INTEGER NOT NULL, idx INTEGER NOT NULL, text TEXT NOT NULL,
+    met_at REAL, met_by TEXT, note TEXT, PRIMARY KEY(milestone_id, idx));
+CREATE TABLE IF NOT EXISTS milestone_targets(
+    milestone_id INTEGER NOT NULL, rev INTEGER NOT NULL, target_at REAL, reason TEXT NOT NULL,
+    set_by TEXT NOT NULL, set_at REAL NOT NULL, PRIMARY KEY(milestone_id, rev));
 CREATE TABLE IF NOT EXISTS idempotency(
     client_id TEXT PRIMARY KEY, op TEXT NOT NULL, result_json TEXT NOT NULL,
     created_at REAL NOT NULL);
 """
 
 PREFIX = {"claim": "C", "discussion": "D", "proposal": "P", "document": "DOC",
-          "task": "T", "memory": "M", "message": "#", "routine": "R"}
+          "task": "T", "memory": "M", "message": "#", "routine": "R", "suggestion": "S",
+          "wake": "W", "mandate": "A", "comment": "K"}
 
 
 class CoordError(Exception):
@@ -355,6 +453,8 @@ class CoordBase:
         if not roster:
             return me, project
         role = next((r["role"] for r in roster if r["name"] == me["display_name"]), None)
+        if right == "decide" and self._mandate(db, project, me["display_name"], "decide") is not None:
+            return me, project                       # crisis authority: bounded, audited, see governance.py
         if role is None:
             admins = [r["name"] for r in roster if r["role"] == "admin"]
             raise CoordError("forbidden",
@@ -407,6 +507,39 @@ class CoordBase:
         ("documents", "ai_assisted", "INTEGER"),                     # 1/0, NULL = not stated
         ("documents", "context", "TEXT"),                            # reflection | discussion | meeting | other
         ("documents", "source", "TEXT"),                             # where the file came from
+        ("documents", "written_at", "REAL"),                         # when the note was written (declared)
+        ("documents", "visibility", "TEXT"),                         # NULL/'project' | 'private'
+        ("documents", "readers", "TEXT"),                            # JSON names, for private notes
+        # the unified chat (0.13): priority, several recipients, links to the structured objects
+        ("messages", "priority", "TEXT NOT NULL DEFAULT 'normal'"),
+        ("messages", "listed", "INTEGER NOT NULL DEFAULT 0"),        # 1: only its recipients (and sender) see it
+        ("messages", "task_id", "INTEGER"),
+        ("messages", "document_id", "INTEGER"),
+        ("messages", "discussion_id", "INTEGER"),
+        # human participants and paused agents
+        ("sessions", "kind", "TEXT NOT NULL DEFAULT 'agent'"),       # 'agent' | 'human'
+        ("sessions", "paused_at", "REAL"),
+        ("sessions", "pause_reason", "TEXT"),
+        ("sessions", "end_reason", "TEXT"),                          # 'ended' (by itself) | 'expired' (reaped)
+        # governance: weights fixed when the discussion opens, designated owner, crisis decisions
+        ("discussion_participants", "weight", "REAL NOT NULL DEFAULT 1"),
+        ("discussions", "threshold", "REAL"),
+        ("discussions", "quorum_weight", "REAL"),
+        ("discussions", "owner_name", "TEXT"),
+        ("discussions", "domain", "TEXT"),
+        ("discussions", "mandate_id", "INTEGER"),                    # decided under crisis authority
+        # the task graph: blocking links carry a condition and can be waived; milestones are tasks
+        ("task_deps", "condition", "TEXT"),
+        ("task_deps", "reason", "TEXT"),
+        ("task_deps", "waived_at", "REAL"),
+        ("task_deps", "waived_by", "TEXT"),
+        ("task_deps", "waive_reason", "TEXT"),
+        ("tasks", "kind", "TEXT NOT NULL DEFAULT 'task'"),           # 'task' | 'milestone'
+        ("tasks", "target_at", "REAL"),
+        ("tasks", "reached_at", "REAL"),
+        ("tasks", "owner", "TEXT"),
+        ("tasks", "suggestion_id", "INTEGER"),                       # promoted from a candidate (provenance)
+        ("claims", "resource", "TEXT"),                              # NULL: a file scope; else gpu, build, port...
     )
 
     @classmethod
@@ -419,6 +552,35 @@ class CoordBase:
             have = {r[1] for r in db.execute(f"PRAGMA table_info({table})")}
             if column not in have:
                 db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+
+    def _mandate(self, db, project: str, name: str, power: str):
+        """The active crisis mandate giving `name` this power in `project`, or None."""
+        now = self.clock()
+        for m in db.execute("SELECT * FROM mandates WHERE project_id=? AND holder=? AND revoked_at IS NULL"
+                            " AND starts_at<=? AND expires_at>? ORDER BY id", (project, name, now, now)):
+            if power in json.loads(m["powers"]):
+                return m
+        return None
+
+    def _session_state(self, row) -> str:
+        """active | idle | paused | ended | unreachable - the session, apart from its work."""
+        now = self.clock()
+        if row["ended_at"] is not None:
+            return "unreachable" if row["end_reason"] == "expired" else "ended"
+        if row["heartbeat_at"] < now - SESSION_TTL:
+            return "unreachable"
+        if row["paused_at"] is not None:
+            return "paused"
+        return "idle" if row["heartbeat_at"] < now - IDLE_AFTER else "active"
+
+    def _setting(self, db, project: str, key: str, default=None):
+        row = db.execute("SELECT value FROM project_settings WHERE project_id=? AND key=?", (project, key)).fetchone()
+        return default if row is None else json.loads(row["value"])
+
+    def _is_human(self, db, name: str) -> bool:
+        """A name is a human's when a session under it said so (the UI, `whoami --human`, a ui:/oidc principal)."""
+        return db.execute("SELECT 1 FROM sessions WHERE display_name=? AND kind='human' LIMIT 1",
+                          (name,)).fetchone() is not None
 
     def _notify(self, db, sender, to_session_id: str | None, body: str, kind: str = "info",
                 claim_id: int | None = None) -> int | None:
@@ -455,7 +617,7 @@ class CoordBase:
         dead = [r[0] for r in db.execute(
             "SELECT session_id FROM sessions WHERE ended_at IS NULL AND heartbeat_at<?", (now - SESSION_TTL,))]
         for sid in dead:
-            db.execute("UPDATE sessions SET ended_at=? WHERE session_id=?", (now, sid))
+            db.execute("UPDATE sessions SET ended_at=?, end_reason='expired' WHERE session_id=?", (now, sid))
         db.execute("UPDATE claims SET released_at=?, released_by='reaper' WHERE released_at IS NULL AND"
                    " owner_session_id IN (SELECT session_id FROM sessions WHERE ended_at IS NOT NULL)", (now,))
 
@@ -478,3 +640,20 @@ class CoordBase:
         def _norm(self, *a, **k) -> tuple: ...
         def _routines_on_commit(self, *a, **k) -> list: ...
         def _doc_insert(self, *a, **k) -> int: ...
+        def _awake(self, *a, **k) -> None: ...
+        def _awaiting(self, *a, **k) -> list: ...
+        def _visible(self, *a, **k) -> tuple: ...
+        def _blocked_by(self, *a, **k) -> list: ...
+        def _auto_wake(self, *a, **k) -> None: ...
+        def _suggestion_source(self, *a, **k) -> str: ...
+        def _discussion_open(self, *a, **k) -> dict: ...
+        def _memory_insert(self, *a, **k) -> int: ...
+        def _doc_gate(self, *a, **k) -> None: ...
+        def _doc_readable(self, *a, **k) -> bool: ...
+        def _sweep_mandates(self, *a, **k) -> None: ...
+        def wake_requests(self, *a, **k) -> list: ...
+        def agents(self, *a, **k) -> list: ...
+        def projects(self, *a, **k) -> list: ...
+        def unblock_points(self, *a, **k) -> list: ...
+        def milestones(self, *a, **k) -> list: ...
+        def discussion(self, *a, **k) -> dict: ...
