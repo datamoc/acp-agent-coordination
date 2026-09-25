@@ -658,6 +658,10 @@ official `@a2a-js/sdk` in `clients/ts/test/a2a-sdk.test.mjs`:
 
 ## Security and identities
 
+The trust boundaries, what each of the four paths checks, the two findings this review turned up
+(the UI token reaching the log; a redirect escaping the push allow-list) and the risks accepted
+on purpose are written up in [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md).
+
 `coord-server` listens on `127.0.0.1:1337` ("leet" - the port this project has used since 0.1; 0.2.x-0.3.0 used 1338 while the ACP server held 1337). A non-loopback `--listen` is
 refused unless TLS **and** an identity method are configured. Without one
 (plain loopback), anyone on the machine can read and write: keep it on

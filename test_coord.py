@@ -1532,6 +1532,8 @@ def _serve(httpd):
 def ui_guards_and_calls():
     """coord-server --ui: token -> cookie, loopback Host only, writes only from the UI's Origin,
     ops run in-process as the human's own session (principal ui:<name>)."""
+    import logging
+
     from coordination.ui import start_ui
     c = Coord(TMP / "ui.db")
     agent = c.whoami("claude", project="p")["session_id"]
@@ -1550,7 +1552,23 @@ def ui_guards_and_calls():
             return e.code, dict(e.headers), e.read()
     assert req("/")[0] == 403                                            # no token, no cookie
     assert req("/?t=wrong")[0] == 403
-    code, headers, _ = req(f"/?t={token}")
+    lines: list[str] = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record):
+            lines.append(record.getMessage())
+
+    lg, was = logging.getLogger("coord-server"), logging.getLogger("coord-server").level
+    cap = _Capture()
+    lg.setLevel(logging.DEBUG)
+    lg.addHandler(cap)
+    try:
+        code, headers, _ = req(f"/?t={token}")                           # the request line carries the token
+    finally:
+        lg.removeHandler(cap)
+        lg.setLevel(was)
+    assert token not in "\n".join(lines), [x for x in lines if token in x]   # nothing secret in logs
+    assert any("?t=<token>" in x for x in lines), lines                     # ...it was logged, redacted
     assert code == 303 and "HttpOnly" in headers["Set-Cookie"] and "SameSite=Strict" in headers["Set-Cookie"]
     cookie = headers["Set-Cookie"].split(";")[0]
     code, headers, page = req("/", Cookie=cookie)
@@ -1641,6 +1659,62 @@ def wake_hooks_are_called_and_recorded():
     except CoordError as e:
         assert e.code == "bad_args"
     hook.shutdown()
+
+
+@check
+def a_push_follows_no_redirect():
+    """The allow-list is checked once, before the request - so a 302 must not carry the body and
+    the Authorization header to a host nobody allow-listed (the SSRF it exists to prevent)."""
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    landed: list[str] = []
+
+    class Target(BaseHTTPRequestHandler):
+        def do_POST(self):
+            landed.append(self.path)
+            self.send_response(204)
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    target = ThreadingHTTPServer(("127.0.0.1", 0), Target)
+    tport = _serve(target)
+
+    class Hop(BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            self.send_response(302)
+            self.send_header("Location", f"http://127.0.0.1:{tport}/stolen")
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    hop = ThreadingHTTPServer(("127.0.0.1", 0), Hop)
+    hport = _serve(hop)
+    try:
+        c, _ = fresh()
+        # the push runs in coord-server's thread, so the op has to go through the server
+        port = _serve(build_server(c, "127.0.0.1", 0))
+        rc = RemoteCoord(f"http://127.0.0.1:{port}")
+        h = rc.whoami(family="ui", user="alice", human=True)["session_id"]
+        q = c.whoami("qwen")["session_id"]
+        c.end(q)
+        rc.wake_hook_set(session=h, target="qwen", url=f"http://127.0.0.1:{hport}/hook", token="s3cret")
+        rc.wake_request(session=h, agent="qwen-01", reason="task", note="T9 waits")
+        st = c.wake_requests(target="qwen-01")[0]
+        for _ in range(50):
+            st = c.wake_requests(target="qwen-01")[0]
+            if st["status"] != "requested":
+                break
+            time.sleep(0.1)
+        assert st["status"] == "failed", st
+        assert "redirect refused" in (st.get("diagnostic") or ""), st
+        assert landed == [], landed                                      # nothing followed it
+    finally:
+        hop.shutdown()
+        target.shutdown()
 
 
 @check

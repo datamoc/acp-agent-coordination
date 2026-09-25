@@ -91,7 +91,8 @@ def make_ui_handler(coord, token: str, humans: HumanSessions, port_ref: dict):
         server_version = "coord-ui"
 
         def log_message(self, fmt, *args):
-            log.debug("ui: " + fmt, *args)
+            # the request line carries the one-shot link (?t=...): replace the token, never log it
+            log.debug("ui: " + fmt, *(str(a).replace(token, "<token>") for a in args))
 
         # --- guards ---------------------------------------------------------
         def _origins(self) -> set[str]:

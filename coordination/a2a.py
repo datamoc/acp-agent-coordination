@@ -23,6 +23,7 @@ import base64
 import ipaddress
 import json
 import threading
+import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
@@ -128,6 +129,29 @@ def host_allowed(url: str, allow: list[str]) -> bool:
     return False
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """A push follows no redirect. `host_allowed` is checked once, before the request; the default
+    opener would follow a 302 and post the same body - and the same Authorization header - to a
+    host nobody allow-listed, which is the SSRF the allow-list exists to prevent."""
+
+    def http_error_302(self, req, fp, code, msg, headers):
+        raise urllib.error.HTTPError(
+            req.full_url, code,
+            "redirect refused: the push allow-list was checked for this URL, not for the next one",
+            headers, fp)
+
+    http_error_301 = http_error_303 = http_error_307 = http_error_308 = http_error_302
+
+
+def _opener(host: str) -> urllib.request.OpenerDirector:
+    """How a push is sent: no redirects, and never through the developer's proxy for a loopback
+    hook (ProxyHandler({}) turns the environment's proxy off)."""
+    handlers: list = [_NoRedirect]
+    if is_loopback(host):
+        handlers.append(urllib.request.ProxyHandler({}))
+    return urllib.request.build_opener(*handlers)
+
+
 class Pusher:
     """Deliver task status updates to registered webhooks (in the background)."""
 
@@ -165,7 +189,7 @@ class Pusher:
             if plan["token"]:
                 headers["Authorization"] = f"Bearer {plan['token']}"
             host = urllib.parse.urlsplit(plan["url"]).hostname or ""
-            opener = urllib.request.build_opener(*([urllib.request.ProxyHandler({})] if is_loopback(host) else []))
+            opener = _opener(host)
             try:
                 with opener.open(urllib.request.Request(plan["url"], data=plan["body"], headers=headers),
                                  timeout=self.timeout) as r:
@@ -186,7 +210,11 @@ class Pusher:
         elif c.get("token"):
             headers["X-A2A-Notification-Token"] = c["token"]
         host = urllib.parse.urlsplit(c["url"]).hostname or ""
-        opener = urllib.request.build_opener(*([urllib.request.ProxyHandler({})] if is_loopback(host) else []))
+        if not host_allowed(c["url"], self.allow):     # registration checked it; --push-allow may have changed
+            self.sent.append((c["url"], 0))
+            self.log(f"push to {c['url']} refused: not an allowed host (--push-allow)")
+            return
+        opener = _opener(host)
         try:
             with opener.open(urllib.request.Request(c["url"], data=body, headers=headers), timeout=self.timeout) as r:
                 self.sent.append((c["url"], r.status))
