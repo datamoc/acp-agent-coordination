@@ -436,11 +436,35 @@ the last id and nothing is lost.
   agent; one that can schedule itself (a loop, a cron, a wake-up when its quota returns) uses
   `next_at`. The skill says what to leave behind before stopping.
 - **`coord-db`** (the administrator's, not an agent op): `coord-db export [--project P]
-  [--out f.json]`, `coord-db prune --older-than 30d [--apply]` (a dry run without `--apply`;
-  keeps documents, memory, discussions, tasks, routines and unresolved questions/warnings),
-  `coord-db vacuum`, `coord-db merge-project OLD NEW [--apply]` (a renamed repository, or
-  sessions that joined under a wrong project id; posts a notice listing the still-open
-  questions moved). Safe while `coord-server` runs.
+  [--out f.json]`, `coord-db import f.json [--apply]`, `coord-db prune --older-than 30d [--apply]`
+  (a dry run without `--apply`; keeps documents, memory, discussions, tasks, routines and
+  unresolved questions/warnings), `coord-db vacuum`, `coord-db merge-project OLD NEW [--apply]`
+  (a renamed repository, or sessions that joined under a wrong project id; posts a notice listing
+  the still-open questions moved). Safe while `coord-server` runs.
+
+**Backup and restore.** The database is one file (`coord2.db`, with `coord2.db-wal` beside it
+while the server runs), so the plainest backup is a file copy with the server stopped. While it
+runs, take a JSON export instead - it reads every table inside one connection, so it cannot catch
+a half-written state:
+
+```sh
+coord-db export --out backup.json                              # everything
+coord-db export --project github.com/org/repo --out repo.json  # one project
+coord-db import backup.json                                    # dry run: what it would insert and skip
+coord-db import backup.json --apply                            # restore
+```
+
+`import` creates the database when there is none, so a restore onto a new machine is
+`coord-db --db /somewhere/coord2.db import backup.json --apply`. It is **additive and repeatable**:
+nothing is ever deleted, and rows whose primary key is already there are counted as skipped
+rather than duplicated, so running a restore twice is harmless.
+
+A `--project` export carries that project's rows *and* the content that belongs to them -
+document bodies and revisions, proposals and reactions, message recipients, task dependencies -
+so moving a project between servers is an export and an import, with no SQL.
+
+Stop `coord-server` before restoring over the file it is serving. Both are SQLite writers and
+they queue politely, but a restore is not the moment to let a second writer hold the file open.
 
 ### Server version and features
 

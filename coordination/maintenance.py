@@ -1,6 +1,7 @@
 """Database upkeep for the administrator - never an agent op. CLI: `coord-db`.
 
     coord-db export [--project P] [--out file.json]   every table (a project's rows only with --project)
+    coord-db import file.json [--apply]              insert an export; dry run unless --apply
     coord-db prune --older-than 30d [--apply]         dry run unless --apply
     coord-db vacuum                                   checkpoint the WAL and compact the file
     coord-db merge-project OLD NEW [--apply]          move everything of project OLD into NEW
@@ -31,6 +32,30 @@ def _db(path: str) -> sqlite3.Connection:
     return db
 
 
+# Rows that belong to a project but do not carry project_id themselves: (table, SQL predicate).
+# Without these `--project` would keep the row that owns the content and drop the content -
+# document bodies, proposals, reactions, recipients, dependencies. Every predicate is written
+# against a project-scoped table, so it works whatever order they are read in.
+_PROJECT_CHILDREN = {
+    "discussion_participants": "discussion_id IN (SELECT id FROM discussions WHERE project_id=?)",
+    "proposals": "discussion_id IN (SELECT id FROM discussions WHERE project_id=?)",
+    "reactions": "proposal_id IN (SELECT id FROM proposals WHERE discussion_id IN"
+                  " (SELECT id FROM discussions WHERE project_id=?))",
+    "document_revisions": "document_id IN (SELECT id FROM documents WHERE project_id=?)",
+    "document_comments": "document_id IN (SELECT id FROM documents WHERE project_id=?)",
+    "memory_revisions": "memory_id IN (SELECT id FROM project_memory WHERE project_id=?)",
+    "routine_runs": "routine_id IN (SELECT id FROM routines WHERE project_id=?)",
+    "claim_roles": "claim_id IN (SELECT claim_id FROM claims WHERE project_id=?)",
+    "message_recipients": "message_id IN (SELECT id FROM messages WHERE project_id=?)",
+    "suggestions": "message_id IN (SELECT id FROM messages WHERE project_id=?)",
+    "task_deps": "task_id IN (SELECT task_id FROM tasks WHERE project_id=?)",
+    "task_links": "task_id IN (SELECT task_id FROM tasks WHERE project_id=?)",
+    "milestone_criteria": "milestone_id IN (SELECT task_id FROM tasks WHERE project_id=?)",
+    "milestone_targets": "milestone_id IN (SELECT task_id FROM tasks WHERE project_id=?)",
+    "agent_profiles": "session_id IN (SELECT session_id FROM sessions WHERE project_id=?)",
+}
+
+
 def export(path: str, project: str | None = None) -> dict:
     db = _db(path)
     tables = [r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND"
@@ -42,6 +67,62 @@ def export(path: str, project: str | None = None) -> dict:
             continue
         q, a = (f"SELECT * FROM {t} WHERE project_id=?", (project,)) if project else (f"SELECT * FROM {t}", ())
         out["tables"][t] = [dict(r) for r in db.execute(q, a)]
+    if project:
+        for t, pred in _PROJECT_CHILDREN.items():
+            if t not in tables or t in out["tables"] or pred.split()[0] not in {
+                    r[1] for r in db.execute(f"PRAGMA table_info({t})")}:
+                continue
+            try:
+                rows = [dict(r) for r in db.execute(f"SELECT * FROM {t} WHERE {pred}", (project,))]
+            except sqlite3.OperationalError:          # a table this version predates
+                continue
+            if rows:
+                out["tables"][t] = rows
+    db.close()
+    return out
+
+
+def import_db(path: str, src: str, apply: bool = False) -> dict:
+    """Insert an export (from `coord-db export`) into this database - a restore, or a copy of one
+    project into another instance. Dry run unless `apply`: the rows are inserted and rolled back,
+    so the counts are what would really happen. Rows whose primary key is already there are
+    skipped, which makes a restore repeatable. The file's own scope is what gets restored - a
+    `--project` export brings that project, a full export brings everything."""
+    raw = json.loads(Path(src).read_text(encoding="utf-8"))
+    rows_by_table = raw.get("tables") or {}
+    db = _db(path)
+    known = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    out = {"file": src, "db": path, "applied": False, "inserted": 0, "skipped": 0,
+           "tables": {}, "unknown_tables": sorted(set(rows_by_table) - known)}
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        for t in sorted(rows_by_table):
+            if t not in known:
+                continue
+            cols = [r[1] for r in db.execute(f"PRAGMA table_info({t})")]
+            ins = skip = 0
+            for row in rows_by_table[t]:
+                use = [c for c in cols if c in row]
+                if not use:
+                    skip += 1
+                    continue
+                sql = f"INSERT OR IGNORE INTO {t} ({', '.join(use)}) VALUES ({', '.join('?' * len(use))})"
+                if db.execute(sql, [row[c] for c in use]).rowcount:
+                    ins += 1
+                else:
+                    skip += 1
+            if ins or skip:
+                out["tables"][t] = {"inserted": ins, "skipped": skip}
+            out["inserted"] += ins
+            out["skipped"] += skip
+        if apply:
+            db.execute("COMMIT")
+            out["applied"] = True
+        else:
+            db.execute("ROLLBACK")
+    except Exception:
+        db.execute("ROLLBACK")
+        raise
     db.close()
     return out
 
@@ -145,6 +226,9 @@ def main(argv=None) -> int:
     sub = p.add_subparsers(dest="cmd", required=True)
     e = sub.add_parser("export", help="dump the database (or one project) as JSON")
     e.add_argument("--project"); e.add_argument("--out")
+    i = sub.add_parser("import", help="insert an export into this database (a restore, or a copy); "
+                                      "dry run without --apply")
+    i.add_argument("file"); i.add_argument("--apply", action="store_true")
     r = sub.add_parser("prune", help="drop what nobody reads again; a dry run without --apply")
     r.add_argument("--older-than", required=True, help="30d, 12h, ...")
     r.add_argument("--apply", action="store_true")
@@ -153,7 +237,7 @@ def main(argv=None) -> int:
                        "without --apply")
     m.add_argument("old"); m.add_argument("new"); m.add_argument("--apply", action="store_true")
     a = p.parse_args(argv)
-    if not Path(a.db).exists():
+    if a.cmd != "import" and not Path(a.db).exists():     # import may create the database it restores into
         print(f"coord-db: no database at {a.db}", file=sys.stderr)
         return 1
     if a.cmd == "export":
@@ -163,6 +247,8 @@ def main(argv=None) -> int:
             print(json.dumps({"out": a.out, "bytes": len(data)}))
         else:
             print(data)
+    elif a.cmd == "import":
+        print(json.dumps(import_db(a.db, a.file, a.apply)))
     elif a.cmd == "prune":
         print(json.dumps(prune(a.db, a.older_than, a.apply)))
     elif a.cmd == "merge-project":

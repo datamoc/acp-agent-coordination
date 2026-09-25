@@ -579,6 +579,58 @@ def older_databases_still_open():
 
 
 @check
+def coord_db_a_project_export_keeps_its_content_and_imports_it():
+    """`export --project` used to keep only the tables that carry project_id: it kept the document
+    row and dropped its body, kept the discussion and dropped its proposals and reactions, kept the
+    message and dropped its recipients. It follows those now, and `coord-db import` puts a file
+    back - dry run first, and repeatable (T31)."""
+    from coordination import maintenance
+
+    c, _ = fresh()
+    a = c.whoami("claude", project="p1")["session_id"]
+    b = c.whoami("codex", project="p1")["session_id"]
+    c.post(a, "look at this", to="codex-01")
+    c.doc_create(a, "Plan", content="the body of the plan")
+    d = c.discuss(a, "which way")["discussion"]
+    p = c.propose(a, d, "the obvious way")["proposal"]
+    c.react(b, p, "support", "yes")
+    c.task_create(a, "one", after=[])
+
+    ex = maintenance.export(str(c.path), project="p1")
+    assert "documents" in ex["tables"] and "idempotency" not in ex["tables"]
+    assert "document_revisions" in ex["tables"], sorted(ex["tables"])       # the body, not the row
+    assert any(r.get("content") == "the body of the plan" for r in ex["tables"]["document_revisions"])
+    assert "proposals" in ex["tables"] and "reactions" in ex["tables"]      # the discussion's record
+    assert "message_recipients" in ex["tables"]                             # who it went to
+    assert "sessions" in ex["tables"]
+
+    src = TMP / "p1.json"
+    src.write_text(json.dumps(ex, default=str), encoding="utf-8")
+
+    # a dry run says what it would do and writes nothing
+    fresh_db = TMP / "restored.db"
+    dry = maintenance.import_db(str(fresh_db), str(src))
+    assert dry["applied"] is False and dry["inserted"] > 0
+    assert Coord(str(fresh_db)).docs(project="p1") == []
+
+    # and really does it
+    done = maintenance.import_db(str(fresh_db), str(src), apply=True)
+    assert done["applied"] and done["inserted"] == dry["inserted"]
+    c2 = Coord(str(fresh_db))
+    assert [d0["title"] for d0 in c2.docs(project="p1")] == ["Plan"]
+    assert any(t["title"] == "one" for t in c2.tasks(project="p1"))
+    back = maintenance.export(str(fresh_db), project="p1")
+    assert any(r.get("content") == "the body of the plan"
+               for r in back["tables"]["document_revisions"])              # the body came back
+    assert any(r.get("body") == "look at this" for r in back["tables"]["messages"])
+    assert "reactions" in back["tables"] and back["tables"]["reactions"]
+
+    # a restore can be repeated: everything already there is skipped, nothing is lost
+    again = maintenance.import_db(str(fresh_db), str(src), apply=True)
+    assert again["inserted"] == 0 and again["skipped"] == done["inserted"]
+
+
+@check
 def paused_agents_and_wake_requests():
     c, clock = fresh()
     h = c.whoami("ui", user="alice", human=True)["session_id"]
