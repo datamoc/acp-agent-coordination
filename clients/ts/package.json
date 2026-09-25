@@ -3,7 +3,6 @@
   "version": "0.13.0",
   "description": "TypeScript client and `coord` CLI for the coord coordination server (claims, messages, tasks, documents; mTLS bundles with automatic renewal, Keycloak SSO)",
   "type": "module",
-  "private": true,
   "license": "AGPL-3.0-only",
   "engines": {
     "node": ">=20"
@@ -20,7 +19,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md"
   ],
   "scripts": {
     "gen": "node scripts/gen-ops.mjs",

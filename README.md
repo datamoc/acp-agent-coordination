@@ -824,6 +824,7 @@ uv run test_coord.py                  # server, PKI, renewal, OIDC, cert sources
 cd clients/ts && npm test             # TS client against the real Python server (+ @a2a-js/sdk interop);
                                        # tsc --strict runs as part of the build this invokes
 npm run bundle-plugin                 # refresh plugins/coord/client (CI fails if stale)
+uv run tools/release.py 0.14.0 --title "..." --dry-run   # release: build, checksum, tag, publish (T106)
 ```
 
 What may be added to the contract and what may not - optional arguments, why a new capability is a
