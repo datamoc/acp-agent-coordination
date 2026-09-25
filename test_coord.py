@@ -548,9 +548,13 @@ def older_databases_still_open():
         if dest.exists():
             shutil.rmtree(dest)
         dest.mkdir(parents=True)
-        blob = subprocess.run(["git", "archive", tag, "coordination"], cwd=repo,
-                              capture_output=True, check=True).stdout
-        with tarfile.open(fileobj=io.BytesIO(blob)) as tf:
+        blob = subprocess.run(["git", "archive", tag, "coordination"], cwd=repo, capture_output=True)
+        if blob.returncode:                      # binary tar: decode only the error text
+            raise AssertionError(
+                f"{tag}: git archive failed ({blob.stderr.decode(errors='replace').strip()}) - the "
+                f"fixtures come from the release tags, so the checkout needs them: "
+                f"actions/checkout with fetch-depth: 0")
+        with tarfile.open(fileobj=io.BytesIO(blob.stdout)) as tf:
             try:
                 tf.extractall(dest, filter="data")
             except TypeError:                       # Python < 3.11.4 has no filter=
