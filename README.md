@@ -826,3 +826,6 @@ npm run bundle-plugin                 # refresh plugins/coord/client (CI fails i
 What may be added to the contract and what may not - optional arguments, why a new capability is a
 new op, the two-release deprecation window, and what 1.0 promises about N-1 clients, error codes
 and older databases - is in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
+
+What a load run looks like, and which number is SQLite's fault, is in
+[docs/LOAD-TEST.md](docs/LOAD-TEST.md) (`uv run tools/load_test.py`).
