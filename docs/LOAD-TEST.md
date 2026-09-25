@@ -49,9 +49,34 @@ multi-second outliers: an automatic checkpoint runs on the connection that trigg
 that connection is an agent waiting for its reply.
 
 > **Hypothesis, not a measurement.** The WAL ceiling and the tail correlate; nothing here proves
-> the checkpoint *causes* the stalls. The experiment is one line: set `PRAGMA wal_autocheckpoint`
-> higher (or 0, checkpointing from maintenance instead) and re-run. That is the first thing
-> **T36** should try, and this tool is how it gets an answer.
+> the checkpoint *causes* the stalls.
+
+### The experiment, and what it actually showed (T36)
+
+Run first, exactly as suggested: `PRAGMA wal_autocheckpoint=0` in `CoordBase._connect()`, then the
+identical load run.
+
+| | checkpoint **on** (default) | checkpoint **off** |
+|---|---|---|
+| wall time | 22.45 s | **41.24 s** |
+| claim p99 / max | 2 947 / 5 249 ms | **9 097 / 24 637 ms** |
+| post p99 / max | 2 518 / 8 394 ms | **4 739 / 21 112 ms** |
+| writes over 1 s | 68 | **106** |
+| WAL peak | 4.17 MB | **42.65 MB** |
+| reads (`locks`) p99 | 123 ms | 203 ms |
+
+**The hypothesis was wrong, and the experiment is the only reason we know.** Turning the checkpoint
+off did not remove the tail - it roughly doubled the tail *and* the run time. The checkpoint is not
+what stalls a writer; it is what keeps the WAL bounded, and without it every append to a 42 MB WAL
+costs more. SQLite's default of 1000 pages stays, and no code changed.
+
+What the numbers *do* support is the single-writer queue. Reads never wait on it at any setting
+(p99 123-203 ms, nothing over a second), while every mutation takes `BEGIN IMMEDIATE` - so 20
+agents are one writer with nineteen waiting. A p50 of ~30 ms times twenty threads is a steady-state
+queue of hundreds of milliseconds, and the seconds-long outliers are that queue's tail. No SQLite
+setting makes two writers go at once, so the honest choices are fewer and smaller write
+transactions, fewer writers, or accepting a tail that an agent polling every five minutes never
+sees.
 
 **5. SSE is a 1 Hz fan-out, and it scales.** 7 975 events reached 4 listeners in 22 s with no
 reader falling behind. `/events/stream` polls the event log every `STREAM_POLL_SECONDS` (1.0) and
@@ -69,7 +94,8 @@ per subscriber is one query per second, not one per event, and it did not move t
 
 ## Where it leaves the roadmap
 
-T34 is done when this exists and the limits are written down. What it found goes to **T36** -
-"fix what the review, load and soak tests find": the checkpoint hypothesis above is the one
-concrete, cheap experiment. Nothing here blocks **T37** (hardened); the 24 h soak (T35) still has
-to show that a longer run does not turn a tail into a trend.
+The limits are written down, and the experiment that was meant to explain the tail has been run:
+**the checkpoint hypothesis was wrong** (see above), so nothing here asks for a code change - that
+closes T36's review and load halves, with one finding fixed (the two from T33) and one refuted.
+What T36 still waits for is the soak: **T35** owns the 24 h run, and a longer run has to show that
+a tail does not become a trend before **T37** (hardened) can be reached.
