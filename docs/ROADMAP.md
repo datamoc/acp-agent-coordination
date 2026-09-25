@@ -53,8 +53,8 @@ load, without a serious bug.
 |---|---|---|---|---|
 | **0.11** quality gates | T22-T26 → T27 | 1 | **yes** - the night of 24-25 Sep | T25 (ruff/pyright) was the biggest: 285 errors to 0 |
 | **0.14** contract frozen | T28-T31 → T32 | 1.5 | **yes** - 25 Sep | contract reviewed (DOC10), policy in docs/COMPATIBILITY.md, fixtures built from the tags, import + restore guide |
-| **0.15** hardened | T33-T36 → T37 | 1.5 + a 24 h soak | no - T33-T37 open | the soak runs overnight; T36 is the unknown |
-| **1.0-rc1** | T37, T38-T40 → T41 | 0.5 | no - T37-T41 open | guides, changelog and packaging can run beside the hardening |
+| **0.15** hardened | T33-T36 → T37 | 1.5 + a 24 h soak | no - T35, T36, T37 open | review and load test done: two findings fixed (T33), the checkpoint tail left for T36 (T34); the soak is T35 |
+| **1.0-rc1** | T37, T38-T40 → T41 | 0.5 | no - T37, T40, T41 open | guides (T38) and changelog (T39) done; packaging (T40) waits on a PyPI credential |
 | **1.0** | T42 → T43 | 7 calendar days | no - T42-T43 open | real multi-agent work on mwg-pixel-dungeon, no P0 bug |
 
 **The numbers ran ahead of the milestones - decided 2026-09-25 (T104).** 0.11.0, 0.12.0 and
@@ -67,7 +67,7 @@ it ships in**, so the two remaining ones were retitled to the next free versions
 is that, and only that. If a feature release takes 0.14.0 first, the milestone moves again:
 retitle the task, never the version that already shipped.
 
-**Critical path:** T25 → T27 → T28 → T29 → T32 (all five done) → T34 → T35 → T36 → T37 → T41 →
+**Critical path:** T25 → T27 → T28 → T29 → T32 → T34 (all six done) → T35 → T36 → T37 → T41 →
 T42 → T43. The week of real use is the longest step and cannot be compressed: it is what earns
 the "1".
 
@@ -114,7 +114,9 @@ update this file with the dates reached.
 **Re-runs.** *2026-09-25 (0.13.0), twice over:* 0.11 reached a day early, its numbering settled
 the same day (T104: a milestone takes the number of the release it ships in) - and then **0.14,
 the contract frozen, reached the same day**: T105, T28, T29, T30, T31 and T32 all closed on
-25 September, hours before the forecast's earliest (optimistic) date of 26 September. What is left
-starts at the security review, the load test, the guides and the changelog. **1.0 still lands
-around 8 October 2026** on every scenario: the remaining effort - 1.5 days of hardening, the 24 h
-soak, the release candidate and the week of real use - did not shrink.
+25 September, hours before the forecast's earliest (optimistic) date of 26 September. Since then
+**the security review, the load test, the guides and the changelog have closed too** (T33, T34,
+T38, T39) - and none of it moved the forecast: **1.0 still lands around 8 October 2026** on every
+scenario, because the remaining effort - the 24 h soak, 1.5 days of hardening, the release
+candidate and the week of real use - did not shrink. What is new is a blocker rather than work:
+T40 (packaging) waits on a PyPI credential, and PyPI was itself down when it was last checked.
