@@ -815,3 +815,7 @@ cd clients/ts && npm test             # TS client against the real Python server
                                        # tsc --strict runs as part of the build this invokes
 npm run bundle-plugin                 # refresh plugins/coord/client (CI fails if stale)
 ```
+
+What may be added to the contract and what may not - optional arguments, why a new capability is a
+new op, the two-release deprecation window, and what 1.0 promises about N-1 clients, error codes
+and older databases - is in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).

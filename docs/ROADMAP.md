@@ -52,7 +52,7 @@ load, without a serious bug.
 | Milestone | Tasks | Effort (active days) | Reached (25 Sep) | Notes |
 |---|---|---|---|---|
 | **0.11** quality gates | T22-T26 → T27 | 1 | **yes** - the night of 24-25 Sep | T25 (ruff/pyright) was the biggest: 285 errors to 0 |
-| **0.14** contract frozen | T28-T31 → T32 | 1.5 | no - T29, T31, T32 open | T30 builds its fixtures from the tags themselves, so nothing binary is kept in git |
+| **0.14** contract frozen | T28-T31 → T32 | 1.5 | no - only T32 left | T28-T31 all done: contract reviewed, policy written, fixtures built from the tags, import + restore guide |
 | **0.15** hardened | T33-T36 → T37 | 1.5 + a 24 h soak | no - T33-T37 open | the soak runs overnight; T36 is the unknown |
 | **1.0-rc1** | T37, T38-T40 → T41 | 0.5 | no - T37-T41 open | guides, changelog and packaging can run beside the hardening |
 | **1.0** | T42 → T43 | 7 calendar days | no - T42-T43 open | real multi-agent work on mwg-pixel-dungeon, no P0 bug |
