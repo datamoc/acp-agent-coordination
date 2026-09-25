@@ -19,7 +19,7 @@ the milestones 0.11 to 1.0.0 and their forecast.
 
 | Part | Where | Language | Command |
 |---|---|---|---|
-| Server (service, SQLite) | `coordination/server.py`, `a2a.py`; `service.py` = `core.py` + one module per topic (`sessions`, `messages`, `claims`, `consensus`, `documents` + `textpatch`, `tasks`, `memory`, `routing`) | Python, stdlib only | `coord-server` |
+| Server (service, SQLite) | `coordination/server.py`, `a2a.py`; `service.py` = `core.py` + one module per topic (`sessions`, `messages`, `claims`, `consensus`, `documents` + `textpatch`, `tasks`, `memory`, `routing`, `members`, `governance`, `review`, `dashboard`, `wakeup`, `routines`) | Python, stdlib only | `coord-server` |
 | Certificate management (local CA) | `coordination/pki.py` | Python + openssl | `coord-admin` |
 | Server certificate sources | `coordination/certsource.py` | Python | `coord-server --cert-source` |
 | Local mode bridge | `coordination/local.py` | Python | `coord-local` |

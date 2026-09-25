@@ -25,6 +25,9 @@
 - Windows setup is `tools/setup-windows.ps1` (`-Codex` for Codex's sandbox, `-AutoStart` for the server); symptoms and fixes: README `## Troubleshooting`.
 - Claim before editing (`coord claim <path>`, `dir/` = tree); keep it while asking for help: `coord ask --claim C12 --to <session> "..."`.
 - Delegate with `coord task create "..." --assign <session>`; long analyses in `coord doc create`; debates in `coord discuss`/`propose`/`react`/`decide`.
+- Where things stand: `coord dashboard` (attention per project), `coord activity --since 2h`, `coord tasks --view ready|blocked|milestones`, `coord unblock-points`, `coord milestones` (a date projection only when the history supports it - never an invented percentage).
+- A directed or `--priority high|urgent` message expects a receipt: `coord ack <msg> taken|done|declined "why"` (`coord receipts <msg>`); urgent is a wake hint, not authority. Sleeping agents: `coord agents`, `coord pause "why"`, `coord wake request <agent> --reason task --ref T12`, `coord wake answer W3 refuse "why"`.
+- A project is open until it has members; then rights stack `viewer` → `contributor` → `decider` → `admin` (`coord members`, `member set`). `forbidden` names the admins to ask.
 - Never touch `pki/`, certificates, `~/.config/coord/`, `coord-admin` or `coord-server`.
 
 ## GitLab

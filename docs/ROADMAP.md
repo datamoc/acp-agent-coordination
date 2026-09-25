@@ -1,6 +1,7 @@
 # Road to coord 1.0.0
 
-*Written 2026-09-24, at 0.10.0. The tasks below are real coord tasks in the project
+*Written 2026-09-24 at 0.10.0; **updated 2026-09-25 at 0.13.0** - the milestones reached, the
+pace measured again, the forecast re-run. The tasks below are real coord tasks in the project
 `github.com/datamoc/coord` (T22-T43, category `roadmap-1.0`): `coord tasks --graph`, or the
 Tasks tab of `coord-server --ui`.*
 
@@ -18,18 +19,24 @@ entirely delivered:
 | P3 consensus - `ask --claim`, roles, discussions, proposals, reactions and objections, decisions | done (consensus is computed) |
 | P4 documents - shared documents, optimistic revisions, history, link to discussions, patches | done |
 | P5 integrations - git hooks, SSE, sub-scope delegation | done; the MCP adapter was dropped (A2A instead) |
-| §13 `coord check` warn **or** fail, configurable | **T22** |
-| §13 post-commit releases exact claims on committed files | **T23** (only `release_on_commit` claims today) |
-| §18 CI on the supported Python versions, lint and type checking, clean-install test | **T24, T25, T26** |
+| §13 `coord check` warn **or** fail, configurable | done - **T22** (24 Sep, 21:57) |
+| §13 post-commit releases exact claims on committed files | done - **T23** (24 Sep; only `release_on_commit` claims today) |
+| §18 CI on the supported Python versions, lint and type checking, clean-install test | done - **T24, T25, T26** (24 Sep) |
 
 Beyond their scope, coord already has per-CLI identities, strategy and routines, wake hints, the
-task graph, a UI for humans, and plugins for eight agent CLIs.
+task graph, a UI for humans, and plugins for eight agent CLIs. Since these notes were written it
+also has, at 0.11-0.13: project permissions (`viewer`/`contributor`/`decider`/`admin`),
+`coord doc import` with provenance, and the rest of the human-participation proposition -
+receipts and contact policies, session states and wake-ups, weighted governance and crisis
+mandates, typed links and milestones with a date projection, claims on any resource, a
+dashboard and an activity stream.
 
 ## What 1.0.0 means
 
-The notes, finished (T22-T26), and a promise: **the wire contract (`schema/ops.json`) and the database
-are stable** - a 1.0 client keeps working against 1.x servers, a 1.x server opens every older
-database - and coord has been used for real, under load, without a serious bug.
+The notes, finished (T22-T26, all five closed on 24 September), and a promise: **the wire
+contract (`schema/ops.json`) and the database are stable** - a 1.0 client keeps working against
+1.x servers, a 1.x server opens every older database - and coord has been used for real, under
+load, without a serious bug.
 
 ## Milestones
 
@@ -42,39 +49,60 @@ database - and coord has been used for real, under load, without a serious bug.
  T26 clean install
 ```
 
-| Milestone | Tasks | Effort (active days) | Notes |
-|---|---|---|---|
-| **0.11** quality gates | T22-T26 → T27 | 1 | T25 (ruff/pyright) is the biggest: it will find things |
-| **0.12** contract frozen | T28-T31 → T32 | 1.5 | T28 decides what 1.0 promises; T30 needs fixture databases from old tags |
-| **0.13** hardened | T33-T36 → T37 | 1.5 + a 24 h soak | the soak runs overnight; T36 is the unknown |
-| **1.0-rc1** | T37, T38-T40 → T41 | 0.5 | guides, changelog and packaging can run beside 0.13 |
-| **1.0** | T42 → T43 | 7 calendar days | real multi-agent work on mwg-pixel-dungeon, no P0 bug |
+| Milestone | Tasks | Effort (active days) | Reached (25 Sep) | Notes |
+|---|---|---|---|---|
+| **0.11** quality gates | T22-T26 → T27 | 1 | **yes** - the night of 24-25 Sep | T25 (ruff/pyright) was the biggest: 285 errors to 0 |
+| **0.12** contract frozen | T28-T31 → T32 | 1.5 | no - T28-T32 open | T28 decides what 1.0 promises; T30 needs fixture databases from old tags |
+| **0.13** hardened | T33-T36 → T37 | 1.5 + a 24 h soak | no - T33-T37 open | the soak runs overnight; T36 is the unknown |
+| **1.0-rc1** | T37, T38-T40 → T41 | 0.5 | no - T37-T41 open | guides, changelog and packaging can run beside the hardening |
+| **1.0** | T42 → T43 | 7 calendar days | no - T42-T43 open | real multi-agent work on mwg-pixel-dungeon, no P0 bug |
 
-**Critical path:** T25 → T27 → T28 → T29 → T32 → T34 → T35 → T36 → T37 → T41 → T42 → T43. The
-week of real use is the longest step and cannot be compressed: it is what earns the "1".
+**The numbers have run ahead of the milestones.** 0.11.0, 0.12.0 and 0.13.0 shipped in one night
+while T28-T37 - contract review, compatibility policy, upgrade tests, threat model, load test,
+soak - are all still open. The milestone names are the tasks' own titles (T32 "Milestone 0.12:
+contract frozen", T37 "Milestone 0.13: hardened"), so they now collide with version numbers that
+have already been released: the next milestone reached cannot be called 0.12. Either the
+remaining milestones take the next free numbers or they drop the number from their name -
+whichever it is, T32 and T37 are retitled with it. **To decide before T28 starts.**
+
+**Critical path:** T25 → T27 (both done) → T28 → T29 → T32 → T34 → T35 → T36 → T37 → T41 →
+T42 → T43. The week of real use is the longest step and cannot be compressed: it is what earns
+the "1".
 
 ## Forecast
 
-**Measured pace.** 0.1.0 → 0.10.0: 16 releases over 4 calendar days, of which 3 were active
-(56 commits), in sessions led by one person with several agents - including pauses when a
-usage quota ran out. Roughly 4 300 lines of Python and 2 100 of TypeScript today.
+**Measured pace.** 0.1.0 → 0.13.0: 20 releases over 5 calendar days (21-25 September), 70
+commits - 8, 3, 25, 29 and 5 a day - in sessions led by one person with several agents,
+including pauses when a usage quota ran out. The last four (0.10.1, 0.11.0, 0.12.0, 0.13.0)
+went out between 23:34 and 01:48. Roughly 6 900 lines of Python (`coordination/`) and 2 800 of
+TypeScript (`clients/ts/src`) today.
+
+**What the first day of this roadmap did.** It was written at 21:18 on 24 September, at 0.10.0;
+T22-T26 closed between 21:57 and 23:44 the same evening, and 0.11.0 - milestone 0.11's release -
+shipped at 00:35. One evening replaced the active day the table below allots for quality gates,
+which is why the forecast is re-run rather than trusted.
 
 **Assumptions.** An *active day* is a day of work like 23 or 24 September. About 4.5 active days
-remain before the release candidate (the table above). Three scenarios, starting 2026-09-25:
+remain before the release candidate (the table above: 1.5 + 1.5, a 24 h soak among them, and
+0.5). Three scenarios, re-run on 2026-09-25, the day after milestone 0.11 was reached:
 
-| Scenario | Pace | 0.11 | 0.12 | 0.13 | 1.0-rc1 | **1.0** |
+| Scenario | Pace | 0.11 (reached) | 0.12 | 0.13 | 1.0-rc1 | **1.0** |
 |---|---|---|---|---|---|---|
-| Optimistic | 5 active days a week, fixes small (3.5 days) | Sep 25 | Sep 26 | Sep 28 | Sep 29 | **Oct 6** |
-| **Likely** | 4 active days a week, 4.5 days of work | Sep 25 | Sep 28 | Sep 30 | Oct 1 | **Oct 8** |
-| Pessimistic | 2-3 active days a week, the review or the soak finds real problems (6.5 days) | Sep 28 | Oct 2 | Oct 8 | Oct 12 | **Oct 19** |
+| Optimistic | 5 active days a week, fixes small (3.5 days) | 24-25 Sep | Sep 26 | Sep 28 | Sep 29 | **Oct 6** |
+| **Likely** | 4 active days a week, 4.5 days of work | 24-25 Sep | Sep 28 | Sep 30 | Oct 1 | **Oct 8** |
+| Pessimistic | 2-3 active days a week, the review or the soak finds real problems (6.5 days) | 24-25 Sep | Oct 2 | Oct 8 | Oct 12 | **Oct 19** |
 
 **Target milestone: 1.0 around 8 October 2026**, with 6-19 October as the range.
 
 **What would move it:**
-- T25 (lint and types) or T33 (security review) finding a structural issue - the pessimistic line.
+- T33 (security review) finding a structural issue - the pessimistic line. T25 (lint and types)
+  was the other candidate; it found 285 errors, all fixed on 24 September, and no structural
+  surprise.
 - T42 finding a P0 bug: fix it, and the week of real use starts again.
 - Packaging (T40): `coord` is free on PyPI and `coord-client` on npm (checked 2026-09-24), so
   publishing is not blocked; the alternative is to keep the GitHub release assets.
+- The milestone names (above): a decision, not a day - but T32 and T37 cannot be reached under a
+  number that has already shipped.
 - Available time: the forecast counts active days, so a quiet week shifts every date by that week.
 
 ## Keeping it current
@@ -82,3 +110,7 @@ remain before the release candidate (the table above). Three scenarios, starting
 Each milestone is a task: when its prerequisites are done, whoever it is for is told it is
 unblocked (`task.unblocked`). Re-run the forecast at each milestone with the actual pace, and
 update this file with the dates reached.
+
+**Re-runs.** *2026-09-25 (0.13.0):* 0.11 reached a day early; 0.12 and 0.13 not reached - their
+version numbers shipped with other work, so their names need settling first. The remaining
+forecast is unchanged: **1.0 still lands around 8 October 2026**.

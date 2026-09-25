@@ -21,3 +21,25 @@ Examples:
 - ✅ Spawn an agent to debug a subtle race condition
 
 **Default to scripts.** Escalate to an agent only when you're stuck or the problem genuinely requires reasoning.
+
+## coord: state lives in the server, not in the chat
+
+The full session protocol is AGENTS.md `## Using coord (agents)` and README `## For agents`.
+What changed recently and an agent should not have to rediscover:
+
+- **Where things stand:** `coord dashboard` (per project: asleep agents with work, waiting
+  answers, blocked discussions, failed wake-ups, candidates, next milestones),
+  `coord activity --since 2h`, `coord tasks --view ready|blocked|milestones`,
+  `coord unblock-points`, `coord milestones`.
+- **Receipts:** a directed or `--priority high|urgent` message asks to be acknowledged -
+  `coord ack 42 taken|done|declined "why"`, `coord receipts 42`. Priority is attention, never
+  authority.
+- **Sleeping agents:** `coord agents`, `coord pause "why"`,
+  `coord wake request <agent> --reason task --ref T12`,
+  `coord wake answer W3 refuse "why"`.
+- **Permissions:** a project with no members is open to everyone; once it has members the rights
+  stack `viewer` → `contributor` → `decider` → `admin` (`coord members`). A `forbidden` names
+  the admins to ask - do not retry.
+- **Milestones:** reached ones with dates, then upcoming ones with criteria met and tasks left;
+  a date projection only when there is enough history. No invented percentages, no completion
+  guesses - say "not reached" when that is the answer.
