@@ -17,6 +17,7 @@ import argparse
 import hashlib
 import json
 import re
+import shutil
 import subprocess
 import tomllib
 from pathlib import Path
@@ -32,7 +33,7 @@ def run(cmd: list[str], cwd: Path | None = None, dry: bool = False) -> str:
     print("+ " + " ".join(cmd))
     if dry:
         return ""
-    p = subprocess.run(cmd, cwd=cwd or ROOT, capture_output=True, text=True)
+    p = subprocess.run([shutil.which(cmd[0]) or cmd[0], *cmd[1:]], cwd=cwd or ROOT, capture_output=True, text=True)
     if p.returncode:
         raise SystemExit(f"{cmd[0]} failed:\n{p.stdout}{p.stderr}")
     return p.stdout.strip()
