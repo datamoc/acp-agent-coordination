@@ -13,6 +13,12 @@ export function configHome(env: NodeJS.ProcessEnv = process.env): string {
 /** Agent CLIs recognized by a variable they set for the commands they run: [variable, identity]. */
 const HOSTS: [string, string][] = [["MUSE_SESSION_ID", "muse"], ["OPENCODE", "opencode"]];
 
+/** The agent CLI running us, from the variable it sets - enrolled or not. */
+export function hostMarker(env: NodeJS.ProcessEnv = process.env): string | null {
+  for (const [variable, identity] of HOSTS) if (env[variable]) return identity;
+  return null;
+}
+
 /** The identity named after the agent CLI running us, when one is enrolled (~/.config/coord/<cli>/env). */
 export function hostIdentity(env: NodeJS.ProcessEnv = process.env): string | null {
   for (const [variable, identity] of HOSTS) {

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { parse, run, versionSkew } from "../dist/cli.js";
 import { CoordClient } from "../dist/client.js";
-import { loadConfig } from "../dist/config.js";
+import { hostMarker, loadConfig } from "../dist/config.js";
 import { canonicalProject } from "../dist/git.js";
 import { OPS } from "../dist/ops.generated.js";
 import { bypassProxy } from "../dist/transport.js";
@@ -196,16 +196,21 @@ test("whoami joins as the CLI running it, never as another CLI's family", async 
     process.env.COORD_SESSION = "s";
     process.env.COORD_PROJECT = "p";
 
-    let p = parse(["whoami"]);                       // no family at all
+    let p = parse(["whoami"]);                       // under Muse a model name is required
+    await assert.rejects(() => run(p.path, p.ns, fake), /name this session's model/);
+    p = parse(["whoami", "claude", "--model", "spark-1.3"]);   // and never another CLI's family
+    await assert.rejects(() => run(p.path, p.ns, fake), /would impersonate/);
+    p = parse(["whoami", "--model", "spark-1.3"]);   // no family at all
     await run(p.path, p.ns, fake);
     assert.equal(sent.at(-1)[1].family, "muse");
+    assert.equal(sent.at(-1)[1].model, "spark-1.3");
 
     process.env.COORD_IDENTITY = "gemini";           // an explicit identity wins over the marker
-    p = parse(["whoami"]);
+    p = parse(["whoami", "--model", "luna-6"]);
     await run(p.path, p.ns, fake);
     assert.equal(sent.at(-1)[1].family, "gemini");
 
-    p = parse(["whoami", "explicit"]);               // and an argument wins over both
+    p = parse(["whoami", "explicit", "--model", "luna-6"]);               // and an argument wins over both
     await run(p.path, p.ns, fake);
     assert.equal(sent.at(-1)[1].family, "explicit");
 
@@ -291,4 +296,10 @@ test("the project is read from .git/config when git refuses the checkout (sandbo
   mkdirSync(join(root, ".git", "worktrees", "w"), { recursive: true });
   writeFileSync(join(root, ".git", "worktrees", "w", "commondir"), "../..\n");
   assert.equal(canonicalProject(originFromConfig(wt)), "github.com/datamoc/mwg-pixel-dungeon");
+});
+
+test("hostMarker names the CLI running us, enrolled or not", () => {
+  assert.equal(hostMarker({ MUSE_SESSION_ID: "x" }), "muse");
+  assert.equal(hostMarker({ OPENCODE: "1" }), "opencode");
+  assert.equal(hostMarker({}), null);
 });

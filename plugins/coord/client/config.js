@@ -8,6 +8,13 @@ export function configHome(env = process.env) {
 }
 /** Agent CLIs recognized by a variable they set for the commands they run: [variable, identity]. */
 const HOSTS = [["MUSE_SESSION_ID", "muse"], ["OPENCODE", "opencode"]];
+/** The agent CLI running us, from the variable it sets - enrolled or not. */
+export function hostMarker(env = process.env) {
+    for (const [variable, identity] of HOSTS)
+        if (env[variable])
+            return identity;
+    return null;
+}
 /** The identity named after the agent CLI running us, when one is enrolled (~/.config/coord/<cli>/env). */
 export function hostIdentity(env = process.env) {
     for (const [variable, identity] of HOSTS) {

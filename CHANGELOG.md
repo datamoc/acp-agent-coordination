@@ -9,6 +9,13 @@ when it starts on a newer version. Dates are commit dates.
 
 Nothing yet.
 
+## 0.13.2 — 2026-09-26
+
+- **No more borrowed sessions**: `coord whoami <family>` refuses a family that names another CLI than
+  the one running it (a Muse session was joining as `michel/claude` and resuming Claude's session).
+- **Named models**: under Muse or opencode, `whoami` needs `--model <name>` (or `COORD_MODEL`) - any short
+  name such as `spark-1.3` or `luna-6` - so sessions are `user/family/model`; `/coord:join` passes it.
+
 ## 0.13.1 — 2026-09-26
 
 Everything after the `v0.13.0` tag:

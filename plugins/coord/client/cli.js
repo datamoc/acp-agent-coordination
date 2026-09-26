@@ -11,7 +11,7 @@ import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CoordClient, tokenSource, transportFromEnv } from "./client.js";
-import { ConfigError, hostIdentity, loadConfig } from "./config.js";
+import { ConfigError, hostIdentity, hostMarker, loadConfig } from "./config.js";
 import { CoordError } from "./errors.js";
 import { unifiedDiff } from "./diff.js";
 import { userInfo } from "node:os";
@@ -31,6 +31,23 @@ const kind = (def) => s("--kind", { default: def, choices: K.message_kinds });
  *  (COORD_IDENTITY, else the one named after the agent CLI that launched this process). One
  *  command file is shared by every CLI, so the agent must not pick the family itself - a Muse
  *  session was joining as `claude` because the shared text mentioned it. No marker, no guess. */
+/** An explicit family must not name another CLI than the one running us: `coord whoami claude` from
+ *  Muse would resume Claude's session and act as it. COORD_IDENTITY set by the human overrides. */
+function checkFamily(family) {
+    const host = hostMarker();
+    if (family && host && family !== host && !process.env.COORD_IDENTITY) {
+        throw new UsageError(`whoami: family '${family}' but this is the ${host} CLI - joining as another agent's `
+            + `session would impersonate it. Run \`coord whoami\` with no family, or set COORD_IDENTITY`);
+    }
+}
+/** A session run by a recognised agent CLI (Muse, opencode) must carry a model name, free-form
+ *  (`--model spark-1.3`, `luna-6`): a bare user/family name is what let one CLI resume another's. */
+function checkModel(model) {
+    if (hostMarker() && !model && !process.env.COORD_MODEL) {
+        throw new UsageError(`whoami: name this session's model - \`coord whoami --model spark-1.3\` (any short name, `
+            + "e.g. luna-6), or set COORD_MODEL");
+    }
+}
 function hostFamily() {
     const id = process.env.COORD_IDENTITY || hostIdentity();
     if (id)
@@ -392,6 +409,8 @@ export async function run(path, a, c) {
     const cmd = path[0];
     switch (cmd) {
         case "whoami": {
+            checkFamily(a.family);
+            checkModel(a.model);
             const r = await call("whoami", { family: a.family || hostFamily(), project: a.project || detectProject(), client_id: uuid(),
                 user: a.user ?? sessionUser(), model: a.model || process.env.COORD_MODEL || null,
                 ...(a.human ? { human: true } : {}) });
