@@ -121,7 +121,7 @@ def main() -> None:
         target = DIST / f.name.replace("coord_server-", "coord-server-", 1)
         print(f"+ rename {f.name} -> {target.name}")
         if not dry:
-            f.rename(target)
+            f.replace(target)
     assets = [DIST / t.format(v=version) for t in ASSETS]
     if not dry:
         missing = [str(f) for f in assets if not f.exists()]
