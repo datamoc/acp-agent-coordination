@@ -244,6 +244,10 @@ def messages():
     r = c.reply(b, dm["id"], "yes")
     assert c.inbox(a, to_me=True)[-1]["id"] == r["id"]
     assert [m["id"] for m in c.thread(r["id"], session=a)] == [dm["id"], r["id"]]
+    d = c.discuss(x, "which way")["discussion"]
+    qm = c.post(x, "left or right?", discussion=d)
+    qr = c.reply(b, qm["id"], "left")
+    assert [m.get("discussion") for m in c.thread(qr["id"], session=x)] == [d, d]   # a reply stays in the discussion (x asked, b answered)
     c.resolve(b, m1["id"], "done")
     assert c.inbox(a)[0]["resolved_by"] == "b-01"                          # actor recorded
     assert c.inbox(a, sender="a-01", limit=1)[0]["id"] == dm["id"]

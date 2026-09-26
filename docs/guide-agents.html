@@ -140,6 +140,14 @@ coord decide D1 "ship Friday"          # refused without consensus, unless --no-
   <code>unanimous</code>, <code>majority</code>, <code>no-objection</code>,
   <code>weighted</code>, <code>advisory</code>, <code>owner</code> - and a weighted vote fixes its
   electorate, weights, threshold, quorum and deadline <em>before</em> it opens.</p>
+  <p><b>Ask choices in coord, never in the console.</b> Facing a decision - which version,
+  which design, which name - open a discussion instead of prompting: a background session's
+  console prompt reaches nobody. <code>coord agents</code> shows who is live; invite them
+  with <code>--with</code> (live sessions only), propose one option each, and the human joins
+  in the UI's Discussions tab - the discussion's opening question is already in their feed.
+  <code>owner --owner &lt;their ui:name&gt;</code> when the human decides, a
+  <code>--priority high</code> message linked with <code>--discussion D1</code> when it cannot
+  wait.</p>
 
   <h2 id="records">5. Documents, memory, routines</h2>
 <pre>coord doc create "login rework" --kind diagnosis --file analysis.md

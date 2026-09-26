@@ -484,10 +484,36 @@ function renderCandidates(list) {
   return pending.length;
 }
 
-async function renderDiscussions(list, mandates) {
+// One discussion's async chat: its linked messages (plus thread replies) and a composer.
+// refresh() rebuilds this panel on every event, so the current draft (and focus) rides
+// along through `draft` instead of being wiped while the human types.
+function discussionChat(d, msgs, draft) {
+  const chat = msgs.filter((m) => m.discussion === d.discussion || m.thread === d.thread);
+  const input = el("input", { placeholder: `Talk with the agents in ${d.discussion}…`, maxlength: "10000", autocomplete: "off" });
+  if (draft) { input.value = draft.v; if (draft.f) input.focus({ preventScroll: true }); }
+  return [el("div", { class: "chat" },
+    el("ul", { class: "feed chatlog" }, ...(chat.length ? chat.map((m) => el("li", { class: m.from === me ? "mine" : "" },
+      el("div", { class: "head" }, el("span", { class: "from" }, m.from), " · ", ago(m.at)),
+      el("div", { class: "body" }, m.body))) : [el("li", { class: "muted small" }, "no messages yet - say hello, the agents read it at their next poll")])),
+    el("form", { class: "compose", "data-d": d.discussion, onsubmit: act(async () => {
+      const body = input.value.trim();
+      if (!body) return;
+      await call("post", { body, kind: "info", discussion: d.discussion,
+        reply_to: chat.length ? chat[chat.length - 1].id : null });
+      input.value = "";
+    }) }, input, el("button", { type: "submit" }, "Send")))];
+}
+
+function boxScrollBottom() {
+  document.querySelectorAll("#discussions .chatlog").forEach((l) => { l.scrollTop = l.scrollHeight; });
+}
+
+async function renderDiscussions(list, mandates, msgs) {
   const details = await Promise.all(list.map((d) => call("discussion", { discussion: d.discussion })));
   const holding = mandates.find((m) => m.status === "active" && m.holder === me && m.powers.includes("decide"));
   const box = $("discussions");
+  const drafts = {};
+  box.querySelectorAll("form[data-d]").forEach((f) => { drafts[f.dataset.d] = { v: f.querySelector("input").value, f: f.contains(document.activeElement) }; });
   box.replaceChildren(...(details.length ? details.map((d) => el("div", { class: "disc" },
     el("div", {}, el("span", { class: "id" }, d.discussion), el("b", {}, d.topic)),
     el("div", { class: "small muted" }, `${d.rule}${d.owner ? ` (owner ${d.owner})` : ""}, by ${d.created_by}`
@@ -519,7 +545,7 @@ async function renderDiscussions(list, mandates) {
             const reason = prompt("Reason (required):", "");
             if (reason) return call("decide", { discussion: d.discussion, decision: text, proposal: p.proposal, crisis: true, reason });
           }) }, "Arbitrate (crisis)") : null));
-    }))) : [el("p", { class: "muted small" }, "no open discussion")]));
+    }), ...discussionChat(d, msgs || [], drafts[d.discussion]))) : [el("p", { class: "muted small" }, "no open discussion")]));
   $("mandates").replaceChildren(...(mandates.length ? mandates.map((m) => el("div", { class: `disc mandate-${m.status}` },
     el("div", {}, el("span", { class: "id" }, m.mandate), el("b", {}, m.holder), el("span", { class: `tag${m.status === "active" ? " due" : ""}` }, m.status)),
     el("div", { class: "small" }, `${m.powers.join(", ")} · ${m.scope} · until ${m.expires_at.replace("T", " ").slice(0, 16)} · granted by ${m.granted_by.join(", ")}`),
@@ -549,7 +575,8 @@ async function refresh() {
     renderMessages(msgs, new Set(ctx.awaiting.map((m) => m.id)));
     renderTasks(tasks); renderMilestones(ms); renderRoutines(routines);
     badge("b-docs", renderDocs(docs) + renderCandidates(cands));
-    await renderDiscussions(discs, mandates);
+    await renderDiscussions(discs, mandates, msgs);
+    boxScrollBottom();
     badge("b-now", renderAttention(msgs, tasks, ctx.awaiting));
     badge("b-tasks", tasks.filter((t) => t.status === "offered" || (t.blocked_by?.length && t.status !== "done")).length);
     badge("b-discussions", discs.length);

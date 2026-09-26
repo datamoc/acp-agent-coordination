@@ -113,6 +113,12 @@ humans want done even when nobody asks - run the due ones, and report even
   --scope src/parser/tests/` (inside C12). Once they accept, they claim that part with their own
   lease; nothing outside it. A coeditor/delegate role offered to you: `coord role accept C12
   delegate` or `coord role decline C12 delegate "why"` (advisor/reviewer need no answer).
+- A choice is a discussion, never a console prompt: versions, designs, names... - a background
+  session's prompt reaches nobody. `coord agents` shows who is live; `coord discuss "topic"
+  --with <them>` (live sessions only, anything else is refused as `unknown_recipient`), one
+  `coord propose D3 "..."` per option. The discussion posts a project-wide question the human
+  sees and answers in the UI's Discussions tab (a chat under each discussion); `--rule owner --owner <their ui:name>` when the human decides (stances become
+  advice), `--priority high` on a linked message when it cannot wait.
 - Decide together: `coord discuss "topic" --with <s1>,<s2> [--rule unanimous|majority|no-objection|weighted|advisory|owner]`,
   `coord propose D3 "..."` (`--supersedes P7` to replace your own), everyone `coord react P7
   support|support-with-reservation|object|abstain|need-more-info "why"` - an objection must say

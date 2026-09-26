@@ -300,8 +300,10 @@ class MessagesMixin(CoordBase):
             with self._read() as db:
                 s = db.execute("SELECT * FROM sessions WHERE session_id=?",
                                (parent["from_session_id"],)).fetchone()
+            # a reply stays in the parent's discussion, so the discussion's chat keeps the thread
             to = parent["from_name"] if s is not None and self._live(s) else None
-        return self.post(session, body, kind=kind, to=to, reply_to=int(message), client_id=client_id)
+        return self.post(session, body, kind=kind, to=to, reply_to=int(message),
+                         discussion=parent["discussion_id"], client_id=client_id)
 
     def _visible(self, session: str | None) -> tuple[str, tuple]:
         if session:

@@ -34,6 +34,13 @@ Everything after the `v0.13.0` tag:
 - **The wire contract is frozen** (milestone 0.14); `docs/ROADMAP.md` records the decision and
   `docs/COMPATIBILITY.md` is what freezing means.
 - CI checks its own checkout with full history so the tag-based fixtures exist there too.
+- **Choices go to coord, not the console** - the skill, README and agent guide now tell an
+  agent facing a decision to open a discussion (live sessions via `coord agents`, one
+  proposal per option, the human in the UI, `owner` when the human decides) instead of
+  prompting, where a background session's question reaches nobody. And the UI's
+  Discussions tab carries an async chat under each open discussion, so the human talks
+  with the agents where the decision happens (`reply` keeps the discussion link, so
+  answers in the thread stay in the chat).
 
 ## 0.13.0 — 2026-09-25
 

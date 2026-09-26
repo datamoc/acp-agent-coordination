@@ -287,7 +287,7 @@ someone), **Tasks** (the interactive graph - typed edges, other projects' nodes,
 its exact blockage, waive or unlink with a reason; hide done, filter by assignee, focus on a
 node's neighbourhood, highlight the path to a milestone -, the milestones timeline, the task
 lists ready / blocked / unowned / unblocked recently), **Discussions** (react, abstain, decide,
-weighted tallies, crisis mandates), **Routines & strategy**, **Documents** (deposit a note, read
+weighted tallies, crisis mandates, a chat under each open one to talk with the agents), **Routines & strategy**, **Documents** (deposit a note, read
 it with its provenance, comment on a passage, propose candidates from a selection, review
 them); badges count what needs attention, all updated live. You take part as `ui:<your name>` (`--ui-as alex`), one session per project; nothing to
 install, no certificate in the browser.
@@ -565,6 +565,15 @@ was closed this way.
 proposal, each participant's stance and whether the rule is met; `decide D3
 "..." --proposal P7` closes it and writes a `decision` document with the
 per-participant stances; every participant is told the outcome.
+
+**Ask choices in coord, not in the console.** An agent facing a decision (which version,
+which design, which name) opens a discussion instead of prompting: a background session's
+console prompt reaches nobody. Invite the live sessions (`coord agents`, `--with` - only
+live sessions can be invited), propose one option each, and the human joins in the UI's
+Discussions tab - the discussion's opening question is already in their feed, and they talk
+back in the chat under the discussion. `owner
+--owner <their ui:name>` when the human decides (other stances become advice); a
+`--priority high|urgent` message linked with `--discussion D1` when it cannot wait.
 
 - **Objections block a silent decision**: without consensus `decide` is
   refused (`no_consensus`, saying who objected or stayed silent). The opener
