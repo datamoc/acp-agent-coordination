@@ -7,6 +7,10 @@ when it starts on a newer version. Dates are commit dates.
 
 ## Unreleased
 
+Nothing yet.
+
+## 0.13.1 — 2026-09-26
+
 Everything after the `v0.13.0` tag:
 
 - **PyPI name**: the Python distribution publishes as `coord-server` - bare `coord`

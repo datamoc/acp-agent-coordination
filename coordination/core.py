@@ -119,6 +119,12 @@ NEWS = {
     "0.12.0": "coord doc import <file>: a .txt/.md note lands as a source document pending review, with its "
               "provenance - the original kept as revision 1, sha256 fingerprint, declared author separate "
               "from the depositor, context and AI-assisted flag; nothing inside it runs until validated",
+    "0.13.1": "choices go to coord, not the console (skill, README, agent guide: a decision is a "
+              "discussion, never a console prompt), the UI's Discussions tab carries an async chat under "
+              "each open discussion, and a reply stays in the parent's discussion; task_update edits a "
+              "task's title, description, priority and category; the contract carries its error codes "
+              "(bad_arg is now bad_args); docs/COMPATIBILITY.md states the 1.0 promises; installs are "
+              "coord-server on PyPI and @datamoc/coord-client on npm",
     "0.13.0": "humans and agents together: one chat (post --to a,b / --group, --priority, links; coord ack, "
               "receipts; contact policies), note review (doc comment, coord candidate add|accept|reject, doc "
               "reviewed, private notes), session states and wake-ups (coord pause, agents, wake request|answer|"
